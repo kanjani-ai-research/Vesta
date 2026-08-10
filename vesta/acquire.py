@@ -57,6 +57,36 @@ PER_SOURCE = 8
 # gate is one thing in one place rather than a check repeated at call sites.
 BRAVE_KEY = "BRAVE_API_KEY"
 
+# How far up to look for the shared `.env`. The components sit one level below
+# it; a few more allows for being run from a subdirectory.
+_ENV_CEILING = 4
+
+
+def _load_env(start: Optional[str] = None) -> None:
+    """Fill the environment from the nearest `.env`, without overriding it.
+
+    Parsed here rather than taken from a library: this is the only thing Vesta
+    needs from one, and an already-set variable must always win so that a key
+    passed explicitly is never replaced by a file.
+    """
+    from pathlib import Path
+
+    origin = Path(start or os.getcwd()).resolve()
+    for directory in [origin, *origin.parents][:_ENV_CEILING]:
+        candidate = directory / ".env"
+        if not candidate.is_file():
+            continue
+        try:
+            for line in candidate.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name, _, value = line.partition("=")
+                os.environ.setdefault(name.strip(), value.strip().strip("\"'"))
+        except OSError:
+            pass
+        return
+
 
 class Reading(BaseModel):
     """One thing found, with enough provenance to be discounted."""
@@ -262,6 +292,10 @@ class Search:
         # the readings behind it; without this that is two round trips and, on
         # a metered key, two charges for one answer.
         self._answered: Dict[str, Found] = {}
+        # Sources whose credential was refused. Held so a run does not keep
+        # asking, and so `why_not` can say a key is present *and* not working —
+        # which is a different problem from a key that is absent.
+        self._rejected: Dict[str, str] = {}
         # Injectable so the sources can be exercised without a network. The
         # default is the real thing; a test supplies its own.
         self.fetch = fetch or {
@@ -272,7 +306,13 @@ class Search:
 
     @classmethod
     def from_environment(cls, env: Optional[Dict[str, str]] = None) -> "Search":
-        env = env if env is not None else dict(os.environ)
+        if env is None:
+            # The family shares one `.env` above each component. Without this a
+            # key that is configured reads as absent, and the search reports a
+            # limitation the user has already removed — which is worse than a
+            # missing key, because it is wrong rather than merely unhelpful.
+            _load_env()
+            env = dict(os.environ)
         return cls(brave_key=env.get(BRAVE_KEY, "").strip())
 
     @property
@@ -289,6 +329,12 @@ class Search:
     @property
     def why_not(self) -> str:
         """What a caller should be told about the limits of this search."""
+        if WEB in self._rejected:
+            return (
+                f"The {BRAVE_KEY} was rejected ({self._rejected[WEB]}), so blogs, "
+                "documentation and standards were not searched — a key is "
+                "configured but it is not working."
+            )
         if not self.brave_key and WEB in self.sources:
             return (
                 f"No {BRAVE_KEY} is set, so blogs, documentation and standards "
@@ -326,6 +372,24 @@ class Search:
             try:
                 readings.extend(call(query))
                 reach.asked.append(name)
+            except urllib.error.HTTPError as exc:
+                # A rejected credential is not a transient failure. Brave
+                # answers 422 for a bad token and 401 for a missing one, and
+                # retrying either spends the rest of the run rediscovering the
+                # same fact — so the source is dropped and the reason is said.
+                #
+                # 403 is deliberately *not* here: it usually means a quota is
+                # exhausted rather than a key is wrong, and a quota can come
+                # back within a run while a bad key cannot.
+                if exc.code in (401, 422):
+                    self.sources = tuple(s for s in self.sources if s != name)
+                    self._rejected[name] = f"HTTP {exc.code} — the key was rejected"
+                    reach.skipped[name] = self._rejected[name]
+                    standing.add(name)
+                    logger.warning("%s rejected the key (HTTP %s)", name, exc.code)
+                else:
+                    logger.warning("%s failed for %r: %s", name, query, exc)
+                    reach.skipped[name] = str(exc)[:120]
             except (urllib.error.URLError, OSError, ValueError, ET.ParseError) as exc:
                 # A source that errors is a hole in the evidence, not a verdict
                 # about the query. Recording which one failed lets a user retry

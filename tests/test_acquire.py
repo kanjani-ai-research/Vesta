@@ -285,3 +285,50 @@ def test_a_missing_key_does_not_stop_an_answer_being_remembered():
     search.for_("consensus")
 
     assert calls["n"] == 1
+
+
+def test_a_rejected_key_is_reported_as_a_key_problem():
+    """A key that is present and refused is not a key that is absent.
+
+    Live, Brave answered 422 SUBSCRIPTION_TOKEN_INVALID for a configured key.
+    Reporting that as "no BRAVE_API_KEY is set" would send a user to set one
+    they had already set.
+    """
+    def refused(query, limit=8):
+        raise urllib.error.HTTPError("u", 422, "invalid token", {}, None)
+
+    search = Search(brave_key="bad", fetch={ARXIV: lambda q, limit=8: [], WEB: refused})
+    found = search.for_("anything")
+
+    assert "rejected" in found.reach.skipped[WEB]
+    assert "rejected" in search.why_not
+    assert acquire.BRAVE_KEY in search.why_not
+
+
+def test_a_rejected_key_is_not_asked_again():
+    calls = {"n": 0}
+
+    def refused(query, limit=8):
+        calls["n"] += 1
+        raise urllib.error.HTTPError("u", 422, "invalid token", {}, None)
+
+    search = Search(brave_key="bad", fetch={ARXIV: lambda q, limit=8: [], WEB: refused})
+    search.for_("one")
+    search.for_("two")
+
+    assert calls["n"] == 1  # dropped after the first refusal
+
+
+def test_an_exhausted_quota_is_retried():
+    """403 usually means a quota, and a quota can return within a run."""
+    calls = {"n": 0}
+
+    def limited(query, limit=8):
+        calls["n"] += 1
+        raise urllib.error.HTTPError("u", 403, "quota", {}, None)
+
+    search = Search(brave_key="k", fetch={ARXIV: lambda q, limit=8: [], WEB: limited})
+    search.for_("one")
+    search.for_("two")
+
+    assert calls["n"] == 2
