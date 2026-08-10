@@ -22,7 +22,7 @@ from . import maturity
 from .acquire import Search
 from .graph import build
 from .propagate import from_files
-from .structure import Pragmatos, structure
+from .structure import Pragmatos, _slug, best_backend, structure
 
 
 def _say(text: str = "") -> None:
@@ -123,16 +123,23 @@ def _learn(args: argparse.Namespace) -> int:
             built = structure(
                 found,
                 f"{args.intent} {aspect.name}",
-                into / aspect.name,
-                pragmatos=Pragmatos(args.pragmatos),
+                into / _slug(aspect.name),
+                # The library where it is importable, the service otherwise:
+                # a corpus is a file, and requiring a running process to write
+                # one would be a dependency the data does not have.
+                pragmatos=(
+                    Pragmatos(args.pragmatos)
+                    if args.pragmatos_url_given
+                    else best_backend()
+                ),
                 ontology=args.ontology,
             )
             _say(f"    → {built.describe()}")
         else:
             from .structure import write
 
-            written = write(found, into / aspect.name, query=query)
-            _say(f"    → {len(written)} file(s) in {into / aspect.name}")
+            written = write(found, into / _slug(aspect.name), query=query)
+            _say(f"    → {len(written)} file(s) in {into / _slug(aspect.name)}")
         _say("")
 
     if judged.could_not_search:
@@ -184,11 +191,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="build a Pragmatos corpus over what was found",
     )
-    learn.add_argument("--pragmatos", default="http://localhost:8000")
+    learn.add_argument(
+        "--pragmatos",
+        default="http://localhost:8000",
+        help="build through a running service instead of the library",
+    )
     learn.add_argument("--ontology", default=None)
     learn.set_defaults(run=_learn)
 
     args = parser.parse_args(argv)
+    # Whether the user actually asked for the service, rather than inheriting
+    # the default and getting HTTP they never chose.
+    args.pragmatos_url_given = any(a.startswith("--pragmatos") for a in (argv or sys.argv[1:]))
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(name)s: %(message)s",
