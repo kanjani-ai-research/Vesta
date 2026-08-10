@@ -237,3 +237,51 @@ def test_a_novelty_finding_is_still_phrased_as_a_question():
     # Never an instruction, and never a licence to redesign anything.
     for word in ("must", "should redesign", "rewrite", "replace the"):
         assert word not in asked.lower()
+
+
+# ── Asking the same thing twice ──────────────────────────────────────────
+
+
+def test_a_repeated_query_is_not_paid_for_twice():
+    calls = {"n": 0}
+
+    def counted(query, limit=8):
+        calls["n"] += 1
+        return [reading("Paper", "http://a/1")]
+
+    search = Search(brave_key="k", fetch={ARXIV: counted, WEB: counted, REPOSITORY: counted})
+    search.for_("consensus")
+    search.for_("consensus")
+
+    assert calls["n"] == 3  # three sources, once each
+
+
+def test_a_partial_answer_is_not_remembered():
+    """A rate limit must not become a permanent hole for the rest of a run."""
+    calls = {"n": 0}
+
+    def sometimes(query, limit=8):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError("u", 429, "slow down", {}, None)
+        return [reading("Paper", "http://a/1")]
+
+    search = Search(fetch={ARXIV: sometimes})
+
+    assert not search.for_("consensus").readings
+    assert search.for_("consensus").readings  # retried, not served from cache
+
+
+def test_a_missing_key_does_not_stop_an_answer_being_remembered():
+    """The web being off is a standing condition, not a transient failure."""
+    calls = {"n": 0}
+
+    def counted(query, limit=8):
+        calls["n"] += 1
+        return [reading("Paper", "http://a/1")]
+
+    search = Search(brave_key="", fetch={ARXIV: counted, WEB: counted})
+    search.for_("consensus")
+    search.for_("consensus")
+
+    assert calls["n"] == 1

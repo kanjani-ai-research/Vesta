@@ -257,6 +257,11 @@ class Search:
     ) -> None:
         self.brave_key = brave_key
         self.sources = tuple(sources)
+        # A query asked twice in one run costs twice and returns the same
+        # thing. `judge` searches to reach a verdict and the caller then wants
+        # the readings behind it; without this that is two round trips and, on
+        # a metered key, two charges for one answer.
+        self._answered: Dict[str, Found] = {}
         # Injectable so the sources can be exercised without a network. The
         # default is the real thing; a test supplies its own.
         self.fetch = fetch or {
@@ -298,16 +303,25 @@ class Search:
         One source failing does not fail the search: a result set from two of
         three sources is worth having, provided it says which one is missing.
         """
+        if query in self._answered:
+            return self._answered[query]
+
         reach = Reach(query=query)
         readings: List[Reading] = []
+        # Sources that will not answer for as long as this Search exists: no
+        # key, or no fetcher. Distinguished from a source that failed this
+        # once, because only the latter is worth asking again.
+        standing: set = set()
 
         for name in self.sources:
             if name == WEB and not self.brave_key:
                 reach.skipped[name] = f"no {BRAVE_KEY}"
+                standing.add(name)
                 continue
             call = self.fetch.get(name)
             if call is None:
                 reach.skipped[name] = "no such source"
+                standing.add(name)
                 continue
             try:
                 readings.extend(call(query))
@@ -319,7 +333,13 @@ class Search:
                 logger.warning("%s failed for %r: %s", name, query, exc)
                 reach.skipped[name] = str(exc)[:120]
 
-        return Found(readings=_deduplicate(readings), reach=reach)
+        found = Found(readings=_deduplicate(readings), reach=reach)
+        # Only a complete answer is kept. A search where a source was rate
+        # limited is a partial result, and remembering it would turn one
+        # transient failure into a permanent hole for the rest of the run.
+        if set(reach.skipped) <= standing:
+            self._answered[query] = found
+        return found
 
     def __call__(self, query: str) -> Found:
         """`maturity.judge` calls its search directly."""

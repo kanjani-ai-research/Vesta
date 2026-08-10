@@ -96,11 +96,18 @@ def _learn(args: argparse.Namespace) -> int:
     _say(judged.ask())
     _say("")
 
-    aspects = judged.needs_theory or (judged.aspects if args.anyway else [])
+    # Every aspect is kept, not only the ones judged to need theory.
+    #
+    # The classifier's verdict is about whether a *field* is settled; it says
+    # nothing about whether the user has read it. Judging "derive ontology
+    # axioms ... conservative extensions" as established work is correct — and
+    # the search behind that verdict returned the conservativity survey that is
+    # exactly what someone building it should read. Withholding the readings
+    # because the field turned out to be mature would discard the useful half
+    # of the result and keep the half that is only a label.
+    aspects = judged.aspects if not args.only_novel else judged.needs_theory
     if not aspects:
-        # Nothing to look up is a result, not a failure, and acquiring anyway
-        # would spend a user's key on work they were told was unnecessary.
-        _say("Nothing was acquired. Pass --anyway to search regardless.")
+        _say("Nothing to look up.")
         return 0
 
     into = Path(args.into)
@@ -167,9 +174,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     learn.add_argument("--into", default="theory", help="where to write readings")
     learn.add_argument("--show", type=int, default=5)
     learn.add_argument(
-        "--anyway",
+        "--only-novel",
         action="store_true",
-        help="acquire even where the brief looks like settled work",
+        help="acquire only for aspects judged to need theory (settled fields "
+        "still have literature worth reading, so this is off by default)",
     )
     learn.add_argument(
         "--structure",
