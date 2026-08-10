@@ -87,21 +87,21 @@ class Answer(BaseModel):
     def answered(self) -> bool:
         """Whether the corpus covered the question.
 
-        Pragmatos' own judgement, plus one condition it does not impose: that
-        *some fact* was matched. Live, "how should I price a used car" against a
-        corpus of description-logic papers came back `answered: true, gap: null`
-        with `matched_facts: []` — three lexical hits on common words and
-        nothing from the ontology. A retrieval grounded in no fact is a text
-        match, and reporting it as an answer is how a corpus appears to know
-        things it has never been told.
+        Pragmatos' own judgement, unchanged. An earlier version also required a
+        matched fact, on the strength of "how should I price a used car" coming
+        back answered against a corpus of description-logic papers. That rule
+        was wrong: `matched_facts` is empty for good retrievals too, so it
+        rejected questions the corpus answers well — it happened to suppress the
+        bad case and suppressed the good ones with it.
+
+        **The separation this needs is not available here.** Off-topic questions
+        do floor out (a pizza query scores 0.7 against 1.4), but a used-car
+        question still matches "whether an ontology can safely be replaced by
+        another" on surface similarity alone. Rather than tune a threshold that
+        would silently drop real answers, the caller is given the retrieval and
+        its scores and left to judge — which is what `Consultation` reports.
         """
-        if self.coverage.get("gap") is not None or not self.results:
-            return False
-        # Absent rather than empty means an older record that predates the
-        # field; its absence is not evidence of no match.
-        if "matched_facts" in self.coverage:
-            return bool(self.coverage["matched_facts"])
-        return True
+        return self.coverage.get("gap") is None and bool(self.results)
 
     def describe(self) -> str:
         if not self.answered:
@@ -264,18 +264,49 @@ class Local:
 
     def __init__(self, base_url: str = "local") -> None:
         self.base_url = base_url
+        # Built once and held. The encoder loads weights from disk, and building
+        # it per question turned every consultation into a model load.
+        self._embed: Any = None
+        self._embed_tried = False
+
+    def _embedder(self):
+        if not self._embed_tried:
+            from pragmatos import llm
+
+            self._embed_tried = True
+            self._embed = llm.build_embedder()
+        return self._embed
 
     @property
     def is_available(self) -> bool:
-        try:
-            import pragmatos.pipeline  # noqa: F401
-        except ImportError:
+        """Whether a corpus can be *built* here.
+
+        Building is model work, so it needs credentials: without them the build
+        would start and fail partway, which is worse than declining to start.
+        Reading needs none of that — see `can_read`, which is the gate for
+        consulting an existing corpus.
+        """
+        if not self.can_read:
             return False
         from pragmatos.config import config
 
-        # Extraction is model work. Without a key the build would start and
-        # fail partway, which is a worse failure than declining to start.
         return not config.missing_credentials()
+
+    @property
+    def can_read(self) -> bool:
+        """Whether an existing corpus can be queried.
+
+        A separate question from `is_available`, and a much weaker one: a corpus
+        is a SQLite file, and reading it needs no API key at all. Conflating the
+        two made consulting already-acquired theory report "no corpus backend"
+        on a machine holding a perfectly good corpus — which would send the
+        system back to the web to buy knowledge it already had.
+        """
+        try:
+            import pragmatos.retrieval  # noqa: F401
+        except ImportError:
+            return False
+        return True
 
     def why_not(self) -> str:
         try:
@@ -364,12 +395,28 @@ class Local:
 
     def ask(self, corpus_id: str, query: str, limit: int = 10) -> Answer:
         from pragmatos import gaps as gaps_module
+        from pragmatos import llm
         from pragmatos.config import config
         from pragmatos.retrieval import Retriever
         from pragmatos.store import Store
 
         store = Store(config.database)
-        results = Retriever(store, corpus_id).search(query, limit=limit)
+        # Embed the question so the vectors in the corpus are actually used.
+        # Without this the retriever falls back to lexical alone — which was
+        # written, measured, and silently unused: a corpus with 17 embeddings
+        # answered every query `how='lexical'`, and a question about pricing a
+        # used car outscored a real one because "how/should/I" are common words.
+        query_vector = None
+        embed = self._embedder()
+        if embed is not None:
+            try:
+                query_vector = list(embed([query])[0])
+            except Exception as exc:  # noqa: BLE001 - lexical still works
+                logger.warning("could not embed the query: %s", exc)
+
+        results = Retriever(store, corpus_id).search(
+            query, limit=limit, query_vector=query_vector
+        )
         coverage = gaps_module.assess(corpus_id, query, results, None)
         return Answer(
             query=query,
@@ -378,13 +425,16 @@ class Local:
         )
 
 
-def best_backend(base_url: str = "http://localhost:8000") -> Any:
+def best_backend(base_url: str = "http://localhost:8000", for_reading: bool = False) -> Any:
     """Whichever way into Pragmatos is actually open.
 
     The library first, because a corpus is a file and a file needs no service.
+    `for_reading` asks the weaker question — reading a corpus needs no model
+    credentials, and requiring them would send a caller to HTTP (or to nothing)
+    for a database sitting on the same disk.
     """
     local = Local()
-    if local.is_available:
+    if local.can_read if for_reading else local.is_available:
         return local
     return Pragmatos(base_url)
 

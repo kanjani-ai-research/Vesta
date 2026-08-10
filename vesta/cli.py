@@ -20,6 +20,7 @@ from typing import List, Optional, Sequence
 
 from . import maturity
 from .acquire import Search
+from .consult import known
 from .graph import build
 from .propagate import from_files
 from .structure import Pragmatos, _slug, best_backend, structure
@@ -147,6 +148,20 @@ def _learn(args: argparse.Namespace) -> int:
     return 0
 
 
+def _knows(args: argparse.Namespace) -> int:
+    """What the acquired theory already says, before anything is searched."""
+    for found in known(args.questions, intent=args.intent, corpus_id=args.corpus):
+        _say(f"{found.question}")
+        _say(f"  {found.describe()}")
+        for cite in found.cites[: args.show]:
+            _say(f"    {cite.score:.2f}  {cite.text[:160]}")
+        if not found.knew and not found.unavailable:
+            # Nothing held is a result: it is the signal to go and acquire.
+            _say("    (nothing acquired covers this — `vesta learn` would look)")
+        _say("")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vesta",
@@ -198,6 +213,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     learn.add_argument("--ontology", default=None)
     learn.set_defaults(run=_learn)
+
+    knows = sub.add_parser("knows", help="what acquired theory already says")
+    knows.add_argument("questions", nargs="+")
+    knows.add_argument("--intent", default="", help="the intent its corpus was built for")
+    knows.add_argument("--corpus", default="", help="an explicit corpus id")
+    knows.add_argument("--show", type=int, default=3)
+    knows.set_defaults(run=_knows)
 
     args = parser.parse_args(argv)
     # Whether the user actually asked for the service, rather than inheriting

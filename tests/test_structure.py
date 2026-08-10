@@ -185,14 +185,29 @@ def test_a_covered_query_with_results_answered():
     ).answered
 
 
-def test_results_grounded_in_no_fact_are_not_an_answer():
-    """Live: "how should I price a used car" against description-logic papers
-    came back answered=true, gap=null, matched_facts=[] — three lexical hits on
-    common words. A retrieval grounded in no fact is a text match."""
+def test_an_empty_matched_facts_does_not_reject_a_real_answer():
+    """`matched_facts` is empty for good retrievals too.
+
+    A rule requiring one was tried and removed: live, "how do I know an
+    extension is conservative" returned the right passage with
+    `matched_facts: []`, so the rule rejected the questions the corpus answers
+    best. It suppressed one bad case by suppressing the good ones with it.
+    """
     answer = Answer(
-        query="how should I price a used car",
-        results=[{"id": "1"}, {"id": "2"}],
+        query="how do I know an extension is conservative",
+        results=[{"id": "1", "score": 1.4}],
         coverage={"gap": None, "answered": True, "matched_facts": []},
+    )
+
+    assert answer.answered
+
+
+def test_a_gap_still_means_the_corpus_did_not_cover_it():
+    """What Pragmatos does judge reliably is carried through unchanged."""
+    answer = Answer(
+        query="what is the best pizza in chicago",
+        results=[{"id": "1"}],
+        coverage={"gap": {"id": "g1", "why": "no fact addresses this"}},
     )
 
     assert not answer.answered
