@@ -7,16 +7,15 @@ name = "vesta"
 version = "0.1.0"
 description = "What a change touches — a domain model of a codebase, and bounded propagation over it"
 requires-python = ">=3.10"
-# Resolution, not just parsing. The standard library's `ast` gives syntax and
-# no name resolution: it cannot tell that `found.describe()` refers to
+# Resolution, not just parsing. The standard library's `ast` gives syntax and no
+# name resolution: it cannot tell that `found.describe()` refers to
 # `Coherence.describe` rather than to any of the three other `describe` methods
-# in the same package. A first attempt resolved by matching qualified-name
-# strings and would have collapsed all four into one node. Jedi resolves them
-# to the correct file and line, and 77% of references in a real repository
-# resolve in-tree at roughly seven seconds per repository.
+# in the same package. Jedi resolved that correctly and only for Python; a tool
+# that must resolve C, Rust, Go, OCaml and the rest cannot be built on it. The
+# language servers do the resolution instead, so the only dependency left is the
+# one that shapes the data — everything else is the standard library.
 dependencies = [
   "pydantic>=2.0",
-  "jedi>=0.19",
 ]
 
 [project.optional-dependencies]

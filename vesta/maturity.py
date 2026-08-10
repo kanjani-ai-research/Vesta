@@ -201,10 +201,51 @@ def read(intent: str) -> List[Aspect]:
                 verdict=UNDETERMINED,
                 confidence=UNCLEAR,
                 because=because,
-                would_search=[f"{name} {' '.join(intent.split()[:6])}"],
+                would_search=[_query_for(name, intent)],
             )
         )
     return found
+
+
+# Words a brief spends before it says anything. Dropped from queries because a
+# search engine ANDs its terms: "build a system that" contributes four words of
+# constraint and no topic, and a first live run returned zero repositories for a
+# query that returned six once these were removed.
+SAYS_NOTHING = {
+    "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "with", "by",
+    "that", "this", "it", "its", "is", "are", "be", "as", "at", "from", "into",
+    "build", "building", "create", "creating", "make", "making", "write",
+    "writing", "add", "adding", "implement", "implementing", "system", "service",
+    "app", "application", "tool", "project", "need", "needs", "want", "should",
+    "we", "i", "our", "my", "using", "use", "new",
+}
+
+# How many content words a query keeps. Short enough that an ANDed search still
+# matches something, long enough to be about one thing.
+QUERY_WORDS = 5
+
+# What it takes to call a field still-moving. Several dated results, spanning
+# few enough years that the older work which would have settled the question is
+# absent rather than merely unreturned. Both numbers are set to make the claim
+# hard: this is the one path to NEEDS_THEORY, and the expensive error is
+# reaching it wrongly.
+MIN_DATED = 4
+STILL_MOVING_SPAN = 4  # years
+
+
+def _query_for(name: str, intent: str) -> str:
+    """A query short and specific enough for a search engine to answer.
+
+    The aspect name leads because it is the topic; the brief supplies the
+    subject matter. Both are needed — the name alone returns a textbook, the
+    brief alone returns the product nobody has built yet.
+    """
+    words = [
+        word
+        for word in re.findall(r"[a-z0-9-]+", intent.lower())
+        if word not in SAYS_NOTHING and len(word) > 2 and word != name
+    ]
+    return " ".join([name, *words[:QUERY_WORDS]])
 
 
 def judge(
@@ -235,6 +276,13 @@ def judge(
 
     for aspect in found.aspects:
         _establish(aspect, search)
+
+    # A search that ran on some of its sources bounds the judgement just as a
+    # missing search does, only less. The caller should not have to know which
+    # sources a search holds to know what it did not look at.
+    limit = getattr(search, "why_not", "")
+    if limit:
+        found.could_not_search = limit
 
     return found
 
@@ -267,3 +315,28 @@ def _establish(aspect: Aspect, search: Callable) -> None:
     aspect.because.append(f"{len(results)} result(s) found")
     aspect.verdict = SETTLED
     aspect.confidence = LIKELY
+
+    # An aspect whose literature is *entirely* recent is one where the answer is
+    # still moving: the older work that would have settled it does not exist.
+    # This is the only route to NEEDS_THEORY, and it is deliberately hard to
+    # reach — it needs several results, dates on nearly all of them, and none of
+    # them old. A single recent paper on a decades-old topic proves nothing.
+    dated = [_year_of(r) for r in results]
+    known = [year for year in dated if year]
+    if len(known) >= MIN_DATED and len(known) >= len(dated) - 1:
+        if max(known) - min(known) <= STILL_MOVING_SPAN:
+            aspect.verdict = NEEDS_THEORY
+            aspect.confidence = LIKELY
+            aspect.because.append(
+                f"all {len(known)} dated result(s) fall in {min(known)}–{max(known)}, "
+                "so there may be no settled answer yet — but recency is weak "
+                "evidence and an active field is not the same as an open question"
+            )
+
+
+def _year_of(reading: Any) -> Optional[int]:
+    published = getattr(reading, "published", "") or ""
+    try:
+        return int(published[:4])
+    except (TypeError, ValueError):
+        return None
