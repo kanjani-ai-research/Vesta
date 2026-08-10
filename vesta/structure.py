@@ -85,8 +85,23 @@ class Answer(BaseModel):
 
     @property
     def answered(self) -> bool:
-        """Whether the corpus covered the question, as the corpus judges it."""
-        return self.coverage.get("gap") is None and bool(self.results)
+        """Whether the corpus covered the question.
+
+        Pragmatos' own judgement, plus one condition it does not impose: that
+        *some fact* was matched. Live, "how should I price a used car" against a
+        corpus of description-logic papers came back `answered: true, gap: null`
+        with `matched_facts: []` — three lexical hits on common words and
+        nothing from the ontology. A retrieval grounded in no fact is a text
+        match, and reporting it as an answer is how a corpus appears to know
+        things it has never been told.
+        """
+        if self.coverage.get("gap") is not None or not self.results:
+            return False
+        # Absent rather than empty means an older record that predates the
+        # field; its absence is not evidence of no match.
+        if "matched_facts" in self.coverage:
+            return bool(self.coverage["matched_facts"])
+        return True
 
     def describe(self) -> str:
         if not self.answered:
@@ -130,7 +145,11 @@ def write(found: Found, into: Path | str, query: str = "") -> List[Path]:
     # built from two of three sources reads exactly like one built from three
     # unless the difference is written down.
     if query or found.reach.skipped:
-        (into / "_reach.md").write_text(
+        # Written outside the tree that gets ingested. It is provenance about
+        # the search, not material about the subject, and a live build made it
+        # the top hit for "how do I check an extension is conservative" — the
+        # corpus citing its own bookkeeping back at the reader.
+        (into.parent / f"{into.name}-reach.md").write_text(
             "\n".join(
                 [
                     f"# How this was found",
@@ -275,18 +294,73 @@ class Local:
         ontology: Optional[str] = None,
         wait: float = BUILD_TIMEOUT,
     ) -> Dict[str, Any]:
+        import asyncio
+
+        from pragmatos import llm, pipeline
         from pragmatos.config import config
-        from pragmatos.pipeline import Builder, load_ontology, read_sources
         from pragmatos.store import Store
 
-        sources = read_sources([Path(p) for p in paths])
-        builder = Builder(
-            store=Store(config.database),
-            corpus_id=corpus_id,
-            ontology=load_ontology(ontology) if ontology else None,
+        sources = pipeline.read_sources([Path(p) for p in paths])
+        if not sources:
+            return {"state": "failed", "id": corpus_id, "error": "no readable text at those paths"}
+
+        embed = llm.build_embedder()
+        builder = pipeline.Builder(
+            Store(config.database),
+            llm.build_extractor(),
+            embed,
         )
-        report = builder.build(sources)
-        return {"state": "complete", "id": corpus_id, "result": report.model_dump(mode="json")}
+
+        async def run():
+            if ontology:
+                return await builder.build(
+                    corpus_id, sources, pipeline.load_ontology(ontology)
+                )
+            # Without an ontology the documents are characterised first and one
+            # is derived from them. That is Metis' job, and it is a hard
+            # dependency rather than a fallback: a corpus built under no
+            # ontology at all would have nothing to label chunks with.
+            from metis.pipelines import analyze_async
+
+            return await builder.build_with_discovery(
+                corpus_id, sources, analyze_async
+            )
+
+        try:
+            report = asyncio.run(run())
+        except ImportError as exc:
+            # Name the module that is actually missing rather than assuming it
+            # is the one this code imports. Several of the family's packages are
+            # installed by path (`kanon` collides with an unrelated name on
+            # PyPI, `stroma` is local), so an ImportError raised deep inside a
+            # build is usually about one of those — and reporting it as "needs
+            # metis" sends a user to install something they already have.
+            missing = getattr(exc, "name", "") or str(exc)
+            return {
+                "state": "failed",
+                "id": corpus_id,
+                "error": (
+                    f"a package the build needs is not installed: {missing} "
+                    f"(some are path-installed: pip install -e ../deps/{missing})"
+                ),
+            }
+        return {
+            "state": "complete",
+            "id": corpus_id,
+            "result": report.model_dump(mode="json"),
+            # Pragmatos returns no embedder when `sentence-transformers` is
+            # absent and falls back to lexical retrieval — a deliberate optional
+            # on its side. It is still a bound on the corpus: a query phrased
+            # unlike the text will not match, and a build reported as whole
+            # while its vectors are missing is the failure this project exists
+            # to avoid.
+            "partial": (
+                ""
+                if embed
+                else "no embeddings were written (sentence-transformers is not "
+                "installed); retrieval is lexical only"
+            ),
+        }
 
     def ask(self, corpus_id: str, query: str, limit: int = 10) -> Answer:
         from pragmatos import gaps as gaps_module
@@ -369,6 +443,10 @@ def structure(
         result.incomplete = (
             f"the build did not finish: {job.get('error') or job.get('state')}"
         )
+    elif job.get("partial"):
+        # Built, and not built the way it was asked for. Reported through the
+        # same field, because a caller checking `is_whole` should see both.
+        result.incomplete = job["partial"]
 
     result.took = time.time() - started
     return result

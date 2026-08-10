@@ -38,7 +38,9 @@ def test_a_search_without_a_key_still_runs_the_free_sources():
     found = search.for_("consensus")
 
     assert len(found) == 2
-    assert found.reach.asked == [ARXIV, REPOSITORY]
+    # Order is web-first so arXiv can follow what a general index surfaced;
+    # with no key the web is skipped and the rest still run.
+    assert set(found.reach.asked) == {ARXIV, REPOSITORY}
 
 
 def test_a_failing_source_does_not_fail_the_search():
@@ -77,8 +79,9 @@ def test_the_same_url_from_two_sources_is_one_reading():
     assert len(found) == 1
     # The first source to find it keeps the attribution: it is what was
     # actually consulted first, and inventing a merged provenance would claim
-    # a comparison across sources that nothing supports.
-    assert found.readings[0].source == ARXIV
+    # a comparison across sources that nothing supports. The web leads, so the
+    # web's copy is the one kept.
+    assert found.readings[0].source == WEB
 
 
 def test_a_reading_carries_which_source_found_it():

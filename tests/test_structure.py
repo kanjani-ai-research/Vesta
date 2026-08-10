@@ -75,7 +75,8 @@ def test_what_was_not_searched_is_written_beside_the_readings(tmp_path: Path):
     where.reach.query = "consensus protocols"
     write(where, tmp_path, query="the intent, which is not the query")
 
-    reach = (tmp_path / "_reach.md").read_text()
+    # Beside the readings, not inside them: it is provenance, not material.
+    reach = (tmp_path.parent / f"{tmp_path.name}-reach.md").read_text()
     assert "no BRAVE_API_KEY" in reach
     # The query actually sent to the sources, not the intent it came from —
     # they differ, and only the former explains what came back.
@@ -178,4 +179,43 @@ def test_coverage_without_results_is_not_an_answer_either():
 
 
 def test_a_covered_query_with_results_answered():
+    assert Answer(
+        query="q", results=[{"id": "1"}],
+        coverage={"gap": None, "matched_facts": ["f1"]},
+    ).answered
+
+
+def test_results_grounded_in_no_fact_are_not_an_answer():
+    """Live: "how should I price a used car" against description-logic papers
+    came back answered=true, gap=null, matched_facts=[] — three lexical hits on
+    common words. A retrieval grounded in no fact is a text match."""
+    answer = Answer(
+        query="how should I price a used car",
+        results=[{"id": "1"}, {"id": "2"}],
+        coverage={"gap": None, "answered": True, "matched_facts": []},
+    )
+
+    assert not answer.answered
+
+
+def test_a_record_without_the_field_is_not_treated_as_empty():
+    """Absence predates the field; it is not evidence of no match."""
     assert Answer(query="q", results=[{"id": "1"}], coverage={"gap": None}).answered
+
+
+def test_a_build_without_embeddings_is_not_reported_as_whole(tmp_path: Path):
+    """Built, and not built the way it was asked for.
+
+    Pragmatos falls back to lexical retrieval when sentence-transformers is
+    absent — deliberate on its side, and still a bound on the corpus. A live
+    build wrote 108 labels and zero vectors while reporting success.
+    """
+    result = structure(
+        found(reading()),
+        "consensus",
+        tmp_path,
+        pragmatos=Fake(job={"state": "complete", "partial": "no embeddings were written"}),
+    )
+
+    assert not result.is_whole
+    assert "no embeddings" in result.incomplete

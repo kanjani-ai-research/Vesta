@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -61,13 +62,45 @@ BRAVE_KEY = "BRAVE_API_KEY"
 # it; a few more allows for being run from a subdirectory.
 _ENV_CEILING = 4
 
+# arXiv asks for a pause between requests and enforces it with 429s and stalled
+# connections. Several queries in a run is enough to trip it — which then reads
+# as "arXiv has nothing", the one conclusion this must never draw by accident.
+ARXIV_DELAY = 3.0
+_last_arxiv = [0.0]
 
-def _load_env(start: Optional[str] = None) -> None:
-    """Fill the environment from the nearest `.env`, without overriding it.
+
+def _arxiv_get(url: str) -> bytes:
+    """Fetch from arXiv over TLS, keeping to the interval it asks for.
+
+    **TLS is not optional here.** Plain `http://export.arxiv.org` answers with a
+    redirect that then stalls until the socket times out — which looks exactly
+    like rate limiting, and cost this an afternoon of blaming arXiv for
+    throttling it. The same request over `https://` returns in under a second.
+    """
+    import time
+
+    waited = time.monotonic() - _last_arxiv[0]
+    if _last_arxiv[0] and waited < ARXIV_DELAY:
+        time.sleep(ARXIV_DELAY - waited)
+    try:
+        return _get(url, {"User-Agent": "vesta/0.1 (research acquisition)"})
+    finally:
+        _last_arxiv[0] = time.monotonic()
+
+
+def _load_env(start: Optional[str] = None, override: bool = False) -> None:
+    """Fill the environment from the nearest `.env`.
 
     Parsed here rather than taken from a library: this is the only thing Vesta
-    needs from one, and an already-set variable must always win so that a key
-    passed explicitly is never replaced by a file.
+    needs from one.
+
+    **`override` exists because ambient credentials are a real hazard.** The
+    default is to let an already-set variable win, which is right for a variable
+    a user exported deliberately. But a shell can carry an unrelated
+    `ANTHROPIC_API_KEY` from some other project, and then the project's own
+    `.env` is silently ignored and the model reports "API key is invalid" about
+    a key the user never chose to use. A caller that knows the project's file is
+    authoritative passes `override=True`.
     """
     from pathlib import Path
 
@@ -82,7 +115,13 @@ def _load_env(start: Optional[str] = None) -> None:
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 name, _, value = line.partition("=")
-                os.environ.setdefault(name.strip(), value.strip().strip("\"'"))
+                name, value = name.strip(), value.strip().strip("\"'")
+                if not value:
+                    continue
+                if override:
+                    os.environ[name] = value
+                else:
+                    os.environ.setdefault(name, value)
         except OSError:
             pass
         return
@@ -178,7 +217,7 @@ def from_arxiv(query: str, limit: int = PER_SOURCE) -> List[Reading]:
     astrophysics uses more than computer science does. A source that answers
     confidently from the wrong field is worse than one that answers nothing.
     """
-    url = "http://export.arxiv.org/api/query?" + urllib.parse.urlencode(
+    url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(
         {
             "search_query": f"abs:({query}) AND cat:cs.*",
             "start": 0,
@@ -186,7 +225,12 @@ def from_arxiv(query: str, limit: int = PER_SOURCE) -> List[Reading]:
             "sortBy": "relevance",
         }
     )
-    root = ET.fromstring(_get(url))
+    return _parse_arxiv(_arxiv_get(url))
+
+
+def _parse_arxiv(payload: bytes) -> List[Reading]:
+    """One Atom reader for both the query and the follow paths."""
+    root = ET.fromstring(payload)
     space = "{http://www.w3.org/2005/Atom}"
     readings: List[Reading] = []
     for entry in root.findall(f"{space}entry"):
@@ -237,6 +281,36 @@ def from_web(query: str, key: str, limit: int = PER_SOURCE) -> List[Reading]:
             )
         )
     return readings
+
+
+_ARXIV_ID = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", re.I)
+
+
+def follow_arxiv(readings: Sequence[Reading], limit: int = PER_SOURCE) -> List[Reading]:
+    """Fetch metadata for arXiv papers the web already surfaced.
+
+    arXiv is one publisher, not the index. Querying it in parallel with a
+    general search asks it about topics it may not hold — the first live run
+    returned five radio-telescope papers for "covering array generation" — while
+    a general index disambiguates from context and gets it right unprompted.
+
+    So the web decides *what* is relevant and this fills in what a search result
+    cannot give: authors, publication date, and the full abstract rather than a
+    truncated snippet. Following a link is cheap and correct where guessing a
+    query is neither.
+    """
+    ids: List[str] = []
+    for reading in readings:
+        found = _ARXIV_ID.search(reading.url)
+        if found and found.group(1) not in ids:
+            ids.append(found.group(1))
+    if not ids:
+        return []
+
+    url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode(
+        {"id_list": ",".join(ids[:limit]), "max_results": limit}
+    )
+    return _parse_arxiv(_arxiv_get(url))
 
 
 def from_repositories(query: str, limit: int = PER_SOURCE) -> List[Reading]:
@@ -359,7 +433,10 @@ class Search:
         # once, because only the latter is worth asking again.
         standing: set = set()
 
-        for name in self.sources:
+        # Web first, so arXiv can follow what it surfaces. A general index
+        # disambiguates a query from context; arXiv answers whatever is asked of
+        # it, out of whichever field the words happen to match.
+        for name in sorted(self.sources, key=lambda s: (s != WEB, s == ARXIV)):
             if name == WEB and not self.brave_key:
                 reach.skipped[name] = f"no {BRAVE_KEY}"
                 standing.add(name)
@@ -370,7 +447,16 @@ class Search:
                 standing.add(name)
                 continue
             try:
-                readings.extend(call(query))
+                if name == ARXIV and call is from_arxiv and readings:
+                    # Follow the papers the web already judged relevant, rather
+                    # than asking arXiv the same question and hoping it holds
+                    # the field. Where the web found nothing — or was never
+                    # asked — fall back to querying it directly, since some
+                    # arXiv is better than none.
+                    followed = follow_arxiv(readings)
+                    readings.extend(followed or call(query))
+                else:
+                    readings.extend(call(query))
                 reach.asked.append(name)
             except urllib.error.HTTPError as exc:
                 # A rejected credential is not a transient failure. Brave
