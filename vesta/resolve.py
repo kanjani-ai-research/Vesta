@@ -220,12 +220,27 @@ class Session:
             {
                 "processId": os.getpid(),
                 "rootUri": self.root.as_uri(),
+                # Declared, and both are load-bearing. A server told the client
+                # cannot supply configuration takes a different startup path;
+                # pyright asks twice before it will resolve an import, and a
+                # client that neither declares the capability nor answers the
+                # request leaves the server half-initialized. It still answers
+                # queries — with the wrong answer. Every reference from a test
+                # file was missing, and it presented as "this function has two
+                # callers" rather than as a failure.
+                "workspaceFolders": [
+                    {"uri": self.root.as_uri(), "name": self.root.name}
+                ],
                 "capabilities": {
+                    "workspace": {
+                        "configuration": True,
+                        "workspaceFolders": True,
+                    },
                     "textDocument": {
                         "references": {},
                         "definition": {},
                         "documentSymbol": {"hierarchicalDocumentSymbolSupport": True},
-                    }
+                    },
                 },
             },
         )
@@ -234,12 +249,34 @@ class Session:
             return False
 
         self._notify("initialized", {})
-        # Servers index asynchronously and report readiness inconsistently.
-        # Waiting a fixed moment is crude and is the honest option: the
-        # alternatives are trusting a signal some servers never send, or
-        # polling for a completeness the protocol does not define.
-        time.sleep(SETTLE)
+        # The server's own requests arrive *after* `initialized`, so the settle
+        # has to be a loop that answers them rather than a sleep. Sleeping here
+        # was the defect: the requests queued unanswered, the server never
+        # finished starting, and it went on answering queries incorrectly.
+        self._serve(SETTLE)
         return True
+
+    def _serve(self, seconds: float) -> None:
+        """Answer whatever the server asks, for a while.
+
+        A server blocked on a request it sent stops making progress. Draining
+        its requests is not optional politeness — it is what lets the server
+        finish initializing.
+        """
+        import select
+
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if self._process is None or self._process.stdout is None:
+                return
+            readable, _, _ = select.select([self._process.stdout], [], [], 0.2)
+            if not readable:
+                continue
+            message = self._read()
+            if message is None:
+                return
+            if "method" in message and "id" in message:
+                self._answer(message)
 
     def stop(self) -> None:
         if self._process is None:
@@ -362,14 +399,48 @@ class Session:
             while time.time() < deadline:
                 message = self._read()
                 if message is None:
+                    # A frame that could not be read at all. Distinct from a
+                    # message this client does not care about, and the earlier
+                    # conflation of the two is what broke resolution: pyright
+                    # asks the client for configuration mid-request, and a
+                    # client that abandons the exchange on the first message it
+                    # did not expect never receives its answer. Every reference
+                    # from a test file was lost that way, and the failure
+                    # presented as "this function has two callers" rather than
+                    # as an error.
                     return None
-                # Notifications and server-initiated requests arrive
-                # interleaved with answers. Anything that is not the answer
-                # being waited for is discarded rather than dispatched: this
-                # client asks questions and does not serve them.
+
                 if message.get("id") == request_id:
                     return message.get("result")
+
+                if "method" in message and "id" in message:
+                    # A request *from* the server. It is waiting on a reply,
+                    # and will not answer anything else until it gets one.
+                    self._answer(message)
             return None
+
+    def _answer(self, request: Dict[str, Any]) -> None:
+        """Reply to a server-initiated request.
+
+        Minimal by design: this client serves the handful of requests a server
+        blocks on and declines the rest. What matters is that every request
+        receives *some* well-formed reply, because a server waiting on one
+        stops answering.
+        """
+        method = request.get("method", "")
+        if method == "workspace/configuration":
+            # One settings object per item asked for. Empty is a valid answer
+            # and means "no opinion, use your defaults".
+            items = (request.get("params") or {}).get("items") or [{}]
+            result: Any = [{} for _ in items]
+        elif method in ("client/registerCapability", "client/unregisterCapability"):
+            result = None
+        elif method == "workspace/workspaceFolders":
+            result = [{"uri": self.root.as_uri(), "name": self.root.name}]
+        else:
+            result = None
+
+        self._write({"jsonrpc": "2.0", "id": request["id"], "result": result})
 
     def _notify(self, method: str, params: Any) -> None:
         with self._lock:
