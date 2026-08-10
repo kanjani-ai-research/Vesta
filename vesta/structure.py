@@ -230,11 +230,96 @@ class Pragmatos:
         )
 
 
+class Local:
+    """Pragmatos as a library rather than a service.
+
+    A corpus is a SQLite file — facts, chunks and embeddings as float32 blobs in
+    one database, with no separate index to keep in step. The service is a
+    transport over that file, so building through it is a choice rather than a
+    requirement, and requiring it would make a corpus depend on a process being
+    up when it only depends on a path being writable.
+
+    Preferred where Pragmatos is importable. The HTTP client stays for the case
+    it exists to serve: a corpus somebody else's machine owns.
+    """
+
+    def __init__(self, base_url: str = "local") -> None:
+        self.base_url = base_url
+
+    @property
+    def is_available(self) -> bool:
+        try:
+            import pragmatos.pipeline  # noqa: F401
+        except ImportError:
+            return False
+        from pragmatos.config import config
+
+        # Extraction is model work. Without a key the build would start and
+        # fail partway, which is a worse failure than declining to start.
+        return not config.missing_credentials()
+
+    def why_not(self) -> str:
+        try:
+            import pragmatos.pipeline  # noqa: F401
+        except ImportError:
+            return "pragmatos is not installed"
+        from pragmatos.config import config
+
+        missing = config.missing_credentials()
+        return f"missing credentials: {', '.join(missing)}" if missing else ""
+
+    def build(
+        self,
+        corpus_id: str,
+        paths: Sequence[Path | str],
+        ontology: Optional[str] = None,
+        wait: float = BUILD_TIMEOUT,
+    ) -> Dict[str, Any]:
+        from pragmatos.config import config
+        from pragmatos.pipeline import Builder, load_ontology, read_sources
+        from pragmatos.store import Store
+
+        sources = read_sources([Path(p) for p in paths])
+        builder = Builder(
+            store=Store(config.database),
+            corpus_id=corpus_id,
+            ontology=load_ontology(ontology) if ontology else None,
+        )
+        report = builder.build(sources)
+        return {"state": "complete", "id": corpus_id, "result": report.model_dump(mode="json")}
+
+    def ask(self, corpus_id: str, query: str, limit: int = 10) -> Answer:
+        from pragmatos import gaps as gaps_module
+        from pragmatos.config import config
+        from pragmatos.retrieval import Retriever
+        from pragmatos.store import Store
+
+        store = Store(config.database)
+        results = Retriever(store, corpus_id).search(query, limit=limit)
+        coverage = gaps_module.assess(corpus_id, query, results, None)
+        return Answer(
+            query=query,
+            results=[r.model_dump(mode="json") for r in results],
+            coverage=coverage.model_dump(mode="json"),
+        )
+
+
+def best_backend(base_url: str = "http://localhost:8000") -> Any:
+    """Whichever way into Pragmatos is actually open.
+
+    The library first, because a corpus is a file and a file needs no service.
+    """
+    local = Local()
+    if local.is_available:
+        return local
+    return Pragmatos(base_url)
+
+
 def structure(
     found: Found,
     intent: str,
     into: Path | str,
-    pragmatos: Optional[Pragmatos] = None,
+    pragmatos: Optional[Any] = None,
     ontology: Optional[str] = None,
 ) -> Structured:
     """Write what was found and build a corpus over it.
@@ -253,13 +338,22 @@ def structure(
         result.took = time.time() - started
         return result
 
-    client = pragmatos or Pragmatos()
+    client = pragmatos or best_backend()
     if not client.is_available:
         # The readings are on disk and a person can read them. Saying the corpus
         # exists when it does not would be the one unrecoverable error here.
+        #
+        # Why it could not be built is named as precisely as the backend knows:
+        # a missing API key and an unreachable host are different problems, and
+        # reporting both as "not reachable" sends a user to restart a service
+        # that was never the cause.
+        why = getattr(client, "why_not", None)
+        why = why() if callable(why) else None
         result.incomplete = (
-            f"Pragmatos was not reachable at {client.base_url}; the readings were "
-            "written but no corpus was built"
+            f"no corpus was built ({why}); the readings were written"
+            if why
+            else f"Pragmatos was not reachable at {client.base_url}; the readings "
+            "were written but no corpus was built"
         )
         result.took = time.time() - started
         return result
