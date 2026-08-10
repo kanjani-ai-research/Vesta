@@ -22,6 +22,17 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
+# Structuring what was acquired into a queryable corpus. Optional because
+# acquisition alone is useful: without these, readings are written to disk and a
+# person reads them.
+#
+# Four of the five are path installs and pip will not resolve them from a name:
+#   pip install -e '../pragmatos[pipelines]' -e ../metis -e ../deps/stroma -e ../deps/kanon
+# `kanon` in particular is deliberately not a named dependency anywhere — an
+# unrelated package owns that name on PyPI.
+theory = [
+  "sentence-transformers>=3.0",  # embeddings; without it retrieval is lexical only
+]
 
 [project.scripts]
 vesta = "vesta.cli:main"
