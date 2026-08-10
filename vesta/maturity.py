@@ -262,15 +262,44 @@ def _query_for(name: str, intent: str) -> str:
     The aspect name leads because it is the topic; the brief supplies the
     subject matter. Both are needed — the name alone returns a textbook, the
     brief alone returns the product nobody has built yet.
+
+    **Which words are kept is decided by specificity, not by word order.** A
+    brief's opening words are its most general ones. Taking the first five of
+    "generate benchmark items from a knowledge base without repeated
+    near-duplicate synthesis" gave "generation generate benchmark items
+    knowledge base", which returned eight papers on knowledge-graph recommender
+    systems — a real literature, and the wrong one, because "knowledge base"
+    is common and "near-duplicate" is not. The discriminating words are the
+    rare ones, and they tend to arrive late in a sentence.
     """
     words = [
         word
         for word in re.findall(r"[a-z0-9-]+", intent.lower())
         if word not in SAYS_NOTHING and len(word) > 2 and word != name
     ]
-    # With no name, the brief is the whole query and gets the slot back.
+    # Rarest first, ties broken by the order they were written in, so the query
+    # is stable for a given brief. A hyphenated or long word is a specific one;
+    # this is a crude proxy for rarity and needs no corpus to compute.
+    ranked = sorted(
+        dict.fromkeys(words),
+        key=lambda w: (-_specificity(w), words.index(w)),
+    )
     keep = QUERY_WORDS if name else QUERY_WORDS + 1
-    return " ".join([name, *words[:keep]] if name else words[:keep])
+    chosen = ranked[:keep]
+    # Written back in the brief's own order: a query reads as a phrase to a
+    # search engine, and scrambling it costs matches on multi-word terms.
+    chosen.sort(key=words.index)
+    return " ".join([name, *chosen] if name else chosen)
+
+
+def _specificity(word: str) -> int:
+    """How much a word narrows a search, approximately.
+
+    Length and hyphenation stand in for rarity. It is a proxy and it is a good
+    enough one to separate "near-duplicate" from "base" without shipping a
+    frequency table that would have to be maintained per language.
+    """
+    return len(word) + (4 if "-" in word else 0)
 
 
 def judge(
