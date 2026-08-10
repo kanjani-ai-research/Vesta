@@ -204,7 +204,30 @@ def read(intent: str) -> List[Aspect]:
                 would_search=[_query_for(name, intent)],
             )
         )
-    return found
+    if found:
+        return found
+
+    # Nothing matched. That is not evidence the brief is ordinary — the table
+    # holds eight shapes and the field has more. Live briefs for this project's
+    # own components ("derive ontology axioms over existing ontologies",
+    # "resolve references across a codebase in any language") matched none of
+    # them, and both needed theory that was expensive to acquire late.
+    #
+    # So an unmatched brief still gets one aspect and still gets searched. The
+    # verdict stays UNDETERMINED and the evidence decides, which is the whole
+    # point of looking: a table that silently returns "ordinary" for everything
+    # it does not recognise would make the search unreachable exactly where it
+    # is most needed.
+    return [
+        Aspect(
+            name="the brief",
+            says="no familiar shape matched, so it was taken as a whole",
+            verdict=UNDETERMINED,
+            confidence=UNCLEAR,
+            because=["none of the known shapes matched, which settles nothing"],
+            would_search=[_query_for("", intent)],
+        )
+    ]
 
 
 # Words a brief spends before it says anything. Dropped from queries because a
@@ -245,7 +268,9 @@ def _query_for(name: str, intent: str) -> str:
         for word in re.findall(r"[a-z0-9-]+", intent.lower())
         if word not in SAYS_NOTHING and len(word) > 2 and word != name
     ]
-    return " ".join([name, *words[:QUERY_WORDS]])
+    # With no name, the brief is the whole query and gets the slot back.
+    keep = QUERY_WORDS if name else QUERY_WORDS + 1
+    return " ".join([name, *words[:keep]] if name else words[:keep])
 
 
 def judge(

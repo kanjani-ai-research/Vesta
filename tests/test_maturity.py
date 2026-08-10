@@ -81,8 +81,28 @@ def test_naming_a_technology_counts_toward_settled():
     assert any("already chosen" in b for b in scheduling[0].because)
 
 
-def test_a_brief_with_no_hard_shape_proposes_nothing():
-    assert read("build a page that lists users and lets you edit them") == []
+def test_a_brief_matching_no_known_shape_is_undetermined_not_ordinary():
+    """The table is eight shapes and the field is larger than eight shapes.
+
+    Briefs for this project's own components — deriving ontology axioms,
+    resolving references across languages — matched none of them, and both
+    needed theory that cost real work to acquire late. An unmatched brief is
+    therefore still searched, and the evidence decides rather than the table.
+    """
+    aspects = read("build a page that lists users and lets you edit them")
+
+    assert len(aspects) == 1
+    assert aspects[0].verdict == UNDETERMINED
+    # Still searchable: an aspect nobody can look up cannot be corrected.
+    assert aspects[0].would_search and aspects[0].would_search[0].strip()
+
+
+def test_an_unmatched_brief_is_never_called_novel_on_its_own():
+    """Undetermined is not a novelty claim, and must not become one unasked."""
+    judged = judge("build a page that lists users and lets you edit them")
+
+    assert not judged.needs_theory
+    assert judged.is_ordinary
 
 
 # ── Aspects, not whole briefs ────────────────────────────────────────────
