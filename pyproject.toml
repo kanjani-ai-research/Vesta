@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vesta"
+version = "0.1.0"
+description = "What a change touches — a domain model of a codebase, and bounded propagation over it"
+requires-python = ">=3.10"
+# The graph and the propagation need nothing but the standard library's own
+# parser. A dependency here would be a dependency on someone else's idea of
+# what a call graph is.
+dependencies = [
+  "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+vesta = "vesta.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
