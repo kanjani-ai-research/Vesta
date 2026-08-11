@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from pydantic import BaseModel, Field
 
-from .structure import LOCAL, PUBLISHED, Answer, best_backend, corpus_id, origin_of
+from .structure import LOCAL, PUBLISHED, Answer, adopt, best_backend, corpus_id, origin_of
 
 logger = logging.getLogger("vesta.consult")
 
@@ -111,6 +111,15 @@ def consult(
     repo: Optional[Any] = None,
 ) -> Consultation:
     """Ask a corpus a question, and say plainly when it has no answer."""
+    if not corpus_id:
+        # A knowledge base built before corpora were keyed by repository is not
+        # wrong, it is unreachable. Claiming it costs a rename; the alternative
+        # is telling a user their theory is gone and charging them to re-acquire
+        # it. Only acts when this repository has none and exactly one orphan
+        # exists — see `adopt`.
+        adopted = adopt(repo)
+        if adopted:
+            logger.info("adopted the knowledge base %s for this repository", adopted)
     corpus = corpus_id or corpus_for(repo)
     found = Consultation(question=question, corpus_id=corpus)
 

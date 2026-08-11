@@ -228,6 +228,105 @@ def origin_of(identifier: str) -> str:
     return parts[1] if len(parts) > 2 and parts[0] == "theory" else LOCAL
 
 
+# Every table that carries a corpus id. Renaming one means rewriting all of
+# them in a single transaction: the schema declares `ON DELETE CASCADE` but the
+# store does not enable foreign-key enforcement, so a partial rename does not
+# fail — it silently detaches rows from the corpus that owns them.
+CORPUS_TABLES = (
+    "corpora",
+    "sources",
+    "chunks",
+    "bindings",
+    "labels",
+    "variants",
+    "gaps",
+    "embeddings",
+)
+
+
+def rename_corpus(old: str, new: str, database: Optional[Path] = None) -> bool:
+    """Move a knowledge base to a new id, or report that it could not be moved.
+
+    Needed because the keying changed: corpora were once named for the intent
+    that prompted them and are now named for the repository they belong to. A
+    knowledge base built before that change is not wrong, it is unreachable —
+    no repository resolves to its name — and rebuilding it would spend a user's
+    money re-reading what they have already paid to read once.
+    """
+    import sqlite3
+
+    if old == new:
+        return True
+
+    path = Path(database) if database else _ensure_data_dir() / "pragmatos.db"
+    if not path.is_file():
+        return False
+
+    connection = sqlite3.connect(path)
+    try:
+        held = {r[0] for r in connection.execute("SELECT id FROM corpora")}
+        if old not in held:
+            return False
+        if new in held:
+            # Two knowledge bases claiming one name is worse than one that is
+            # merely misnamed: merging them would mix material silently.
+            logger.warning("%s already exists; leaving %s alone", new, old)
+            return False
+
+        with connection:
+            for table in CORPUS_TABLES:
+                column = "id" if table == "corpora" else "corpus"
+                connection.execute(
+                    f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new, old)
+                )
+    finally:
+        connection.close()
+
+    logger.info("renamed corpus %s to %s", old, new)
+    return True
+
+
+def adopt(repo: Optional[Path | str] = None, database: Optional[Path] = None) -> str:
+    """Claim an unreachable knowledge base for a repository, if there is one.
+
+    Only acts where the repository has no knowledge base of its own and exactly
+    one orphan exists — an orphan being a corpus whose name belongs to no
+    repository under the current scheme. With two, guessing which belongs to
+    this project would be worse than leaving both alone and saying so.
+    """
+    import sqlite3
+
+    path = Path(database) if database else _ensure_data_dir() / "pragmatos.db"
+    if not path.is_file():
+        return ""
+
+    wanted = corpus_id(repo)
+    connection = sqlite3.connect(path)
+    try:
+        held = [r[0] for r in connection.execute("SELECT id FROM corpora")]
+    finally:
+        connection.close()
+
+    if wanted in held:
+        return ""
+    orphans = [name for name in held if not _is_current_scheme(name)]
+    if len(orphans) != 1:
+        if orphans:
+            logger.info("%d corpora predate the current naming; none adopted", len(orphans))
+        return ""
+
+    return orphans[0] if rename_corpus(orphans[0], wanted, path) else ""
+
+
+def _is_current_scheme(identifier: str) -> bool:
+    """Whether a corpus id was written by the repository-keyed scheme.
+
+    Those ids end in a name and an eight-character fingerprint of the path.
+    Anything else predates the change.
+    """
+    return bool(re.fullmatch(r"theory\.(local|pub)\..*-[0-9a-f]{8}", identifier))
+
+
 def write(found: Found, into: Path | str, query: str = "") -> List[Path]:
     """Put readings on disk in a form a document pipeline can read.
 

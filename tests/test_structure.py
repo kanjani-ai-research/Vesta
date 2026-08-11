@@ -271,3 +271,102 @@ def test_a_build_without_embeddings_is_not_reported_as_whole(tmp_path: Path):
 
     assert not result.is_whole
     assert "no embeddings" in result.incomplete
+
+
+# ── Knowledge bases that predate the current naming ──────────────────────
+
+
+def a_store(tmp_path: Path, *corpus_ids: str) -> Path:
+    """A store shaped like Pragmatos', with rows in every keyed table."""
+    import sqlite3
+
+    path = tmp_path / "pragmatos.db"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE corpora (id TEXT PRIMARY KEY, title TEXT)")
+    for table in ("sources", "chunks", "labels", "embeddings", "gaps", "variants", "bindings"):
+        db.execute(f"CREATE TABLE {table} (corpus TEXT, payload TEXT)")
+    for name in corpus_ids:
+        db.execute("INSERT INTO corpora VALUES (?, ?)", (name, "t"))
+        for table in ("sources", "chunks", "labels", "embeddings", "gaps", "variants", "bindings"):
+            db.execute(f"INSERT INTO {table} VALUES (?, ?)", (name, "x"))
+    db.commit()
+    db.close()
+    return path
+
+
+def rows_for(path: Path, corpus: str) -> int:
+    import sqlite3
+
+    db = sqlite3.connect(path)
+    total = sum(
+        db.execute(f"SELECT count(*) FROM {t} WHERE corpus = ?", (corpus,)).fetchone()[0]
+        for t in ("sources", "chunks", "labels", "embeddings", "gaps", "variants", "bindings")
+    )
+    db.close()
+    return total
+
+
+def test_a_rename_moves_every_table(tmp_path: Path):
+    """The schema cascades on delete but enforcement is off, so a partial
+    rename detaches rows silently rather than failing."""
+    from vesta.structure import rename_corpus
+
+    store = a_store(tmp_path, "theory.local.old-name")
+
+    assert rename_corpus("theory.local.old-name", "theory.local.new-abcd1234", store)
+    assert rows_for(store, "theory.local.old-name") == 0
+    assert rows_for(store, "theory.local.new-abcd1234") == 7
+
+
+def test_a_rename_onto_an_existing_corpus_is_refused(tmp_path: Path):
+    """Two knowledge bases claiming one name is worse than one misnamed: a
+    merge would mix material with no way to tell them apart afterwards."""
+    from vesta.structure import rename_corpus
+
+    store = a_store(tmp_path, "theory.local.old", "theory.local.taken-abcd1234")
+
+    assert not rename_corpus("theory.local.old", "theory.local.taken-abcd1234", store)
+    assert rows_for(store, "theory.local.old") == 7
+
+
+def test_an_orphan_is_adopted_by_a_repository_with_none(tmp_path: Path):
+    """Rebuilding would re-spend a user's money on reading they already paid
+    for."""
+    from vesta.structure import adopt, corpus_id
+
+    repo = tmp_path / "project"
+    repo.mkdir()
+    store = a_store(tmp_path, "theory.local.some-old-intent-name")
+
+    assert adopt(repo, store)
+    assert rows_for(store, corpus_id(repo)) == 7
+
+
+def test_two_orphans_are_left_alone(tmp_path: Path):
+    """Guessing which belongs to this project would be worse than saying so."""
+    from vesta.structure import adopt
+
+    repo = tmp_path / "project"
+    repo.mkdir()
+    store = a_store(tmp_path, "theory.local.one-intent", "theory.local.another-intent")
+
+    assert not adopt(repo, store)
+
+
+def test_a_repository_with_its_own_kb_adopts_nothing(tmp_path: Path):
+    from vesta.structure import adopt, corpus_id
+
+    repo = tmp_path / "project"
+    repo.mkdir()
+    store = a_store(tmp_path, corpus_id(repo), "theory.local.an-orphan")
+
+    assert not adopt(repo, store)
+
+
+def test_a_current_name_is_not_mistaken_for_an_orphan(tmp_path: Path):
+    from vesta.structure import _is_current_scheme
+
+    assert _is_current_scheme("theory.local.vesta-20bb90f3")
+    assert _is_current_scheme("theory.pub.causum.thing-0f26fad7")
+    assert not _is_current_scheme("theory.local.implement-a-t-way-covering-array")
+    assert not _is_current_scheme("theory-conservative-extensions")
