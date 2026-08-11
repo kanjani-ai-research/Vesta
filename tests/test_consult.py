@@ -10,7 +10,7 @@ from typing import Any, List
 
 import pytest
 
-from vesta.consult import Consultation, consult, corpus_for, known
+from vesta.consult import LOCAL, PUBLISHED, Consultation, consult, corpus_for, known, origin_of
 from vesta.structure import Answer
 
 
@@ -38,12 +38,38 @@ def passage(text: str, score: float = 1.0) -> dict:
 
 
 def test_the_corpus_name_matches_what_acquisition_would_have_written():
-    """Derived both ways rather than looked up: a name computed twice is a name
-    that eventually differs."""
-    from vesta.structure import _slug
+    """One definition, used by both sides: a naming rule implemented twice
+    agrees only until one copy changes."""
+    from vesta.structure import corpus_id
 
     intent = "derive ontology axioms conservative extensions"
-    assert corpus_for(intent) == f"theory-{_slug(intent)}"
+    assert corpus_for(intent) == corpus_id(intent)
+
+
+def test_a_local_corpus_and_a_published_one_do_not_share_a_name():
+    """The whole point of the namespace. A corpus this machine scraped and one
+    somebody put their name to are different evidence about the same subject,
+    and a user must be able to tell which answered."""
+    intent = "conservative extensions"
+    mine = corpus_for(intent)
+    theirs = corpus_for(intent, origin=PUBLISHED, publisher="causum")
+
+    assert mine != theirs
+    assert origin_of(mine) == LOCAL
+    assert origin_of(theirs) == PUBLISHED
+    assert "causum" in theirs
+
+
+def test_a_published_corpus_without_a_publisher_says_it_is_unattributed():
+    """"Governed" is a claim somebody makes; an unattributable one is worth
+    less and should not be able to hide that."""
+    assert "unattributed" in corpus_for("x", origin=PUBLISHED)
+
+
+def test_an_unnamespaced_id_reads_as_local():
+    """Ids written down before the namespace existed still resolve, and resolve
+    to the weaker claim rather than the stronger one."""
+    assert origin_of("theory-conservative-extensions") == LOCAL
 
 
 def test_a_corpus_that_answers_is_reported_as_knowing():

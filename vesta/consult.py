@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from pydantic import BaseModel, Field
 
-from .structure import Answer, _slug, best_backend
+from .structure import LOCAL, PUBLISHED, Answer, best_backend, corpus_id, origin_of
 
 logger = logging.getLogger("vesta.consult")
 
@@ -83,13 +83,14 @@ class Consultation(BaseModel):
         )
 
 
-def corpus_for(intent: str) -> str:
+def corpus_for(intent: str, origin: str = LOCAL, publisher: str = "") -> str:
     """The corpus id acquisition would have written for an intent.
 
-    Derived rather than looked up, so consulting and building agree by
-    construction: a name computed two ways is a name that eventually differs.
+    Delegates to the one definition in `structure` rather than rebuilding the
+    string here: consulting and building must agree, and two implementations of
+    a naming rule agree only until one of them changes.
     """
-    return f"theory-{_slug(intent)}"
+    return corpus_id(intent, origin=origin, publisher=publisher)
 
 
 def _cite(result: Dict[str, Any]) -> Citation:

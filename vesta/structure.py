@@ -109,9 +109,47 @@ class Answer(BaseModel):
         return f"{len(self.results)} result(s)"
 
 
+# Who built a corpus, carried in its id.
+#
+# A corpus this machine acquired for itself and one obtained from a publisher
+# are different evidence about the same subject: the first is whatever the web
+# returned that day, the second is something somebody put their name to. They
+# must not share a name, or a user cannot tell which one answered — and an id
+# is the thing that ends up in filenames, configs, and bug reports, so it is
+# the wrong place to be ambiguous.
+#
+# Local is the default and needs no infrastructure. The published namespace is
+# reserved now, while it costs nothing, rather than retrofitted onto ids that
+# are already written down.
+LOCAL = "local"
+PUBLISHED = "pub"
+
+
 def _slug(text: str) -> str:
     kept = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return kept[:48] or "intent"
+
+
+def corpus_id(intent: str, origin: str = LOCAL, publisher: str = "") -> str:
+    """The id of the corpus holding theory for an intent.
+
+    One definition, used by both the building side and the consulting side, so
+    the two agree by construction: a name computed in two places is a name that
+    eventually differs.
+
+    A published corpus carries who published it, because "governed" is a claim
+    somebody makes and a claim nobody can attribute is not worth much.
+    """
+    subject = _slug(intent)
+    if origin == PUBLISHED:
+        return f"theory.{PUBLISHED}.{_slug(publisher) if publisher else 'unattributed'}.{subject}"
+    return f"theory.{LOCAL}.{subject}"
+
+
+def origin_of(identifier: str) -> str:
+    """Where a corpus came from, read back from its id."""
+    parts = identifier.split(".")
+    return parts[1] if len(parts) > 2 and parts[0] == "theory" else LOCAL
 
 
 def write(found: Found, into: Path | str, query: str = "") -> List[Path]:
@@ -453,9 +491,11 @@ def structure(
     person. Neither case is reported as success.
     """
     started = time.time()
-    corpus_id = f"theory-{_slug(intent)}"
+    # Acquired here, so it carries the local origin. Nothing this machine
+    # scraped may claim to be published.
+    identifier = corpus_id(intent)
     written = write(found, into, query=intent)
-    result = Structured(corpus_id=corpus_id, wrote=[str(p) for p in written])
+    result = Structured(corpus_id=identifier, wrote=[str(p) for p in written])
 
     if not written:
         result.incomplete = "nothing was found to structure"
@@ -483,7 +523,7 @@ def structure(
         return result
 
     try:
-        job = client.build(corpus_id, [into], ontology=ontology)
+        job = client.build(identifier, [into], ontology=ontology)
     except (urllib.error.URLError, OSError, ValueError) as exc:
         result.incomplete = f"the build could not be started: {exc}"
         result.took = time.time() - started

@@ -143,7 +143,9 @@ def test_a_complete_build_is_whole(tmp_path: Path):
 
     assert result.is_whole
     assert fake.built
-    assert result.corpus_id == "theory-rank-documents"
+    # Acquired here, so it says so: nothing this machine scraped may look
+    # like something a publisher stood behind.
+    assert result.corpus_id == "theory.local.rank-documents"
 
 
 def test_theory_for_one_intent_is_its_own_corpus(tmp_path: Path):
