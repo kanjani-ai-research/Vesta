@@ -124,6 +124,33 @@ class Answer(BaseModel):
 LOCAL = "local"
 PUBLISHED = "pub"
 
+# Where corpora live when nothing says otherwise.
+#
+# Pragmatos defaults to `/var/lib/pragmatos`, which is right for a service
+# deployed to a host and wrong for a tool a developer runs: it is not writable,
+# and the failure is a PermissionError from inside a build rather than anything
+# a user can act on. A tool that works only if you happen to have exported an
+# environment variable is not finished.
+VESTA_HOME = Path.home() / ".vesta"
+
+
+def _ensure_data_dir() -> Path:
+    """Point Pragmatos somewhere writable, unless the user has chosen.
+
+    `setdefault`, so an explicit `PRAGMATOS_DATA_DIR` always wins — a user who
+    has said where their corpora go has said it for a reason, and a deployment
+    sharing a corpus between components depends on that choice being honoured.
+    """
+    import os
+
+    chosen = os.environ.get("PRAGMATOS_DATA_DIR")
+    if chosen:
+        return Path(chosen).expanduser()
+    home = VESTA_HOME / "data"
+    home.mkdir(parents=True, exist_ok=True)
+    os.environ["PRAGMATOS_DATA_DIR"] = str(home)
+    return home
+
 
 def _slug(text: str) -> str:
     kept = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
@@ -275,6 +302,11 @@ class Pragmatos:
 
         return job
 
+    def corpora(self) -> List[str]:
+        found = self._call("/corpora")
+        listed = found if isinstance(found, list) else found.get("corpora", [])
+        return [c["id"] if isinstance(c, dict) else str(c) for c in listed]
+
     def ask(self, corpus_id: str, query: str, limit: int = 10) -> Answer:
         """Query a corpus, keeping its own judgement of whether it answered."""
         payload = self._call(
@@ -344,6 +376,7 @@ class Local:
             import pragmatos.retrieval  # noqa: F401
         except ImportError:
             return False
+        _ensure_data_dir()
         return True
 
     def why_not(self) -> str:
@@ -365,6 +398,7 @@ class Local:
     ) -> Dict[str, Any]:
         import asyncio
 
+        _ensure_data_dir()
         from pragmatos import llm, pipeline
         from pragmatos.config import config
         from pragmatos.store import Store
@@ -431,7 +465,16 @@ class Local:
             ),
         }
 
+    def corpora(self) -> List[str]:
+        """Every corpus in the store on this machine."""
+        _ensure_data_dir()
+        from pragmatos.config import config
+        from pragmatos.store import Store
+
+        return [c.id for c in Store(config.database).list_corpora()]
+
     def ask(self, corpus_id: str, query: str, limit: int = 10) -> Answer:
+        _ensure_data_dir()
         from pragmatos import gaps as gaps_module
         from pragmatos import llm
         from pragmatos.config import config

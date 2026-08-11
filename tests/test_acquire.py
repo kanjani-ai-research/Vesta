@@ -335,3 +335,64 @@ def test_an_exhausted_quota_is_retried():
     search.for_("two")
 
     assert calls["n"] == 2
+
+
+# ── Finding the project's own configuration ──────────────────────────────
+
+
+def test_an_explicit_env_file_wins(tmp_path, monkeypatch):
+    chosen = tmp_path / "chosen.env"
+    chosen.write_text("BRAVE_API_KEY=from-the-explicit-file\n")
+    monkeypatch.setenv("VESTA_ENV_FILE", str(chosen))
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+    acquire._load_env(override=True)
+
+    import os
+
+    assert os.environ["BRAVE_API_KEY"] == "from-the-explicit-file"
+
+
+def test_a_stale_shell_key_does_not_shadow_the_project(tmp_path, monkeypatch):
+    """The failure this exists for.
+
+    An ANTHROPIC_API_KEY exported months ago in another project silently won
+    under `setdefault`, and a build then reported "API key is invalid" about a
+    key the user never chose to use.
+    """
+    project = tmp_path / ".env"
+    project.write_text("ANTHROPIC_API_KEY=the-configured-one\n")
+    monkeypatch.delenv("VESTA_ENV_FILE", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a-stale-one-from-the-shell")
+
+    acquire._load_env(str(tmp_path), override=True)
+
+    import os
+
+    assert os.environ["ANTHROPIC_API_KEY"] == "the-configured-one"
+
+
+def test_without_override_a_deliberate_export_is_kept(tmp_path, monkeypatch):
+    """A variable the user set on purpose is theirs, not the file's."""
+    (tmp_path / ".env").write_text("BRAVE_API_KEY=from-file\n")
+    monkeypatch.delenv("VESTA_ENV_FILE", raising=False)
+    monkeypatch.setenv("BRAVE_API_KEY", "deliberate")
+
+    acquire._load_env(str(tmp_path))
+
+    import os
+
+    assert os.environ["BRAVE_API_KEY"] == "deliberate"
+
+
+def test_an_empty_value_does_not_overwrite_a_real_one(tmp_path, monkeypatch):
+    """`.env` files carry empty placeholders; they are not settings."""
+    (tmp_path / ".env").write_text("BRAVE_API_KEY=\n")
+    monkeypatch.delenv("VESTA_ENV_FILE", raising=False)
+    monkeypatch.setenv("BRAVE_API_KEY", "a-real-key")
+
+    acquire._load_env(str(tmp_path), override=True)
+
+    import os
+
+    assert os.environ["BRAVE_API_KEY"] == "a-real-key"

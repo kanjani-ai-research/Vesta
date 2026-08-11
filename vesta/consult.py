@@ -139,6 +139,69 @@ def consult(
     return found
 
 
+def corpora(pragmatos: Optional[Any] = None) -> List[str]:
+    """Every corpus on this machine, newest-looking first.
+
+    Needed because an agent mid-task has a question, not a corpus name. Making
+    the caller know the id before asking is the difference between a tool an
+    agent can use and one it must be configured for.
+    """
+    client = pragmatos or best_backend(for_reading=True)
+    lister = getattr(client, "corpora", None)
+    if lister is None:
+        return []
+    try:
+        return list(lister())
+    except Exception as exc:  # noqa: BLE001 - no corpora is not a failure
+        logger.warning("could not list corpora: %s", exc)
+        return []
+
+
+def anywhere(
+    question: str,
+    intent: str = "",
+    pragmatos: Optional[Any] = None,
+    limit: int = PASSAGES,
+) -> Consultation:
+    """Ask every corpus and keep whichever answered best.
+
+    The entry point for a caller who has a question and no idea where it might
+    be answered. Preferring the strongest match across corpora rather than
+    merging them: a passage's score is only comparable to others from the same
+    retrieval, and interleaving two rankings would invent a comparison neither
+    corpus supports.
+
+    Where the intent names a corpus that exists, that one is asked first and
+    kept if it answers — a corpus built *for* this work is better evidence than
+    a stronger-scoring match from unrelated theory.
+    """
+    client = pragmatos or best_backend(for_reading=True)
+    available = corpora(client)
+
+    if not available:
+        found = Consultation(question=question, corpus_id=corpus_for(intent or question))
+        found.unavailable = "no corpus has been built yet"
+        return found
+
+    preferred = corpus_for(intent) if intent else ""
+    ordered = ([preferred] if preferred in available else []) + [
+        name for name in available if name != preferred
+    ]
+
+    best: Optional[Consultation] = None
+    for name in ordered:
+        found = consult(question, corpus_id=name, pragmatos=client, limit=limit)
+        if found.knew and name == preferred:
+            # Built for this work: taken over anything that merely scores higher.
+            return found
+        if found.knew and (best is None or found.best > best.best):
+            best = found
+
+    return best or Consultation(
+        question=question, corpus_id=ordered[0]
+    )
+
+
 def known(
     questions: Sequence[str],
     intent: str = "",

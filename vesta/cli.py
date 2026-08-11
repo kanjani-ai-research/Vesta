@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from . import maturity
-from .acquire import Search
+from .acquire import Search, _load_env
 from .consult import known
 from .graph import build
 from .propagate import from_files
@@ -220,6 +220,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     knows.add_argument("--corpus", default="", help="an explicit corpus id")
     knows.add_argument("--show", type=int, default=3)
     knows.set_defaults(run=_knows)
+
+    # The project's own `.env` wins over whatever the shell happens to carry.
+    # A stale ANTHROPIC_API_KEY exported months ago in another project shadows
+    # the configured one under plain `setdefault`, and the failure surfaces as
+    # "API key is invalid" about a key the user never chose to use.
+    _load_env(override=True)
 
     args = parser.parse_args(argv)
     # Whether the user actually asked for the service, rather than inheriting

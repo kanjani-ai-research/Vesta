@@ -104,27 +104,57 @@ def _load_env(start: Optional[str] = None, override: bool = False) -> None:
     """
     from pathlib import Path
 
-    origin = Path(start or os.getcwd()).resolve()
+    # Where to look, in order of authority:
+    #   1. an explicit VESTA_ENV_FILE, for a user who has decided
+    #   2. upward from cwd, which finds a project's own file when run inside it
+    #   3. upward from this package, which finds it when run from anywhere else
+    #
+    # The third matters most for the sidecar: an MCP server's working directory
+    # is whatever the host chose, usually the repository being edited, so the
+    # cwd walk finds nothing and every model call fails on a missing key.
+    explicit = os.environ.get("VESTA_ENV_FILE")
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        if candidate.is_file():
+            _read_env(candidate, override)
+            return
+
+    roots = [Path(start).resolve()] if start else [
+        Path(os.getcwd()).resolve(),
+        Path(__file__).resolve().parent,
+    ]
+    for origin in roots:
+        if _walk_up(origin, override):
+            return
+
+
+def _walk_up(origin, override: bool) -> bool:
+    from pathlib import Path
+
     for directory in [origin, *origin.parents][:_ENV_CEILING]:
         candidate = directory / ".env"
-        if not candidate.is_file():
-            continue
-        try:
-            for line in candidate.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                name, _, value = line.partition("=")
-                name, value = name.strip(), value.strip().strip("\"'")
-                if not value:
-                    continue
-                if override:
-                    os.environ[name] = value
-                else:
-                    os.environ.setdefault(name, value)
-        except OSError:
-            pass
-        return
+        if candidate.is_file():
+            _read_env(candidate, override)
+            return True
+    return False
+
+
+def _read_env(path, override: bool) -> None:
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, _, value = line.partition("=")
+            name, value = name.strip(), value.strip().strip("\"'")
+            if not value:
+                continue
+            if override:
+                os.environ[name] = value
+            else:
+                os.environ.setdefault(name, value)
+    except OSError:
+        pass
 
 
 class Reading(BaseModel):

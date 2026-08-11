@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from . import maturity
 from .acquire import Search
+from .consult import anywhere as _anywhere
 from .consult import consult as _consult
 from .consult import corpus_for
 from .structure import best_backend, structure
@@ -65,7 +66,15 @@ def quiet_stdout():
 
 def _consultation(question: str, intent: str, corpus: str) -> str:
     with quiet_stdout():
-        found = _consult(question, intent=intent, corpus_id=corpus)
+        # No corpus named: search every one on the machine. An agent mid-task
+        # has a question, not a corpus id, and requiring the id before asking
+        # is the difference between a tool an agent can use and one it has to
+        # be configured for.
+        found = (
+            _consult(question, intent=intent, corpus_id=corpus)
+            if corpus
+            else _anywhere(question, intent=intent)
+        )
 
     if found.unavailable:
         return (
@@ -237,6 +246,11 @@ def build_server():
 
 def main() -> int:
     _quieten()
+    # The project's `.env` is authoritative over an ambient shell key; see the
+    # note in `acquire._load_env`.
+    from .acquire import _load_env
+
+    _load_env(override=True)
     try:
         server = build_server()
     except ImportError:
