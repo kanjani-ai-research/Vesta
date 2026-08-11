@@ -321,7 +321,12 @@ def _touches(paths: List[str], project: Optional[Path], hops: int) -> str:
             f"{graph.describe()}."
         )
 
-    lines = [f"project: {project}", found.describe(graph), ""]
+    lines = [
+        f"project: {project}",
+        f"(paths below are relative to that directory)",
+        found.describe(graph),
+        "",
+    ]
     for entry in sorted(found.reached, key=lambda r: r.hops):
         node = graph.nodes.get(entry.node)
         if node:
@@ -396,7 +401,12 @@ def _known(name: str, project: Optional[Path]) -> str:
     with quiet_stdout():
         standing = settle(graph, harvest.notes, project)
 
-    lines = [f"project: {project}", harvest.describe(), ""]
+    lines = [
+        f"project: {project}",
+        "(paths below are relative to that directory)",
+        harvest.describe(),
+        "",
+    ]
     said = False
     # A budget across the whole answer rather than a cut per note. Truncating
     # each at 900 characters severed an account mid-sentence exactly where it
@@ -469,7 +479,7 @@ def _uses(name: str, project: Optional[Path]) -> str:
     if not wanted:
         return f"project: {project}\nNo definition named {name!r} in the graph."
 
-    lines = [f"project: {project}"]
+    lines = [f"project: {project}", "(paths below are relative to that directory)"]
     for node in wanted[:8]:
         # Say when understanding already exists. An agent cannot ask for what it
         # does not know is there: a live run called `uses` and `touches` and
@@ -518,7 +528,12 @@ def _shape(project: Optional[Path]) -> str:
         graph.nodes.values(), key=lambda n: len(graph.referenced_by(n.id)), reverse=True
     )[:12]
 
-    lines = [f"project: {project}", graph.describe(), ""]
+    lines = [
+        f"project: {project}",
+        "(paths below are relative to that directory)",
+        graph.describe(),
+        "",
+    ]
     lines.append("Most depended upon:")
     for node in busiest:
         count = len(graph.referenced_by(node.id))
