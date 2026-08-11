@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from pydantic import BaseModel, Field
 
 from .acquire import Found, Reading
+from .fetch import Fetched, gather, summarise
 
 logger = logging.getLogger("vesta.structure")
 
@@ -60,6 +61,9 @@ class Structured(BaseModel):
     # What the build could not do. A corpus built from six of eight readings is
     # usable and is not the corpus the caller asked for.
     incomplete: str = ""
+    # Documents fetched and not admitted, each with the reason. Reported so a
+    # thin corpus is explicable rather than mysterious.
+    excluded: List[str] = Field(default_factory=list)
     took: float = 0.0
 
     @property
@@ -68,6 +72,8 @@ class Structured(BaseModel):
 
     def describe(self) -> str:
         said = f"{self.corpus_id}: {len(self.wrote)} reading(s) in {self.took:.0f}s"
+        if self.excluded:
+            said += f", {len(self.excluded)} dropped"
         return f"{said} — {self.incomplete}" if self.incomplete else said
 
 
@@ -327,7 +333,16 @@ def _is_current_scheme(identifier: str) -> bool:
     return bool(re.fullmatch(r"theory\.(local|pub)\..*-[0-9a-f]{8}", identifier))
 
 
-def write(found: Found, into: Path | str, query: str = "") -> List[Path]:
+_EXCLUDED: List[List[Fetched]] = [[]]
+
+
+def write(
+    found: Found,
+    into: Path | str,
+    query: str = "",
+    subject: str = "",
+    fetch: bool = True,
+) -> List[Path]:
     """Put readings on disk in a form a document pipeline can read.
 
     One file per reading, with the provenance in the file rather than only in
@@ -338,7 +353,16 @@ def write(found: Found, into: Path | str, query: str = "") -> List[Path]:
     into.mkdir(parents=True, exist_ok=True)
     written: List[Path] = []
 
-    for index, reading in enumerate(found.readings):
+    # The document, not the search result that pointed at it. A live agent asked
+    # for IPOG's horizontal/vertical growth procedure, got 418 bytes of snippet,
+    # and had to write the algorithm from its own knowledge — the paper was in
+    # the corpus and its body had never been fetched.
+    gathered = gather(found.readings, subject or found.reach.query) if fetch else [
+        Fetched(reading=r) for r in found.readings
+    ]
+
+    for index, entry in enumerate(g for g in gathered if fetch is False or g.kept):
+        reading = entry.reading
         path = into / f"{index:03d}-{_slug(reading.title)}.md"
         body = [
             f"# {reading.title}",
@@ -350,9 +374,15 @@ def write(found: Found, into: Path | str, query: str = "") -> List[Path]:
             body.append(f"Published: {reading.published}")
         if reading.authors:
             body.append(f"Authors: {', '.join(reading.authors)}")
-        body.extend(["", reading.summary or "(no summary was supplied)", ""])
+        body.extend(
+            ["", entry.text or reading.summary or "(no summary was supplied)", ""]
+        )
         path.write_text("\n".join(body), encoding="utf-8")
         written.append(path)
+
+    # What was excluded, beside the readings. An exclusion nobody can see reads
+    # as a document that never existed.
+    _EXCLUDED[0] = [g for g in gathered if fetch and not g.kept]
 
     # What was searched and what was not, kept beside the readings. A corpus
     # built from two of three sources reads exactly like one built from three
@@ -684,6 +714,7 @@ def structure(
     pragmatos: Optional[Any] = None,
     ontology: Optional[str] = None,
     repo: Optional[Path | str] = None,
+    fetch: bool = True,
 ) -> Structured:
     """Write what was found and build a corpus over it.
 
@@ -696,11 +727,19 @@ def structure(
     # accumulates. Acquired here, so it carries the local origin — nothing this
     # machine scraped may claim to be published.
     identifier = corpus_id(repo)
-    written = write(found, into, query=intent)
+    written = write(found, into, query=intent, subject=intent, fetch=fetch)
     result = Structured(corpus_id=identifier, wrote=[str(p) for p in written])
 
+    excluded = list(_EXCLUDED[0])
+    if excluded:
+        result.excluded = [e.describe() for e in excluded]
+
     if not written:
-        result.incomplete = "nothing was found to structure"
+        result.incomplete = (
+            "nothing was found to structure"
+            if not excluded
+            else f"every document was dropped: {summarise(excluded)}"
+        )
         result.took = time.time() - started
         return result
 

@@ -60,7 +60,7 @@ class Fake(Pragmatos):
 
 
 def test_a_reading_is_written_with_its_provenance(tmp_path: Path):
-    written = write(found(reading()), tmp_path, query="consensus")
+    written = write(found(reading()), tmp_path, query="consensus", fetch=False)
 
     body = written[0].read_text()
     # The source has to survive into the file: whatever reads the corpus will
@@ -73,7 +73,7 @@ def test_a_reading_is_written_with_its_provenance(tmp_path: Path):
 def test_what_was_not_searched_is_written_beside_the_readings(tmp_path: Path):
     where = found(reading(), skipped={WEB: "no BRAVE_API_KEY"})
     where.reach.query = "consensus protocols"
-    write(where, tmp_path, query="the intent, which is not the query")
+    write(where, tmp_path, query="the intent, which is not the query", fetch=False)
 
     # Beside the readings, not inside them: it is provenance, not material.
     reach = (tmp_path.parent / f"{tmp_path.name}-reach.md").read_text()
@@ -85,7 +85,9 @@ def test_what_was_not_searched_is_written_beside_the_readings(tmp_path: Path):
 
 def test_two_readings_with_the_same_title_do_not_collide(tmp_path: Path):
     written = write(
-        found(reading(url="http://a/1"), reading(url="http://a/2")), tmp_path
+        found(reading(url="http://a/1"), reading(url="http://a/2")),
+        tmp_path,
+        fetch=False,
     )
 
     assert len(written) == 2
@@ -96,7 +98,7 @@ def test_two_readings_with_the_same_title_do_not_collide(tmp_path: Path):
 
 
 def test_an_absent_pragmatos_is_reported_not_swallowed(tmp_path: Path):
-    result = structure(found(reading()), "consensus", tmp_path, pragmatos=Fake(available=False))
+    result = structure(found(reading()), "consensus", tmp_path, pragmatos=Fake(available=False), fetch=False)
 
     assert not result.is_whole
     assert "not reachable" in result.incomplete
@@ -110,7 +112,7 @@ def test_a_failed_build_is_reported(tmp_path: Path):
         found(reading()),
         "consensus",
         tmp_path,
-        pragmatos=Fake(job={"state": "failed", "error": "no credentials"}),
+        fetch=False, pragmatos=Fake(job={"state": "failed", "error": "no credentials"}),
     )
 
     assert not result.is_whole
@@ -122,7 +124,7 @@ def test_a_build_that_will_not_start_is_reported(tmp_path: Path):
         found(reading()),
         "consensus",
         tmp_path,
-        pragmatos=Fake(raises=urllib.error.URLError("connection refused")),
+        fetch=False, pragmatos=Fake(raises=urllib.error.URLError("connection refused")),
     )
 
     assert not result.is_whole
@@ -139,7 +141,7 @@ def test_nothing_found_builds_no_corpus(tmp_path: Path):
 
 def test_a_complete_build_is_whole(tmp_path: Path):
     fake = Fake()
-    result = structure(found(reading()), "rank documents", tmp_path, pragmatos=fake)
+    result = structure(found(reading()), "rank documents", tmp_path, pragmatos=fake, fetch=False)
 
     assert result.is_whole
     assert fake.built
@@ -158,8 +160,8 @@ def test_one_repository_is_one_knowledge_base(tmp_path: Path):
     """
     repo = tmp_path / "one-project"
     repo.mkdir()
-    a = structure(found(reading()), "rank documents", tmp_path / "a", pragmatos=Fake(), repo=repo)
-    b = structure(found(reading()), "schedule work", tmp_path / "b", pragmatos=Fake(), repo=repo)
+    a = structure(found(reading()), "rank documents", tmp_path / "a", pragmatos=Fake(), fetch=False, repo=repo)
+    b = structure(found(reading()), "schedule work", tmp_path / "b", pragmatos=Fake(), fetch=False, repo=repo)
 
     assert a.corpus_id == b.corpus_id
 
@@ -170,8 +172,8 @@ def test_two_repositories_do_not_share_a_knowledge_base(tmp_path: Path):
     similarity alone."""
     one, two = tmp_path / "one", tmp_path / "two"
     one.mkdir(); two.mkdir()
-    a = structure(found(reading()), "x", tmp_path / "a", pragmatos=Fake(), repo=one)
-    b = structure(found(reading()), "x", tmp_path / "b", pragmatos=Fake(), repo=two)
+    a = structure(found(reading()), "x", tmp_path / "a", pragmatos=Fake(), fetch=False, repo=one)
+    b = structure(found(reading()), "x", tmp_path / "b", pragmatos=Fake(), fetch=False, repo=two)
 
     assert a.corpus_id != b.corpus_id
 
@@ -266,7 +268,7 @@ def test_a_build_without_embeddings_is_not_reported_as_whole(tmp_path: Path):
         found(reading()),
         "consensus",
         tmp_path,
-        pragmatos=Fake(job={"state": "complete", "partial": "no embeddings were written"}),
+        fetch=False, pragmatos=Fake(job={"state": "complete", "partial": "no embeddings were written"}),
     )
 
     assert not result.is_whole

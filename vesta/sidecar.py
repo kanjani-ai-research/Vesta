@@ -198,7 +198,12 @@ def _judgement(intent: str, search: bool) -> str:
     return "\n".join(lines)
 
 
-def _acquisition(intent: str, into: Optional[str], project: Optional[Path]) -> str:
+def _acquisition(
+    intent: str,
+    into: Optional[str],
+    project: Optional[Path],
+    about: str = "",
+) -> str:
     with quiet_stdout():
         search = Search.from_environment()
         judged = maturity.judge(intent, search=search)
@@ -210,12 +215,28 @@ def _acquisition(intent: str, into: Optional[str], project: Optional[Path]) -> s
             "CLAUDE_PROJECT_DIR is not set."
         )
     where = Path(into) if into else THEORY_DIR / repository_name(project)
-    lines = [f"project: {project}", judged.ask(), ""]
 
-    for aspect in judged.aspects:
+    # Deliberately *not* `judged.ask()` here. A live run opened this output with
+    # "this looks like established work" while acquiring the very theory that
+    # had been asked for, and the agent reasonably read it as permission to
+    # stop. The two say different things: `assess` judges whether a *field* is
+    # mature, which is no answer to whether this corpus can supply a procedure.
+    # Maturity belongs in `assess`; what belongs here is what was acquired.
+    lines = [f"project: {project}", ""]
+
+    # The caller's own question is the better query, and this had been throwing
+    # it away. A live agent asked for "greedy algorithms like IPOG and AETG
+    # construct t-way covering arrays, and what sizes do they achieve" — that
+    # phrasing returns the NIST IPOG paper; the query derived mechanically from
+    # the intent does not return it at all. Keyword extraction from a one-line
+    # brief is a worse search than a question written by something that knows
+    # what it is looking for.
+    queries = [about] if about else [a.would_search[0] for a in judged.aspects]
+
+    for aspect, query in zip(judged.aspects or [None], queries):
         with quiet_stdout():
-            found = search.for_(aspect.would_search[0])
-        lines.append(f"{aspect.name}: {found.describe()}")
+            found = search.for_(query)
+        lines.append(f"{query!r}: {found.describe()}")
         for reading in found.readings[:6]:
             lines.append(f"  {reading.describe()}")
             lines.append(f"    {reading.url}")
@@ -233,6 +254,11 @@ def _acquisition(intent: str, into: Optional[str], project: Optional[Path]) -> s
 
     if judged.could_not_search:
         lines.append(f"({judged.could_not_search})")
+    lines.append(
+        "Acquiring says nothing about whether the field is mature — most of it "
+        "is. It says the corpus now holds these documents. Ask `recall` what "
+        "they say."
+    )
     return "\n".join(lines)
 
 
@@ -328,15 +354,21 @@ def build_server():
         return await anyio.to_thread.run_sync(_judgement, intent, search)
 
     @server.tool()
-    async def learn(intent: str, into: str = "", context: Context = None) -> str:
+    async def learn(
+        intent: str, about: str = "", into: str = "", context: Context = None
+    ) -> str:
         """Go and acquire the theory for a task, and structure it.
 
-        Expensive: searches the web, writes readings to disk, and runs a model
-        over them to build a queryable corpus. Takes minutes and spends tokens.
-        Use when `recall` reports nothing acquired and the task warrants it.
+        Expensive: fetches papers in full, then runs a model over them to build
+        a queryable corpus. Takes minutes and spends tokens. Use when `recall`
+        reports nothing acquired and the task warrants it.
 
         Args:
             intent: What is to be built, in a sentence.
+            about: What to search for, phrased as you would search — naming the
+                algorithms, authors or properties you want. Strongly preferred:
+                a question you write finds better papers than anything derived
+                from the intent, and this is what the corpus is built from.
             into: Where to write. Defaults under ~/.vesta/theory.
         """
         project = await project_of(context)
@@ -347,7 +379,7 @@ def build_server():
         import anyio
 
         return await anyio.to_thread.run_sync(
-            _acquisition, intent, into or None, project
+            _acquisition, intent, into or None, project, about
         )
 
     return server
