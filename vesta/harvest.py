@@ -158,6 +158,27 @@ def _passages(said: str) -> List[str]:
     return [p for p in parts if LEAST_USEFUL <= len(p) <= MOST_USEFUL]
 
 
+# Harvests already read, keyed by the repository and the state of its
+# transcripts. Re-reading every session on every call cost thirteen seconds on
+# the first `known` in a live run, and that grows with every session a user
+# has — the opposite of the accumulation this is supposed to reward.
+_HARVESTED: Dict[str, Tuple[str, "Harvest"]] = {}
+
+
+def _state_of(paths: Sequence[Path]) -> str:
+    """A fingerprint of the transcripts, so a new session invalidates the cache."""
+    import hashlib
+
+    marks = []
+    for path in paths:
+        try:
+            stat = path.stat()
+            marks.append(f"{path}:{stat.st_size}:{int(stat.st_mtime)}")
+        except OSError:
+            continue
+    return hashlib.sha256("\n".join(marks).encode("utf-8")).hexdigest()[:16]
+
+
 def from_sessions(
     graph: Graph,
     repo: Path | str,
@@ -170,10 +191,17 @@ def from_sessions(
     whoever ran the session. This only picks it up.
     """
     root = Path(repo).expanduser().resolve()
+    paths = list(transcripts) if transcripts is not None else _sessions_for(root)
+
+    state = _state_of(paths)
+    remembered = _HARVESTED.get(str(root))
+    if remembered and remembered[0] == state and not since:
+        return remembered[1]
+
     found = Harvest()
     seen: Set[Tuple[str, str]] = set()
 
-    for path in transcripts if transcripts is not None else _sessions_for(root):
+    for path in paths:
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
@@ -214,6 +242,8 @@ def from_sessions(
                             )
                         )
 
+    if not since:
+        _HARVESTED[str(root)] = (state, found)
     return found
 
 
