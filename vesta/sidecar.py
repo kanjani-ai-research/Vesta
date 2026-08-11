@@ -24,12 +24,14 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import maturity
 from .acquire import Search
 from .consult import consult as _consult
+from .harvest import from_sessions, keep, recall_notes
 from .held import graph_for
 from .propagate import from_files, is_test
 from .consult import corpus_for
@@ -333,6 +335,54 @@ def _touches(paths: List[str], project: Optional[Path], hops: int) -> str:
     return "\n".join(lines)
 
 
+def _known(name: str, project: Optional[Path]) -> str:
+    """What has already been worked out about a definition, by anyone.
+
+    The framework reads files and reasons about them constantly, and every
+    session throws that away. This hands it back, so the same understanding is
+    not re-derived and re-paid for.
+    """
+    if project is None:
+        return "Could not tell which project this is."
+
+    with quiet_stdout():
+        graph = graph_for(project)
+        harvest = from_sessions(graph, project)
+
+    wanted = [
+        n for n in graph.nodes.values()
+        if n.name == name or n.qualified == name or n.qualified.endswith(f".{name}")
+    ]
+    if not wanted:
+        return f"project: {project}\nNo definition named {name!r} in the graph."
+
+    lines = [f"project: {project}", harvest.describe(), ""]
+    said = False
+    for node in wanted[:4]:
+        notes = harvest.for_node(node.id)
+        if not notes:
+            continue
+        said = True
+        lines.append(f"{node.qualified}  {node.path}:{node.line + 1}")
+        for note in notes[:3]:
+            lines.append("")
+            lines.append(f"  [{time.strftime('%Y-%m-%d', time.localtime(note.at))}] {note.text[:900]}")
+        lines.append("")
+
+    if not said:
+        return (
+            f"project: {project}\n"
+            f"Nothing has been worked out about {name!r} yet in any recorded "
+            "session. This is not a claim that it is simple — only that nobody "
+            "has written down what it does."
+        )
+    lines.append(
+        "These are claims an agent made while reading the code, not the code "
+        "itself. They can be wrong and they can be stale."
+    )
+    return "\n".join(lines)
+
+
 def _uses(name: str, project: Optional[Path]) -> str:
     """Where a definition lives and what refers to it, resolved not guessed."""
     if project is None:
@@ -501,6 +551,30 @@ def build_server():
         started = time.monotonic()
         answer = await anyio.to_thread.run_sync(_uses, name, project)
         _record("uses", project, time.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def known(name: str, context: Context = None) -> str:
+        """What has already been worked out about a definition.
+
+        Understanding that previous sessions derived by reading this code —
+        what it does, how it fails, what changes with it. Ask BEFORE reading a
+        file: the reasoning may already exist, and re-deriving it costs a full
+        read and a fresh analysis.
+
+        Returns nothing when nobody has written about it yet, which is not a
+        claim that the code is simple.
+
+        Args:
+            name: A function, method or class name.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_known, name, project)
+        _record("known", project, _t.monotonic() - started, len(answer))
         return answer
 
     @server.tool()
