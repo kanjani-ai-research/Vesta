@@ -13,6 +13,7 @@ import pytest
 
 from vesta.enforce import (
     CALLS_INTO,
+    FILES_LACKING,
     COUNT_AT_LEAST,
     COUNT_AT_MOST,
     FILES_MATCHING,
@@ -86,13 +87,43 @@ def test_a_malformed_pattern_decides_nothing(repo):
     assert "malformed" in why
 
 
-def test_at_least_is_broken_by_too_few(repo):
+def test_finding_none_of_a_presence_decides_nothing(repo):
+    """Absence of the subject is not evidence about the rule.
+
+    A rule about langextract, checked in a repository containing no langextract
+    anywhere, was reported broken with a site pointing at the repository root.
+    Nothing was found because the subject is not here, which settles neither
+    way.
+    """
     graph, root = repo
     check = Check(look_for=NAMES_MATCHING, pattern=r"^test_",
                   holds_when=COUNT_AT_LEAST, how_many=1, tests_the_rule=True)
 
-    sites, _ = run_check(check, graph, root)
-    assert sites  # no test_ definitions exist, so the rule is broken
+    sites, why = run_check(check, graph, root)
+    assert not sites
+    assert "neither honoured nor broken" in why
+
+
+def test_finding_none_of_an_absence_honours_the_rule(repo):
+    """`files_lacking` enumerates the violations themselves, so finding none
+    of them is the rule holding — "every file must have a docstring" was called
+    undecidable in a repository where every file has one."""
+    graph, root = repo
+    check = Check(look_for=FILES_LACKING, pattern=r"def ", within=r"\.py$",
+                  holds_when=COUNT_AT_LEAST, how_many=1, tests_the_rule=True)
+
+    sites, why = run_check(check, graph, root)
+    assert not sites and not why
+
+
+def test_at_least_is_broken_by_too_few(repo):
+    """Some, but fewer than required, is a genuine violation."""
+    graph, root = repo
+    check = Check(look_for=NAMES_MATCHING, pattern=r"load|other",
+                  holds_when=COUNT_AT_LEAST, how_many=5, tests_the_rule=True)
+
+    sites, why = run_check(check, graph, root)
+    assert sites and not why
 
 
 def test_definitions_reaching_a_name_are_found(repo):
