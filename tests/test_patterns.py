@@ -36,6 +36,22 @@ def empty() -> Blindspot:
 # ── Hardcoded language lists ─────────────────────────────────────────────
 
 
+def test_one_table_is_one_finding(tmp_path: Path, empty):
+    """Eight entries in one table are one decision to enumerate languages.
+    A reader handed eight items has to work out that they are the same item."""
+    (tmp_path / "resolve.py").write_text(
+        'Server(languages=["rust"], suffixes=[".rs"])\n'
+        'Server(languages=["go"], suffixes=[".go"])\n'
+        'Server(languages=["c"], suffixes=[".c"])\n',
+        encoding="utf-8",
+    )
+    found = hardcoded_language_lists(Graph(root=str(tmp_path)), tmp_path, empty)
+
+    assert len(found) == 1
+    assert len(found[0].sites) == 3
+    assert "+2 more" in found[0].describe()
+
+
 def test_a_language_table_is_found(tmp_path: Path, empty):
     (tmp_path / "resolve.py").write_text(
         'Server(languages=["rust"], suffixes=[".rs"])\n', encoding="utf-8"
@@ -108,7 +124,7 @@ def test_a_genuinely_unreferenced_definition_is_found(tmp_path: Path, empty):
     graph = Graph(root=str(tmp_path), nodes={n.id: n for n in [node("orphaned")]})
     found = unreachable_definitions(graph, tmp_path, empty)
 
-    assert found and found[0].what == "orphaned"
+    assert found and found[0].sites[0].what == "orphaned"
     assert found[0].confidence == "worth a look"
 
 
@@ -117,8 +133,10 @@ def test_a_referenced_definition_is_not_reported(tmp_path: Path, empty):
     graph = Graph(root=str(tmp_path), nodes={used.id: used, user.id: user},
                   edges=[Edge(source=user.id, target=used.id)])
 
-    assert not [f for f in unreachable_definitions(graph, tmp_path, empty)
-                if f.what == "used"]
+    assert not [
+        f for f in unreachable_definitions(graph, tmp_path, empty)
+        for s in f.sites if s.what == "used"
+    ]
 
 
 # ── Dynamic reach ────────────────────────────────────────────────────────

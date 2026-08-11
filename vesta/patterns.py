@@ -42,19 +42,45 @@ LIKELY = "likely"      # the structure is strong evidence, with known exceptions
 WORTH_A_LOOK = "worth a look"  # a signal, not a conclusion
 
 
-class Found(BaseModel):
-    """One thing worth fixing, and why it is worth fixing."""
+class Site(BaseModel):
+    """One place a defect shows."""
 
-    pattern: str
     where: str
     line: int = 0
     what: str = ""
-    why: str = Field(description="Why this is a defect rather than a curiosity")
-    confidence: str = LIKELY
 
     def describe(self) -> str:
         at = f"{self.where}:{self.line}" if self.line else self.where
-        return f"[{self.confidence}] {self.pattern} — {at}  {self.what}"
+        return f"{at}  {self.what}" if self.what else at
+
+
+class Found(BaseModel):
+    """One thing worth fixing, and everywhere it shows.
+
+    **One defect is one event, however many lines it touches.** A hardcoded
+    language table reported eight times is one decision reported eight times,
+    and a reader handed eight items has to work out for themselves that they
+    are the same item. The sites are nested under the finding because fixing
+    the finding fixes all of them.
+    """
+
+    pattern: str
+    why: str = Field(description="Why this is a defect rather than a curiosity")
+    confidence: str = LIKELY
+    sites: List[Site] = Field(default_factory=list)
+
+    @property
+    def where(self) -> str:
+        return self.sites[0].where if self.sites else ""
+
+    @property
+    def line(self) -> int:
+        return self.sites[0].line if self.sites else 0
+
+    def describe(self) -> str:
+        first = self.sites[0].describe() if self.sites else "(nowhere)"
+        more = f" (+{len(self.sites) - 1} more)" if len(self.sites) > 1 else ""
+        return f"[{self.confidence}] {self.pattern} — {first}{more}"
 
 
 class Survey(BaseModel):
@@ -103,26 +129,30 @@ def hardcoded_language_lists(graph: Graph, root: Path, blind: Blindspot) -> List
         r"\b(languages?|suffixes?|extensions?|file_types?)\s*[=:]\s*[\[\(]",
         re.I,
     )
-    found: List[Found] = []
+    # Grouped per file: eight entries in one table are one decision to enumerate
+    # languages, not eight decisions.
+    by_file: Dict[str, List[Site]] = {}
     for path, relative in _sources(root):
         if "test" in relative:
             continue  # a fixture naming a language is naming it on purpose
         for number, line in enumerate(_lines(path), start=1):
             if marker.search(line):
-                found.append(
-                    Found(
-                        pattern="hardcoded language list",
-                        where=relative,
-                        line=number,
-                        what=line.strip()[:80],
-                        why=(
-                            "every language not in this list is one the tool "
-                            "cannot handle, and nothing says so"
-                        ),
-                        confidence=LIKELY,
-                    )
+                by_file.setdefault(relative, []).append(
+                    Site(where=relative, line=number, what=line.strip()[:80])
                 )
-    return found
+
+    return [
+        Found(
+            pattern="hardcoded language list",
+            why=(
+                "every language not in this list is one the tool cannot handle, "
+                "and nothing says so"
+            ),
+            confidence=LIKELY,
+            sites=sites,
+        )
+        for sites in by_file.values()
+    ]
 
 
 def swallowed_failures(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
@@ -136,7 +166,7 @@ def swallowed_failures(graph: Graph, root: Path, blind: Blindspot) -> List[Found
     Not reported: a handler that logs, re-raises, records the failure, or
     returns something naming it. Only the ones that vanish.
     """
-    found: List[Found] = []
+    sites: List[Site] = []
     for path, relative in _sources(root):
         lines = list(_lines(path))
         for number, line in enumerate(lines, start=1):
@@ -159,21 +189,28 @@ def swallowed_failures(graph: Graph, root: Path, blind: Blindspot) -> List[Found
             ):
                 continue
             if said in ("pass", "continue", "pass  # noqa", "..."):
-                found.append(
-                    Found(
-                        pattern="swallowed failure",
-                        where=relative,
-                        line=number,
-                        what=line.strip()[:70],
-                        why=(
-                            "the caller cannot tell this from success; a failure "
-                            "that leaves no trace is indistinguishable from the "
-                            "case never arising"
-                        ),
-                        confidence=LIKELY,
-                    )
+                sites.append(
+                    Site(where=relative, line=number, what=line.strip()[:70])
                 )
-    return found
+
+    # One finding per file: a module that discards errors in four places has
+    # one habit, and a reader fixes the habit.
+    by_file: Dict[str, List[Site]] = {}
+    for site in sites:
+        by_file.setdefault(site.where, []).append(site)
+    return [
+        Found(
+            pattern="swallowed failure",
+            why=(
+                "the caller cannot tell this from success; a failure that "
+                "leaves no trace is indistinguishable from the case never "
+                "arising"
+            ),
+            confidence=LIKELY,
+            sites=group,
+        )
+        for group in by_file.values()
+    ]
 
 
 def unresolvable_reach(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
@@ -187,20 +224,29 @@ def unresolvable_reach(graph: Graph, root: Path, blind: Blindspot) -> List[Found
     Not reported: dynamic access inside tests, where it is usually the subject
     rather than an accident.
     """
+    # Grouped by the name reached: five call sites reaching `why_not` are one
+    # fact about `why_not`, and the reader wants the name, not five lines.
+    by_name: Dict[str, List[Site]] = {}
+    known: Dict[str, int] = {}
+    for entry in blind.found:
+        if "test" in entry.path:
+            continue
+        by_name.setdefault(entry.name, []).append(
+            Site(where=entry.path, line=entry.line, what=entry.name)
+        )
+        known[entry.name] = max(known.get(entry.name, 0), len(entry.candidates))
+
     return [
         Found(
             pattern="reached by name only",
-            where=entry.path,
-            line=entry.line,
-            what=f"{entry.name!r} — {len(entry.candidates)} candidate(s)",
             why=(
-                "no resolver follows this, so every structural answer about "
-                f"{entry.name!r} is missing this call site"
+                f"no resolver follows this, so every structural answer about "
+                f"{name!r} is missing {len(sites)} call site(s)"
             ),
-            confidence=CLEAR if entry.candidates else WORTH_A_LOOK,
+            confidence=CLEAR if known.get(name) else WORTH_A_LOOK,
+            sites=sites,
         )
-        for entry in blind.found
-        if "test" not in entry.path
+        for name, sites in by_name.items()
     ]
 
 
@@ -217,7 +263,7 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
     too, so what remains is genuinely unreferenced.
     """
     reachable_by_name = {entry.name for entry in blind.found}
-    found: List[Found] = []
+    by_file: Dict[str, List[Site]] = {}
     for node in graph.nodes.values():
         if graph.referenced_by(node.id):
             continue
@@ -229,20 +275,22 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
             continue  # something reaches it by name; the graph just cannot see
         if node.container:
             continue  # a method may be reached through its class
-        found.append(
-            Found(
-                pattern="nothing refers to this",
-                where=node.path,
-                line=node.line + 1,
-                what=node.qualified,
-                why=(
-                    "carried and maintained while contributing nothing, and no "
-                    "test reaches it, so a wrong change here is invisible"
-                ),
-                confidence=WORTH_A_LOOK,
-            )
+        by_file.setdefault(node.path, []).append(
+            Site(where=node.path, line=node.line + 1, what=node.qualified)
         )
-    return found
+
+    return [
+        Found(
+            pattern="nothing refers to this",
+            why=(
+                "carried and maintained while contributing nothing, and no test "
+                "reaches it, so a wrong change here is invisible"
+            ),
+            confidence=WORTH_A_LOOK,
+            sites=sites,
+        )
+        for sites in by_file.values()
+    ]
 
 
 PATTERNS: Tuple[Tuple[str, Callable], ...] = (
