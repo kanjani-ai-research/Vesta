@@ -38,10 +38,21 @@ logger = logging.getLogger("vesta.sidecar")
 # Imported at module scope so tool annotations resolve. `mcp` is an optional
 # dependency, so its absence must not stop the rest of the package importing —
 # the CLI and the library work without a sidecar.
-try:
-    from mcp.server.fastmcp import Context
+# `mcp` renamed FastMCP to MCPServer in 2.0. Both are supported rather than
+# pinning to one major: pinning back strands the sidecar on an old release, and
+# pinning forward excludes anyone who already has 1.x installed. The two expose
+# the same shape — a name, instructions, a `tool` decorator and `run`.
+try:  # mcp >= 2
+    # `mcp.server.mcpserver.context`, not `mcp.server.context`. Both exist in
+    # 2.0 and only this one is the class the tool decorator matches against —
+    # annotating with the other makes it try to put the context in the tool's
+    # JSON schema, which pydantic then refuses to generate.
+    from mcp.server.mcpserver.context import Context
 except ImportError:  # pragma: no cover - depends on what is installed
-    Context = Any  # type: ignore[assignment,misc]
+    try:  # mcp 1.x
+        from mcp.server.fastmcp import Context
+    except ImportError:
+        Context = Any  # type: ignore[assignment,misc]
 
 async def project_of(context) -> Optional[Path]:
     """Which project the host is working on, right now.
@@ -255,9 +266,12 @@ def _quieten() -> None:
 
 def build_server():
     """The MCP server, built lazily so the package imports without `mcp`."""
-    from mcp.server.fastmcp import FastMCP
+    try:  # mcp >= 2
+        from mcp.server.mcpserver import MCPServer as _Server
+    except ImportError:  # mcp 1.x
+        from mcp.server.fastmcp import FastMCP as _Server
 
-    server = FastMCP(
+    server = _Server(
         "vesta",
         instructions=(
             "Supplies computer-science theory that is not in the repository — "

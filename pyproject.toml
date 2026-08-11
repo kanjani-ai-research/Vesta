@@ -1,3 +1,11 @@
+# Only `vesta` is a package. Stated explicitly because setuptools' flat-layout
+# autodiscovery treats every top-level directory as one, and a run that left a
+# `var/` or `theory/` directory beside the source made the project refuse to
+# install — "Multiple top-level packages discovered". A working tree should not
+# be able to break packaging.
+[tool.setuptools]
+packages = ["vesta"]
+
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -34,8 +42,11 @@ theory = [
   "sentence-transformers>=3.0",  # embeddings; without it retrieval is lexical only
 ]
 # Running as a sidecar to a coding agent over MCP.
+# Both majors work: 2.0 renamed FastMCP to MCPServer and moved the injected
+# Context class, and `sidecar.py` accommodates each. Verified against 1.28 and
+# 2.0 over a real client.
 sidecar = [
-  "mcp>=1.0",
+  "mcp>=1.9",
 ]
 
 [project.scripts]
