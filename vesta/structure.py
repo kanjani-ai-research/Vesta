@@ -654,6 +654,9 @@ class Local:
         )
 
 
+_LOCAL: List[Optional["Local"]] = [None]
+
+
 def best_backend(base_url: str = "http://localhost:8000", for_reading: bool = False) -> Any:
     """Whichever way into Pragmatos is actually open.
 
@@ -662,7 +665,13 @@ def best_backend(base_url: str = "http://localhost:8000", for_reading: bool = Fa
     credentials, and requiring them would send a caller to HTTP (or to nothing)
     for a database sitting on the same disk.
     """
-    local = Local()
+    # Held, not rebuilt. `Local` caches the embedding encoder, and constructing
+    # a new one per call threw that cache away every time — a warm consultation
+    # reloaded model weights and took 3.5s where it should take a fraction of
+    # that. The instance carries no per-request state, so sharing it is safe.
+    local = _LOCAL[0]
+    if local is None:
+        local = _LOCAL[0] = Local()
     if local.can_read if for_reading else local.is_available:
         return local
     return Pragmatos(base_url)

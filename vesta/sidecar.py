@@ -287,10 +287,17 @@ def build_server():
             intent: The build this is for, used to pick the corpus.
             corpus: An explicit corpus id, if you know it.
         """
-        return _consultation(question, intent, corpus, await project_of(context))
+        project = await project_of(context)
+        # Also off the loop: the first consultation loads embedding weights,
+        # which is seconds of blocking work inside a C extension.
+        import anyio
+
+        return await anyio.to_thread.run_sync(
+            _consultation, question, intent, corpus, project
+        )
 
     @server.tool()
-    def assess(intent: str, search: bool = True) -> str:
+    async def assess(intent: str, search: bool = True) -> str:
         """Judge whether a task is settled work or needs theory first.
 
         Defaults hard toward "settled": naming a framework usually means the
@@ -302,7 +309,9 @@ def build_server():
             intent: What is to be built, in a sentence.
             search: Whether to check the literature. Costs a search.
         """
-        return _judgement(intent, search)
+        import anyio
+
+        return await anyio.to_thread.run_sync(_judgement, intent, search)
 
     @server.tool()
     async def learn(intent: str, into: str = "", context: Context = None) -> str:
@@ -316,7 +325,16 @@ def build_server():
             intent: What is to be built, in a sentence.
             into: Where to write. Defaults under ~/.vesta/theory.
         """
-        return _acquisition(intent, into or None, await project_of(context))
+        project = await project_of(context)
+        # Off the event loop. Acquisition takes minutes — searching, then a
+        # model reading every result — and running it inline would block the
+        # server from answering anything at all, including the protocol
+        # messages that keep the session alive.
+        import anyio
+
+        return await anyio.to_thread.run_sync(
+            _acquisition, intent, into or None, project
+        )
 
     return server
 

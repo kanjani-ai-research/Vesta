@@ -370,3 +370,16 @@ def test_a_current_name_is_not_mistaken_for_an_orphan(tmp_path: Path):
     assert _is_current_scheme("theory.pub.causum.thing-0f26fad7")
     assert not _is_current_scheme("theory.local.implement-a-t-way-covering-array")
     assert not _is_current_scheme("theory-conservative-extensions")
+
+
+def test_the_local_backend_is_held_not_rebuilt():
+    """It caches the embedding encoder, and rebuilding per call threw that
+    cache away: a warm consultation reloaded model weights and took 3.5s
+    where it should take a fraction of that."""
+    from vesta.structure import Local, best_backend
+
+    first = best_backend(for_reading=True)
+    if not isinstance(first, Local):
+        pytest.skip("pragmatos is not installed")
+
+    assert best_backend(for_reading=True) is first
