@@ -343,8 +343,9 @@ def _touches(paths: List[str], project: Optional[Path], hops: int) -> str:
     if explained:
         lines.append("")
         lines.append(
-            "  ⓘ already explained in earlier sessions — call known() rather "
-            "than re-reading: " + ", ".join(sorted(set(explained))[:8])
+            "  \u24d8 already explained in earlier sessions — use this server's "
+            "\"known\" tool rather than re-reading: "
+            + ", ".join(sorted(set(explained))[:8])
         )
 
     # References that reach these definitions by name rather than by a path a
@@ -501,9 +502,9 @@ def _uses(name: str, project: Optional[Path]) -> str:
         if held:
             lines.append("")
             lines.append(
-                f"  ⓘ {len(held)} recorded account(s) of what {node.name} does and "
-                f"how it fails — call known({node.name!r}) instead of reading the "
-                "file to re-derive it."
+                f"  \u24d8 {len(held)} recorded account(s) of what {node.name} does "
+                f"and how it fails. Use this server's \"known\" tool with "
+                f"name={node.name!r} rather than reading the file to re-derive it."
             )
         lines.append("")
         lines.append(f"{node.qualified}  {node.path}:{node.line + 1}")
