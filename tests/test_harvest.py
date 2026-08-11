@@ -147,3 +147,32 @@ def test_a_path_the_graph_does_not_know_is_left_alone(code: Graph):
     from vesta.harvest import anchor
 
     assert "vendor/thing.py:12" in anchor("see vendor/thing.py:12", code)
+
+
+def test_a_stamp_is_written_once_and_not_re_anchored(code: Graph, tmp_path: Path, monkeypatch):
+    """The bug that made authority circular.
+
+    Re-stamping from the current code on every read meant a note always
+    described what the code looks like now, so nothing was ever superseded and
+    the check said "current" forever — which is the same as not checking.
+    """
+    import vesta.harvest as harvest
+
+    monkeypatch.setattr(harvest, "NOTES", tmp_path / "notes")
+    monkeypatch.setattr(harvest, "_HARVESTED", {})
+    calls = {"n": 0}
+    real = harvest.from_sessions
+
+    def counting_region(graph, node, root):
+        calls["n"] += 1
+        return ("m.py:1-9", f"hash-{calls['n']}")
+
+    monkeypatch.setattr("vesta.authority.bounded_region", counting_region)
+    t = transcript(tmp_path, ACCOUNT)
+
+    first = real(code, tmp_path, transcripts=[t])
+    harvest._HARVESTED.clear()
+    second = real(code, tmp_path, transcripts=[t])
+
+    # The second read must reuse the first stamp, not compute a new one.
+    assert first.notes[0].region_hash == second.notes[0].region_hash

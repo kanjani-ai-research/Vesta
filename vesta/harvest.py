@@ -90,6 +90,13 @@ class Note(BaseModel):
     text: str
     session: str = ""
     at: float = 0.0
+    # The span the claim was about, and its hash at the moment the claim was
+    # made. A timestamp says when somebody looked; this says *at what*, which
+    # is the only thing that makes a later check possible. A live agent
+    # verified every note it was given because nothing here could tell it
+    # whether the ground had moved.
+    region: str = ""
+    region_hash: str = ""
 
     def describe(self) -> str:
         when = time.strftime("%Y-%m-%d", time.localtime(self.at)) if self.at else ""
@@ -200,6 +207,9 @@ def from_sessions(
 
     found = Harvest()
     seen: Set[Tuple[str, str]] = set()
+    # Stamps already written for this repository, so a claim keeps the region
+    # it was first seen against rather than being re-anchored to today's code.
+    _stamped: Dict[str, Tuple[str, str]] = _load_stamps(root)
 
     for path in paths:
         try:
@@ -231,6 +241,23 @@ def from_sessions(
                         if key in seen:
                             continue
                         seen.add(key)
+                        # Stamped once, at first sight, and never recomputed.
+                        #
+                        # Re-stamping from the current code on every read made
+                        # the check circular: a note always described what the
+                        # code looks like now, so nothing was ever superseded
+                        # and the whole mechanism said "current" forever. What
+                        # a claim was made about is a fact about the past, and
+                        # the only way to hold it is to write it down the first
+                        # time and leave it alone.
+                        region, digest = _stamped.get(node) or ("", "")
+                        if not digest:
+                            from .authority import bounded_region
+
+                            region, digest = bounded_region(
+                                graph, graph.nodes[node], root
+                            )
+                            _stamped[node] = (region, digest)
                         found.notes.append(
                             Note(
                                 node=node,
@@ -239,12 +266,41 @@ def from_sessions(
                                 text=passage,
                                 session=path.stem,
                                 at=stamp,
+                                region=region,
+                                region_hash=digest,
                             )
                         )
 
+    _save_stamps(root, _stamped)
     if not since:
         _HARVESTED[str(root)] = (state, found)
     return found
+
+
+def _stamp_file(root: Path) -> Path:
+    import hashlib
+
+    NOTES.mkdir(parents=True, exist_ok=True)
+    return NOTES / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}-stamps.json"
+
+
+def _load_stamps(root: Path) -> Dict[str, Tuple[str, str]]:
+    path = _stamp_file(root)
+    if not path.is_file():
+        return {}
+    try:
+        return {k: tuple(v) for k, v in json.loads(path.read_text(encoding="utf-8")).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_stamps(root: Path, stamps: Dict[str, Tuple[str, str]]) -> None:
+    try:
+        _stamp_file(root).write_text(
+            json.dumps({k: list(v) for k, v in stamps.items()}), encoding="utf-8"
+        )
+    except OSError:
+        pass
 
 
 def _place(graph: Graph, cited: str, line: int) -> Optional[str]:

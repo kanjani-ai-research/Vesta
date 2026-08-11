@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 from . import maturity
 from .acquire import Search
 from .consult import consult as _consult
+from .authority import settle
 from .harvest import anchor, from_sessions, keep, recall_notes
 from .held import graph_for
 from .propagate import from_files, is_test
@@ -372,6 +373,9 @@ def _known(name: str, project: Optional[Path]) -> str:
     if not wanted:
         return f"project: {project}\nNo definition named {name!r} in the graph."
 
+    with quiet_stdout():
+        standing = settle(graph, harvest.notes, project)
+
     lines = [f"project: {project}", harvest.describe(), ""]
     said = False
     # A budget across the whole answer rather than a cut per note. Truncating
@@ -394,7 +398,18 @@ def _known(name: str, project: Optional[Path]) -> str:
                 )
                 break
             when = time.strftime("%Y-%m-%d", time.localtime(note.at))
+            # Whether the claim still speaks for the code. A live agent
+            # verified every note it was given, correctly, because nothing told
+            # it whether the ground had moved — and verification costs more
+            # than the note saves.
+            stands = standing.get(id(note))
+            mark = (
+                "✓ current" if stands and stands.authoritative
+                else "⚠ superseded" if stands and stands.state == "moved"
+                else "? unverified"
+            )
             lines.append("")
+            lines.append(f"  {mark} — {stands.region if stands else note.region}")
             # Citations rewritten to paths this repository actually has, so a
             # reader following one arrives somewhere.
             lines.append(f"  [{when}] {anchor(note.text, graph)}")
@@ -409,8 +424,11 @@ def _known(name: str, project: Optional[Path]) -> str:
             "has written down what it does."
         )
     lines.append(
-        "These are claims an agent made while reading the code, not the code "
-        "itself. They can be wrong and they can be stale."
+        "✓ current means the exact lines the claim was made about are unchanged "
+        "since — re-reading them will not tell you anything new. ⚠ superseded "
+        "means that region has been edited and the claim may no longer hold; "
+        "verify those. A current claim can still be a wrong claim: currency is "
+        "about the code moving, not about the reasoning being sound."
     )
     return "\n".join(lines)
 
