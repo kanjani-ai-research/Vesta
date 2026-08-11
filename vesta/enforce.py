@@ -292,8 +292,15 @@ def what_the_code_says(
     if not scored:
         return ""
 
+    # Braces are stripped from the passages. The prompt is formatted again
+    # downstream by the extractor, so a docstring containing an f-string —
+    # which this repository's own docstrings do — makes it read `{node.name}`
+    # as a placeholder and fail the whole derivation. The failure surfaced as
+    # "no check could be derived" for a rule the repository describes plainly,
+    # which is the least informative way a bug could present.
     return "\n\n".join(
-        f"    from {where}:\n    {said}" for _, where, said in scored[:limit]
+        f"    from {where}:\n    {said}".replace("{", "(").replace("}", ")")
+        for _, where, said in scored[:limit]
     )
 
 
@@ -329,14 +336,17 @@ def derive_check(
         return None
 
     async def run():
-        return await extract(
-            Check,
-            DERIVING.format(
-                rule=rule.stated or rule.text,
-                said=rule.text[:600],
-                vocabulary=vocabulary or "    (none found)",
-            ),
+        # Substituted by replacement, not by `format`. The passages come from
+        # source, and source contains braces — an f-string in a docstring made
+        # `format` read `{node.name}` as a placeholder and fail the whole
+        # derivation, which surfaced as "no check could be derived" for a rule
+        # whose subject the repository describes plainly.
+        prompt = (
+            DERIVING.replace("{rule}", rule.stated or rule.text)
+            .replace("{said}", rule.text[:600])
+            .replace("{vocabulary}", vocabulary or "    (none found)")
         )
+        return await extract(Check, prompt)
 
     try:
         return asyncio.run(run())
