@@ -576,6 +576,28 @@ def _shape(project: Optional[Path]) -> str:
     return "\n".join(lines)
 
 
+def _not_ready(project: Path) -> str:
+    """What to say when nothing has been built for this project yet.
+
+    Never build inside a tool call. Resolving a tree takes ten to fifteen
+    seconds, and an agent waiting that long for an answer it did not know it
+    wanted has been made worse off — the same rule that governs injection.
+    Preparation is started and the answer says so.
+    """
+    from .ready import prepare, readiness
+
+    state = readiness(project)
+    if state.can_answer:
+        return ""
+    prepare(project)
+    return (
+        f"project: {project}\n"
+        f"{state.describe()}. Nothing is being claimed about this repository "
+        "yet; preparation runs in the background and this will answer once it "
+        "finishes."
+    )
+
+
 def _defects(project: Optional[Path], limit: int) -> str:
     """Things worth fixing, found without anybody asking.
 
@@ -585,6 +607,10 @@ def _defects(project: Optional[Path], limit: int) -> str:
     """
     if project is None:
         return "Could not tell which project this is."
+
+    waiting = _not_ready(project)
+    if waiting:
+        return waiting
 
     with quiet_stdout():
         graph = graph_for(project, trust_for=300)
@@ -636,6 +662,10 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
     """
     if project is None:
         return "Could not tell which project this is."
+
+    waiting = _not_ready(project)
+    if waiting:
+        return waiting
 
     from .rules import from_sessions, judge
 
