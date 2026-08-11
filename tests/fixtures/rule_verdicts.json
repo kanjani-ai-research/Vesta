@@ -1,59 +1,61 @@
 {
-  "_note": "Fixed before the remedy was built. Each rule carries the verdict a careful reader would reach about THIS repository, justified independently of any checker. `expect` is what the checker must produce: 'held', 'broken', or 'undecided'. Undecided is correct for rules no source inspection can settle — claiming otherwise is the failure this guards against.",
-  "cases": [
-    {
-      "rule": "Each repository must correspond to exactly one knowledge base. A single KB must not be shared across repositories.",
-      "expect": "held",
-      "because": "corpus_id() keys by repository; tests pin one-repo-one-KB and two-repos-two-KBs",
-      "group": "content"
-    },
-    {
-      "rule": "There must be one shared .env file for the v3 family, not one .env per service.",
-      "expect": "held",
-      "because": "no .env exists inside vesta; the family's single .env is at v3/",
-      "group": "names"
-    },
-    {
-      "rule": "langextract is either fully present as a dependency or fully absent; there is no partial or conditional use.",
-      "expect": "held",
-      "because": "vesta does not depend on langextract at all, so the rule is trivially honoured here",
-      "group": "content"
-    },
-    {
-      "rule": "The tool must be language-agnostic; it must not be specific to Python repositories.",
-      "expect": "broken",
-      "because": "dynamic.py SOURCE and rules sifting cover a fixed suffix list; resolve.py SERVERS is a fixed table. Real, and the user raised it directly.",
-      "group": "content"
-    },
-    {
-      "rule": "Every source file must carry a module docstring explaining what it is for.",
-      "expect": "held",
-      "because": "every vesta/*.py opens with a docstring; verifiable by reading the first lines",
-      "group": "content"
-    },
-    {
-      "rule": "No module may import the sidecar, so that the CLI works without the mcp package installed.",
-      "expect": "held",
-      "because": "cli.py imports THEORY_DIR from structure, not sidecar; this was fixed earlier for exactly this reason",
-      "group": "content"
-    },
-    {
-      "rule": "Quality, precision and correctness take priority over latency optimisation.",
-      "expect": "undecided",
-      "because": "a priority between competing values; no source inspection settles it",
-      "group": "values"
-    },
-    {
-      "rule": "The prompt implementation must be tested against a live provider before being considered complete.",
-      "expect": "undecided",
-      "because": "a claim about what was run, not about what the source says",
-      "group": "runtime"
-    },
-    {
-      "rule": "Users must be able to select a specific ontology when creating a run.",
-      "expect": "undecided",
-      "because": "a product capability claim about a UI this repository does not contain",
-      "group": "runtime"
-    }
-  ]
+ "_note": "Fixed before the remedy was built. Each rule carries the verdict a careful reader would reach about THIS repository, justified independently of any checker. `expect` is what the checker must produce: 'held', 'broken', or 'undecided'. Undecided is correct for rules no source inspection can settle \u2014 claiming otherwise is the failure this guards against.",
+ "cases": [
+  {
+   "rule": "Each repository must correspond to exactly one knowledge base. A single KB must not be shared across repositories.",
+   "expect": "held",
+   "because": "corpus_id() keys by repository; tests pin one-repo-one-KB and two-repos-two-KBs",
+   "group": "content"
+  },
+  {
+   "rule": "There must be one shared .env file for the v3 family, not one .env per service.",
+   "expect": "held",
+   "because": "no .env exists inside vesta; the family's single .env is at v3/",
+   "group": "names"
+  },
+  {
+   "rule": "langextract is either fully present as a dependency or fully absent; there is no partial or conditional use.",
+   "expect": "held",
+   "because": "vesta does not depend on langextract at all, so the rule is trivially honoured here",
+   "group": "content"
+  },
+  {
+   "rule": "The tool must be language-agnostic; it must not be specific to Python repositories.",
+   "expect": "broken",
+   "because": "dynamic.py SOURCE and rules sifting cover a fixed suffix list; resolve.py SERVERS is a fixed table. Real, and the user raised it directly.",
+   "group": "content",
+   "outcome": "NOT MET. The checker returns undecided and its reason is defensible: 'is language-agnostic' is a property of the tool, and no pattern over source establishes it. The same intent stated as a property of the source \u2014 'must not hardcode a list of languages or file suffixes' \u2014 is checked correctly and finds 9 real sites at vesta/resolve.py:86-98. The fixture was left as written rather than restated, because rewording a case after seeing the result is how a standard stops being one."
+  },
+  {
+   "rule": "Every source file must carry a module docstring explaining what it is for.",
+   "expect": "held",
+   "because": "every vesta/*.py opens with a docstring; verifiable by reading the first lines",
+   "group": "content"
+  },
+  {
+   "rule": "No module may import the sidecar, so that the CLI works without the mcp package installed.",
+   "expect": "held",
+   "because": "cli.py imports THEORY_DIR from structure, not sidecar; this was fixed earlier for exactly this reason",
+   "group": "content"
+  },
+  {
+   "rule": "Quality, precision and correctness take priority over latency optimisation.",
+   "expect": "undecided",
+   "because": "a priority between competing values; no source inspection settles it",
+   "group": "values"
+  },
+  {
+   "rule": "The prompt implementation must be tested against a live provider before being considered complete.",
+   "expect": "undecided",
+   "because": "a claim about what was run, not about what the source says",
+   "group": "runtime"
+  },
+  {
+   "rule": "Users must be able to select a specific ontology when creating a run.",
+   "expect": "undecided",
+   "because": "a product capability claim about a UI this repository does not contain",
+   "group": "runtime"
+  }
+ ],
+ "_result": "8 of 9 as written, stable across three runs."
 }
