@@ -217,6 +217,37 @@ def _used(args: argparse.Namespace) -> int:
     return 0
 
 
+def _status(args: argparse.Namespace) -> int:
+    """Whether vesta can contribute here yet, and what it holds.
+
+    Exists so a user who sees nothing happening can find out why, rather than
+    concluding the tool is broken.
+    """
+    from .harvest import from_sessions
+    from .held import graph_for
+    from .ready import prepare, readiness
+
+    where = Path(args.root).expanduser().resolve()
+    state = readiness(where)
+    _say(f"{where}")
+    _say(f"  {state.describe()}")
+
+    if state.can_answer and state.definitions:
+        graph = graph_for(where, trust_for=300)
+        harvest = from_sessions(graph, where)
+        _say(f"  {graph.describe()}")
+        _say(f"  {harvest.describe()}")
+        if graph.holes:
+            _say(f"  {len(graph.holes)} file(s) the resolver could not read")
+    elif not state.can_answer:
+        if args.prepare:
+            prepare(where)
+            _say("  preparation started; it runs in the background")
+        else:
+            _say("  run `vesta status --prepare` to start building")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vesta",
@@ -285,6 +316,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # the configured one under plain `setdefault`, and the failure surfaces as
     # "API key is invalid" about a key the user never chose to use.
     _load_env(override=True)
+
+    status = sub.add_parser("status", help="whether vesta can help here yet")
+    status.add_argument("root", nargs="?", default=".")
+    status.add_argument("--prepare", action="store_true", help="start building if nothing is built")
+    status.set_defaults(run=_status)
 
     used = sub.add_parser("used", help="what the sidecar was asked, and when")
     used.add_argument("--since", type=float, default=0, help="minutes to look back")

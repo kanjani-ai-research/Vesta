@@ -65,6 +65,12 @@ class Readiness(BaseModel):
         return self.state == READY
 
     def describe(self) -> str:
+        if self.state == READY and not self.definitions:
+            # Built, and there was nothing to build from. A new project is not
+            # broken and not preparing; it simply has no structure yet, and
+            # saying "ready" about an empty graph invites a user to wonder why
+            # nothing is ever offered.
+            return "nothing to describe yet — this project has no definitions"
         if self.state == READY:
             return f"ready — {self.definitions} definition(s) resolved"
         if self.state == PREPARING:
