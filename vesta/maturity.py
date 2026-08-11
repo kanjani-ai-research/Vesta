@@ -271,11 +271,24 @@ def _query_for(name: str, intent: str) -> str:
     systems — a real literature, and the wrong one, because "knowledge base"
     is common and "near-duplicate" is not. The discriminating words are the
     rare ones, and they tend to arrive late in a sentence.
+
+    **Adjacent words are kept together, because a technical term is a phrase.**
+    Ranking words individually pulled "array" out of "covering array" — five
+    letters against "guaranteed" at ten — and the surviving query, "covering
+    generator guaranteed coverage", returned generator warranties from a
+    hardware retailer. Length is a poor proxy for rarity exactly where a short
+    word is the domain noun, so a word immediately beside a chosen one is
+    carried with it rather than judged on its own.
     """
     words = [
         word
         for word in re.findall(r"[a-z0-9-]+", intent.lower())
         if word not in SAYS_NOTHING and len(word) > 2 and word != name
+        # Dropped outright rather than merely ranked last. A brief with few
+        # content words fills its budget regardless of order, so "build an
+        # efficient reliable robust parser for arbitrary grammars" kept all four
+        # qualifiers and searched for none of the subject.
+        and _specificity(word) > 0
     ]
     # Rarest first, ties broken by the order they were written in, so the query
     # is stable for a given brief. A hyphenated or long word is a specific one;
@@ -285,20 +298,63 @@ def _query_for(name: str, intent: str) -> str:
         key=lambda w: (-_specificity(w), words.index(w)),
     )
     keep = QUERY_WORDS if name else QUERY_WORDS + 1
-    chosen = ranked[:keep]
+
+    # Take the strongest words, then pull in whatever sits immediately beside
+    # them: "covering" without "array" is a different subject.
+    chosen: List[str] = []
+    taken: set = set()
+    for word in ranked:
+        if len(chosen) >= keep:
+            break
+        for index, spelled in enumerate(words):
+            if spelled != word or index in taken:
+                continue
+            taken.add(index)
+            chosen.append(spelled)
+            # A neighbour is carried only if it is worth carrying. Taking one
+            # unconditionally reintroduced exactly the words the ranking had
+            # just rejected: "generator" dragged "guaranteed" back in, scored
+            # zero moments earlier for narrowing nothing.
+            neighbour = index + 1
+            if (
+                len(chosen) < keep
+                and neighbour < len(words)
+                and neighbour not in taken
+                and _specificity(words[neighbour]) > 0
+            ):
+                taken.add(neighbour)
+                chosen.append(words[neighbour])
+            break
     # Written back in the brief's own order: a query reads as a phrase to a
     # search engine, and scrambling it costs matches on multi-word terms.
     chosen.sort(key=words.index)
     return " ".join([name, *chosen] if name else chosen)
 
 
+# Long words that narrow nothing. Length stands in for rarity well enough for
+# most of a brief, and fails hardest on ordinary English qualifiers: on length
+# alone "guaranteed" outranks "array", and a query that spent two slots on it
+# returned generator warranties from a hardware retailer. Listing the offenders
+# is cruder than a frequency table and needs no corpus to maintain.
+NARROWS_NOTHING = {
+    "guaranteed", "efficient", "efficiently", "correct", "correctly", "proper",
+    "properly", "robust", "reliable", "reliably", "scalable", "performant",
+    "simple", "complete", "completely", "arbitrary", "generic", "general",
+    "custom", "various", "multiple", "different", "existing", "standard",
+    "appropriate", "suitable", "necessary", "possible", "available",
+}
+
+
 def _specificity(word: str) -> int:
     """How much a word narrows a search, approximately.
 
-    Length and hyphenation stand in for rarity. It is a proxy and it is a good
-    enough one to separate "near-duplicate" from "base" without shipping a
-    frequency table that would have to be maintained per language.
+    Length and hyphenation stand in for rarity. It is a proxy, and a good enough
+    one to separate "near-duplicate" from "base" without shipping a frequency
+    table that would have to be maintained per language — provided the ordinary
+    qualifiers that are long *and* useless are struck out first.
     """
+    if word in NARROWS_NOTHING:
+        return 0
     return len(word) + (4 if "-" in word else 0)
 
 

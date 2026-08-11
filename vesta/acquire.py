@@ -66,6 +66,13 @@ _ENV_CEILING = 4
 # connections. Several queries in a run is enough to trip it — which then reads
 # as "arXiv has nothing", the one conclusion this must never draw by accident.
 ARXIV_DELAY = 3.0
+# What to do when it says no anyway. The published interval is three seconds and
+# observing it is still not sufficient under a burst — several queries in one
+# `learn` trips a 429 regardless. Backing off and retrying costs seconds; not
+# retrying costs the source, and "arXiv returned nothing" is indistinguishable
+# from "this field has no preprints" to everything downstream.
+ARXIV_RETRIES = 2
+ARXIV_BACKOFF = 8.0
 _last_arxiv = [0.0]
 
 
@@ -79,13 +86,20 @@ def _arxiv_get(url: str) -> bytes:
     """
     import time
 
-    waited = time.monotonic() - _last_arxiv[0]
-    if _last_arxiv[0] and waited < ARXIV_DELAY:
-        time.sleep(ARXIV_DELAY - waited)
-    try:
-        return _get(url, {"User-Agent": "vesta/0.1 (research acquisition)"})
-    finally:
-        _last_arxiv[0] = time.monotonic()
+    for attempt in range(ARXIV_RETRIES + 1):
+        waited = time.monotonic() - _last_arxiv[0]
+        if _last_arxiv[0] and waited < ARXIV_DELAY:
+            time.sleep(ARXIV_DELAY - waited)
+        try:
+            return _get(url, {"User-Agent": "vesta/0.1 (research acquisition)"})
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 or attempt == ARXIV_RETRIES:
+                raise
+            logger.info("arxiv is rate limiting; waiting %.0fs", ARXIV_BACKOFF)
+            time.sleep(ARXIV_BACKOFF)
+        finally:
+            _last_arxiv[0] = time.monotonic()
+    raise urllib.error.URLError("arxiv kept rate limiting")
 
 
 def _load_env(start: Optional[str] = None, override: bool = False) -> None:

@@ -133,6 +133,12 @@ PUBLISHED = "pub"
 # environment variable is not finished.
 VESTA_HOME = Path.home() / ".vesta"
 
+# Where acquired readings are written. Absolute, and beside the corpora built
+# from them: theory is about a subject, not about the directory a command was
+# run from, and a relative default put the two halves of one run in different
+# places.
+THEORY_DIR = VESTA_HOME / "theory"
+
 
 def _ensure_data_dir() -> Path:
     """Point Pragmatos somewhere writable, unless the user has chosen.

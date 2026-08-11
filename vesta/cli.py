@@ -23,7 +23,7 @@ from .acquire import Search, _load_env
 from .consult import known
 from .graph import build
 from .propagate import from_files
-from .structure import Pragmatos, _slug, best_backend, structure
+from .structure import THEORY_DIR, Pragmatos, _slug, best_backend, structure
 
 
 def _say(text: str = "") -> None:
@@ -111,7 +111,12 @@ def _learn(args: argparse.Namespace) -> int:
         _say("Nothing to look up.")
         return 0
 
-    into = Path(args.into)
+    # Absolute by default. A relative default wrote readings into whatever
+    # directory the command happened to be run from — `/tmp/theory` on a cold
+    # start — while the corpus was built under the home directory, so the two
+    # halves of one run landed in different places and the corpus came out
+    # empty. Acquired theory is about a subject, not about a working directory.
+    into = Path(args.into).expanduser() if args.into else THEORY_DIR
     for aspect in aspects:
         query = aspect.would_search[0]
         found = search.for_(query)
@@ -193,7 +198,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     learn = sub.add_parser("learn", help="acquire the theory a brief needs")
     learn.add_argument("intent")
-    learn.add_argument("--into", default="theory", help="where to write readings")
+    learn.add_argument(
+        "--into",
+        default="",
+        help="where to write readings (default: ~/.vesta/theory)",
+    )
     learn.add_argument("--show", type=int, default=5)
     learn.add_argument(
         "--only-novel",

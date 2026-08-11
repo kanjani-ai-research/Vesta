@@ -32,15 +32,9 @@ from .acquire import Search
 from .consult import anywhere as _anywhere
 from .consult import consult as _consult
 from .consult import corpus_for
-from .structure import best_backend, structure
+from .structure import THEORY_DIR, best_backend, structure
 
 logger = logging.getLogger("vesta.sidecar")
-
-# Where corpora are written when a caller does not say. Under the user's home
-# rather than the repository, because acquired theory is about a subject, not
-# about one checkout of one project.
-THEORY_DIR = Path.home() / ".vesta" / "theory"
-
 
 @contextlib.contextmanager
 def quiet_stdout():

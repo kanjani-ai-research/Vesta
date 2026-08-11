@@ -16,6 +16,7 @@ from vesta.maturity import (
     UNCLEAR,
     UNDETERMINED,
     Aspect,
+    _query_for,
     judge,
     read,
 )
@@ -169,3 +170,33 @@ def test_every_verdict_carries_its_reasons():
 
     assert result.aspects
     assert all(a.because for a in result.aspects)
+
+
+# ── Queries that survived a cold start ───────────────────────────────────
+
+
+def test_a_common_qualifier_does_not_outrank_a_domain_noun():
+    """Live: "guaranteed" (10 letters) beat "array" (5), and the query
+    "covering generator guaranteed coverage" returned generator warranties from
+    a hardware retailer."""
+    query = _query_for("generation", "implement a t-way covering array generator with guaranteed coverage")
+
+    assert "array" in query
+    assert "guaranteed" not in query
+
+
+def test_a_technical_phrase_is_not_split():
+    """"covering" without "array" is a different subject."""
+    query = _query_for("generation", "implement a t-way covering array generator with guaranteed coverage")
+
+    assert "covering array" in query
+
+
+def test_a_neighbour_is_only_carried_if_it_is_worth_carrying():
+    """Carrying neighbours unconditionally reintroduced the words the ranking
+    had just rejected."""
+    query = _query_for("", "build an efficient reliable robust parser for arbitrary grammars")
+
+    for useless in ("efficient", "reliable", "robust", "arbitrary"):
+        assert useless not in query
+    assert "parser" in query or "grammars" in query
