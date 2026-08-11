@@ -167,36 +167,6 @@ def corpora(pragmatos: Optional[Any] = None) -> List[str]:
         return []
 
 
-def here(
-    question: str,
-    repo: Optional[Any] = None,
-    pragmatos: Optional[Any] = None,
-    limit: int = PASSAGES,
-) -> Consultation:
-    """Ask this repository's knowledge base.
-
-    One repository, one knowledge base — so there is no search across corpora to
-    do. An earlier version asked every corpus on the machine and kept the best
-    score, which reached into unrelated projects: theory acquired for a compiler
-    is not evidence about a payments service, and a cross-project match is
-    surface similarity by definition.
-
-    Where this repository has no knowledge base yet, that is said plainly. It is
-    the signal to acquire, not a reason to answer from somebody else's work.
-    """
-    client = pragmatos or best_backend(for_reading=True)
-    corpus = corpus_for(repo)
-
-    if corpus not in corpora(client):
-        found = Consultation(question=question, corpus_id=corpus)
-        found.unavailable = (
-            "this repository has no knowledge base yet; `learn` would build one"
-        )
-        return found
-
-    return consult(question, corpus_id=corpus, pragmatos=client, limit=limit)
-
-
 def known(
     questions: Sequence[str],
     intent: str = "",

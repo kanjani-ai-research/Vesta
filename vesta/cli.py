@@ -266,6 +266,65 @@ def _status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rules(args: argparse.Namespace) -> int:
+    """What this repository's user has decided, and whether the code honours it.
+
+    Reachable because a survey found `enforce.against` referred to by nothing —
+    an entry point nobody could call is a feature nobody has.
+    """
+    from .enforce import against
+    from .held import graph_for
+    from .rules import from_sessions, judge
+
+    where = Path(args.root).expanduser().resolve()
+    found = from_sessions(where, read_everything=not args.quick)
+    if not args.quick:
+        found = judge(found)
+    _say(found.describe())
+
+    if not args.check:
+        for rule in found.standing[: args.show]:
+            _say(f"  {rule.describe()[:110]}")
+        if found.gaps:
+            _say("")
+            _say(f"{len(found.gaps)} rule(s) nothing can check yet:")
+            for gap in found.gaps[:5]:
+                _say(f"  {gap.describe()[:110]}")
+        return 0
+
+    verdict = against(found, graph_for(where), where)
+    _say("")
+    _say(verdict.describe())
+    for finding in verdict.broken:
+        _say("")
+        _say(f"✗ {finding.rule[:100]}")
+        _say(f"   you said: {finding.said[:90]}")
+        for site in finding.sites[: args.show]:
+            _say(f"      {site.describe()[:96]}")
+    return 0
+
+
+def _patterns(args: argparse.Namespace) -> int:
+    """Things worth fixing, found without being asked."""
+    from .held import graph_for
+    from .patterns import survey
+
+    where = Path(args.root).expanduser().resolve()
+    found = survey(graph_for(where), where)
+    _say(found.describe())
+
+    for name, items in found.by_pattern().items():
+        _say("")
+        _say(f"{name} ({len(items)})")
+        _say(f"  {items[0].why}")
+        for entry in items[: args.show]:
+            at = f"{entry.where}:{entry.line}" if entry.line else entry.where
+            _say(f"    {at}  {entry.what[:70]}")
+        if len(items) > args.show:
+            _say(f"    … and {len(items) - args.show} more")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vesta",
@@ -339,6 +398,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     status.add_argument("root", nargs="?", default=".")
     status.add_argument("--prepare", action="store_true", help="start building if nothing is built")
     status.set_defaults(run=_status)
+
+    rules = sub.add_parser("rules", help="what you have decided, and whether the code honours it")
+    rules.add_argument("root", nargs="?", default=".")
+    rules.add_argument("--check", action="store_true", help="check the code against them")
+    rules.add_argument("--quick", action="store_true", help="patterns only, no model")
+    rules.add_argument("--show", type=int, default=6)
+    rules.set_defaults(run=_rules)
+
+    patterns = sub.add_parser("patterns", help="things worth fixing, found unasked")
+    patterns.add_argument("root", nargs="?", default=".")
+    patterns.add_argument("--show", type=int, default=5)
+    patterns.set_defaults(run=_patterns)
 
     used = sub.add_parser("used", help="what the sidecar was asked, and when")
     used.add_argument("--since", type=float, default=0, help="minutes to look back")
