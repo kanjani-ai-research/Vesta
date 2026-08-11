@@ -66,7 +66,11 @@ def test_prose_citing_nothing_is_not_attached(code: Graph, tmp_path: Path):
 def test_a_citation_the_graph_cannot_place_is_counted(code: Graph, tmp_path: Path):
     """A large number means the graph and the transcripts disagree about the
     repository, which a caller should be able to see."""
-    said = "The logic in `vendor/unknown.py:12` handles this, as described here at length."
+    said = (
+        "The logic in `vendor/unknown.py:12` handles this case, and it matters "
+        "because the surrounding code assumes the vendor module has already "
+        "normalised its input before anything downstream reads it."
+    )
     got = from_sessions(code, tmp_path, transcripts=[transcript(tmp_path, said)])
 
     assert got.unplaced == 1
