@@ -453,12 +453,23 @@ def _known(name: str, project: Optional[Path]) -> str:
             "session. This is not a claim that it is simple — only that nobody "
             "has written down what it does."
         )
+    # What each mark licenses, stated as what it does and does not settle.
+    #
+    # An earlier version ended with "a current claim can still be a wrong
+    # claim", which is true and was the last thing an agent read before
+    # deciding to verify everything anyway. Hedging every note equally gives a
+    # reader no way to spend their effort well. The narrower thing is worth
+    # saying: the bytes are settled, the reasoning is not, and those call for
+    # different amounts of checking.
     lines.append(
-        "✓ current means the exact lines the claim was made about are unchanged "
-        "since — re-reading them will not tell you anything new. ⚠ superseded "
-        "means that region has been edited and the claim may no longer hold; "
-        "verify those. A current claim can still be a wrong claim: currency is "
-        "about the code moving, not about the reasoning being sound."
+        "\u2713 current: the exact lines this was written about are byte-identical "
+        "now, so re-reading them recovers the same text this was derived from. "
+        "What is not settled is whether the reasoning over that text was right "
+        "\u2014 so check the conclusions you are about to depend on, rather than "
+        "the code they describe.\n"
+        "\u26a0 superseded: that region has been edited since. Read it.\n"
+        "? unverified: nothing was recorded about what this described, so "
+        "nothing can be checked. Treat it as hearsay."
     )
     return "\n".join(lines)
 
