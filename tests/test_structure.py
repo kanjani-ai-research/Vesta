@@ -145,16 +145,51 @@ def test_a_complete_build_is_whole(tmp_path: Path):
     assert fake.built
     # Acquired here, so it says so: nothing this machine scraped may look
     # like something a publisher stood behind.
-    assert result.corpus_id == "theory.local.rank-documents"
+    # Keyed by repository, not by intent.
+    assert result.corpus_id.startswith("theory.local.")
 
 
-def test_theory_for_one_intent_is_its_own_corpus(tmp_path: Path):
-    """Paper abstracts and source files in one corpus answer each other's
-    queries. They are kept apart."""
-    a = structure(found(reading()), "rank documents", tmp_path / "a", pragmatos=Fake())
-    b = structure(found(reading()), "schedule work", tmp_path / "b", pragmatos=Fake())
+def test_one_repository_is_one_knowledge_base(tmp_path: Path):
+    """Two tasks in one project accumulate into one KB.
+
+    Keying by task would give a project a scatter of single-purpose corpora
+    that never accumulate: theory acquired for one piece of work would be
+    invisible to the next, which is the opposite of the point.
+    """
+    repo = tmp_path / "one-project"
+    repo.mkdir()
+    a = structure(found(reading()), "rank documents", tmp_path / "a", pragmatos=Fake(), repo=repo)
+    b = structure(found(reading()), "schedule work", tmp_path / "b", pragmatos=Fake(), repo=repo)
+
+    assert a.corpus_id == b.corpus_id
+
+
+def test_two_repositories_do_not_share_a_knowledge_base(tmp_path: Path):
+    """Theory acquired for a compiler is not evidence about a payments
+    service, and a query reaching across projects retrieves on surface
+    similarity alone."""
+    one, two = tmp_path / "one", tmp_path / "two"
+    one.mkdir(); two.mkdir()
+    a = structure(found(reading()), "x", tmp_path / "a", pragmatos=Fake(), repo=one)
+    b = structure(found(reading()), "x", tmp_path / "b", pragmatos=Fake(), repo=two)
 
     assert a.corpus_id != b.corpus_id
+
+
+def test_the_same_project_by_two_paths_is_one_knowledge_base(tmp_path: Path):
+    """A live client returned both `/private/tmp/x` and `/tmp/x` for one
+    directory. Treating those as two projects would split a KB in half."""
+    from vesta.structure import corpus_id
+
+    repo = tmp_path / "project"
+    repo.mkdir()
+    link = tmp_path / "linked"
+    try:
+        link.symlink_to(repo)
+    except OSError:
+        pytest.skip("symlinks are not available here")
+
+    assert corpus_id(repo) == corpus_id(link)
 
 
 # ── Asking ───────────────────────────────────────────────────────────────

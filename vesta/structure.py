@@ -163,17 +163,60 @@ def _slug(text: str) -> str:
     return kept[:48] or "intent"
 
 
-def corpus_id(intent: str, origin: str = LOCAL, publisher: str = "") -> str:
-    """The id of the corpus holding theory for an intent.
+def repository(start: Optional[Path | str] = None) -> Path:
+    """The project under analysis: the working directory, as the user set it.
+
+    **No detection, deliberately.** Two earlier attempts guessed — first by
+    shelling out to `git rev-parse`, then by walking up for a list of project
+    markers — and both were wrong in the same way. A marker list can never cover
+    every language, and a miss does not raise: it silently resolves to whichever
+    subdirectory the user happened to be in, so `src/parser` and `src/lexer`
+    become two knowledge bases for one project. The tool looks like it is
+    working while quietly fragmenting the thing it exists to accumulate.
+
+    The working directory is a decision the user already made, and every host
+    that runs this as a sidecar sets it. Honouring it exactly means the answer
+    is always explicable — change project by changing directory — and there is
+    no heuristic to be wrong.
+    """
+    where = Path(start).expanduser().resolve() if start else Path.cwd().resolve()
+    return where if where.is_dir() else where.parent
+
+
+def repository_name(start: Optional[Path | str] = None) -> str:
+    """A short, stable name for a repository.
+
+    The directory name carries meaning to a person; the hash of the full path
+    keeps two checkouts of the same project apart. Both, because a name nobody
+    recognises is unusable and a name that collides is wrong.
+    """
+    import hashlib
+
+    root = repository(start)
+    fingerprint = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:8]
+    return f"{_slug(root.name)}-{fingerprint}"
+
+
+def corpus_id(
+    repo: Optional[Path | str] = None, origin: str = LOCAL, publisher: str = ""
+) -> str:
+    """The id of the knowledge base for a repository.
+
+    **One repository, one knowledge base.** Pragmatos creates a KB each time it
+    builds, and keying those by *task* would give one repository a scatter of
+    single-purpose corpora that never accumulate — theory acquired for one piece
+    of work would be invisible to the next, which is the opposite of the point.
+    Keying by repository means a project's knowledge grows as it is worked on.
+
+    Two repositories must not share one, either: theory acquired for a compiler
+    is not evidence about a payments service, and a query that reaches across
+    projects retrieves on surface similarity alone.
 
     One definition, used by both the building side and the consulting side, so
     the two agree by construction: a name computed in two places is a name that
     eventually differs.
-
-    A published corpus carries who published it, because "governed" is a claim
-    somebody makes and a claim nobody can attribute is not worth much.
     """
-    subject = _slug(intent)
+    subject = repository_name(repo)
     if origin == PUBLISHED:
         return f"theory.{PUBLISHED}.{_slug(publisher) if publisher else 'unattributed'}.{subject}"
     return f"theory.{LOCAL}.{subject}"
@@ -532,6 +575,7 @@ def structure(
     into: Path | str,
     pragmatos: Optional[Any] = None,
     ontology: Optional[str] = None,
+    repo: Optional[Path | str] = None,
 ) -> Structured:
     """Write what was found and build a corpus over it.
 
@@ -540,9 +584,10 @@ def structure(
     person. Neither case is reported as success.
     """
     started = time.time()
-    # Acquired here, so it carries the local origin. Nothing this machine
-    # scraped may claim to be published.
-    identifier = corpus_id(intent)
+    # Keyed by repository, not by intent: one project, one knowledge base that
+    # accumulates. Acquired here, so it carries the local origin — nothing this
+    # machine scraped may claim to be published.
+    identifier = corpus_id(repo)
     written = write(found, into, query=intent)
     result = Structured(corpus_id=identifier, wrote=[str(p) for p in written])
 

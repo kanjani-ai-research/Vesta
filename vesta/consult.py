@@ -83,14 +83,14 @@ class Consultation(BaseModel):
         )
 
 
-def corpus_for(intent: str, origin: str = LOCAL, publisher: str = "") -> str:
-    """The corpus id acquisition would have written for an intent.
+def corpus_for(repo=None, origin: str = LOCAL, publisher: str = "") -> str:
+    """The id of the knowledge base for a repository.
 
     Delegates to the one definition in `structure` rather than rebuilding the
     string here: consulting and building must agree, and two implementations of
     a naming rule agree only until one of them changes.
     """
-    return corpus_id(intent, origin=origin, publisher=publisher)
+    return corpus_id(repo, origin=origin, publisher=publisher)
 
 
 def _cite(result: Dict[str, Any]) -> Citation:
@@ -108,9 +108,10 @@ def consult(
     corpus_id: str = "",
     pragmatos: Optional[Any] = None,
     limit: int = PASSAGES,
+    repo: Optional[Any] = None,
 ) -> Consultation:
     """Ask a corpus a question, and say plainly when it has no answer."""
-    corpus = corpus_id or corpus_for(intent or question)
+    corpus = corpus_id or corpus_for(repo)
     found = Consultation(question=question, corpus_id=corpus)
 
     client = pragmatos or best_backend(for_reading=True)
@@ -157,49 +158,34 @@ def corpora(pragmatos: Optional[Any] = None) -> List[str]:
         return []
 
 
-def anywhere(
+def here(
     question: str,
-    intent: str = "",
+    repo: Optional[Any] = None,
     pragmatos: Optional[Any] = None,
     limit: int = PASSAGES,
 ) -> Consultation:
-    """Ask every corpus and keep whichever answered best.
+    """Ask this repository's knowledge base.
 
-    The entry point for a caller who has a question and no idea where it might
-    be answered. Preferring the strongest match across corpora rather than
-    merging them: a passage's score is only comparable to others from the same
-    retrieval, and interleaving two rankings would invent a comparison neither
-    corpus supports.
+    One repository, one knowledge base — so there is no search across corpora to
+    do. An earlier version asked every corpus on the machine and kept the best
+    score, which reached into unrelated projects: theory acquired for a compiler
+    is not evidence about a payments service, and a cross-project match is
+    surface similarity by definition.
 
-    Where the intent names a corpus that exists, that one is asked first and
-    kept if it answers — a corpus built *for* this work is better evidence than
-    a stronger-scoring match from unrelated theory.
+    Where this repository has no knowledge base yet, that is said plainly. It is
+    the signal to acquire, not a reason to answer from somebody else's work.
     """
     client = pragmatos or best_backend(for_reading=True)
-    available = corpora(client)
+    corpus = corpus_for(repo)
 
-    if not available:
-        found = Consultation(question=question, corpus_id=corpus_for(intent or question))
-        found.unavailable = "no corpus has been built yet"
+    if corpus not in corpora(client):
+        found = Consultation(question=question, corpus_id=corpus)
+        found.unavailable = (
+            "this repository has no knowledge base yet; `learn` would build one"
+        )
         return found
 
-    preferred = corpus_for(intent) if intent else ""
-    ordered = ([preferred] if preferred in available else []) + [
-        name for name in available if name != preferred
-    ]
-
-    best: Optional[Consultation] = None
-    for name in ordered:
-        found = consult(question, corpus_id=name, pragmatos=client, limit=limit)
-        if found.knew and name == preferred:
-            # Built for this work: taken over anything that merely scores higher.
-            return found
-        if found.knew and (best is None or found.best > best.best):
-            best = found
-
-    return best or Consultation(
-        question=question, corpus_id=ordered[0]
-    )
+    return consult(question, corpus_id=corpus, pragmatos=client, limit=limit)
 
 
 def known(
