@@ -46,6 +46,8 @@ NAMES_MATCHING = "names_matching"      # definitions whose name matches a patter
 FILES_MATCHING = "files_matching"      # files in the tree matching a pattern
 CALLS_INTO = "calls_into"              # definitions referring to a named thing
 NOT_REACHED_BY = "not_reached_by"      # definitions nothing named reaches
+CONTENT_MATCHING = "content_matching"  # lines inside files matching a pattern
+FILES_LACKING = "files_lacking"        # files that never match a pattern
 COUNT_AT_MOST = "count_at_most"        # no more than N of the above
 COUNT_AT_LEAST = "count_at_least"      # at least N of the above
 
@@ -129,6 +131,13 @@ class Check(BaseModel):
         default="",
         description="A regular expression naming what to enumerate.",
     )
+    within: str = Field(
+        default=r"\.py$",
+        description=(
+            "For content_matching and files_lacking: a regular expression for "
+            "which files to read. Defaults to Python sources."
+        ),
+    )
     holds_when: str = Field(
         default="",
         description=(
@@ -165,11 +174,18 @@ Describe a mechanical check that would find places the repository breaks this
 rule, using only what a resolved graph of definitions and a file tree can
 answer.
 
-You have four ways to enumerate:
-  names_matching  — definitions whose name matches a regular expression
-  files_matching  — files in the tree whose path matches a regular expression
-  calls_into      — definitions that refer to something matching a pattern
-  not_reached_by  — definitions that nothing matching a pattern reaches
+You have six ways to enumerate:
+  names_matching   — definitions whose name matches a regular expression
+  files_matching   — files in the tree whose path matches a regular expression
+  calls_into       — definitions that refer to something matching a pattern
+  not_reached_by   — definitions that nothing matching a pattern reaches
+  content_matching — lines inside files matching a regular expression, for
+                     rules about what the code actually says
+  files_lacking    — files where a pattern never appears, for rules requiring
+                     that something always be present
+
+For content_matching and files_lacking, `within` says which files to read — a
+regular expression over paths, defaulting to Python sources.
 
 and two ways to judge what you find:
   count_at_most   — the rule is broken if more than N are found
@@ -177,11 +193,39 @@ and two ways to judge what you find:
 
 Give the check that most directly tests the rule.
 
-If none of these can actually test it, set tests_the_rule to false and say in
-`why` what would be needed instead. That is a useful answer and a common one.
-Do not supply an approximation: a check that matches every source file will
-report every file as a violation, and a user accused of breaking a rule
-thirty-five times over will stop believing any of it.
+A check does not have to be exact to be worth running. If it looks in the right
+place and its mistakes would be near-misses about the real property, set
+tests_the_rule to true and name the imprecision in `why`. A rule about module
+docstrings tested by "files where no docstring appears anywhere" is a good
+check even though it cannot tell that the docstring is first.
+
+Set tests_the_rule to false only when the check would be about something else
+entirely — when what it enumerates has no bearing on the rule, so the things it
+finds would not be violations of anything. A check matching every source file
+in the repository is the clear case: it reports every file as a violation, and
+a user accused of breaking a rule thirty-five times over stops believing any of
+it.
+
+The question to ask is not "is this check exact" but "would the things it finds
+be worth a user's attention".
+
+Before choosing a check at all, settle a prior question: **is this rule about
+the source at all?** Three kinds of rule are not, however clearly they are
+stated, and each must have tests_the_rule false:
+
+  a priority between competing values — "quality matters more than latency" —
+  because no arrangement of files could satisfy or violate it;
+
+  a claim about what was done or will happen at run time — "must be tested
+  against a live provider", "must write to the shared volume" — because the
+  source shows what could happen, not what did;
+
+  a product capability — "users must be able to select an ontology" — because
+  the presence of a function named for it is not the capability, and its
+  absence is not proof the product lacks it.
+
+For these, no pattern over files or definitions is a near-miss; it is a
+different subject. Say so in `why` and set tests_the_rule to false.
 """
 
 
@@ -212,6 +256,23 @@ def derive_check(rule: Rule, model: Optional[str] = None) -> Optional[Check]:
         return None
 
 
+def _readable(root: Path, within: str) -> Iterable[Tuple[Path, str]]:
+    """Files worth reading, and their repository-relative names."""
+    try:
+        which = re.compile(within or r"\.py$", re.I)
+    except re.error:
+        which = re.compile(r"\.py$")
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if any(p in (".venv", ".git", "node_modules", "__pycache__", ".vesta")
+               for p in path.parts):
+            continue
+        relative = str(path.relative_to(root))
+        if which.search(relative):
+            yield path, relative
+
+
 def run_check(check: Check, graph: Graph, root: Path) -> Tuple[List[Site], str]:
     """Execute a derived check. Nothing here is model work."""
     if not check.tests_the_rule:
@@ -224,7 +285,12 @@ def run_check(check: Check, graph: Graph, root: Path) -> Tuple[List[Site], str]:
         return [], check.why or "no mechanical check covers this rule"
 
     try:
-        pattern = re.compile(check.pattern, re.I)
+        # DOTALL as well as IGNORECASE. A pattern written for a docstring —
+        # `""".*"""` — matches nothing without it, because every real docstring
+        # spans lines, and the check then reports files that plainly have one.
+        # Patterns are written to describe a thing, not to be careful about a
+        # flag the writer cannot see.
+        pattern = re.compile(check.pattern, re.I | re.S)
     except re.error as exc:
         return [], f"the derived pattern is malformed: {exc}"
 
@@ -257,6 +323,32 @@ def run_check(check: Check, graph: Graph, root: Path) -> Tuple[List[Site], str]:
                     found.append(
                         Site(path=source.path, line=source.line + 1, what=source.qualified)
                     )
+
+    elif check.look_for == CONTENT_MATCHING:
+        # Inside files, not just their names. Most real rules are about what
+        # the code says — "no conditional import of langextract", "commit must
+        # write to the filesystem" — and matching paths and identifiers could
+        # not reach any of them.
+        for path, relative in _readable(root, check.within):
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for number, line in enumerate(lines, start=1):
+                if pattern.search(line):  # one line at a time: DOTALL is moot
+                    found.append(Site(path=relative, line=number, what=line.strip()[:90]))
+
+    elif check.look_for == FILES_LACKING:
+        # The absence of something, per file. "Every source file must carry a
+        # module docstring" is not expressible as a match — it is expressible
+        # as the files where no match occurs.
+        for path, relative in _readable(root, check.within):
+            try:
+                body = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if not pattern.search(body):
+                found.append(Site(path=relative, what="does not contain it"))
 
     elif check.look_for == NOT_REACHED_BY:
         reaching = {
