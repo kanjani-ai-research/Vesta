@@ -170,9 +170,19 @@ They originally said it like this:
 
     {said}
 
-Definitions in this repository whose names relate to the rule:
+What this repository says about the subject of the rule, in its own words:
 
 {vocabulary}
+
+The repository may call the rule's subject something else entirely — a rule
+about "one knowledge base per repository" in a codebase that says `corpus_id`.
+Read the passages above to find what it is called here, and write the check
+against the names this code actually uses.
+
+Where nothing above speaks to the rule, the rule's subject may simply be
+absent, which is not the same as the rule being uncheckable: a rule about a
+dependency, in a repository that does not use it, is honoured. Write the check
+against the rule's own words in that case, and let it find nothing.
 
 Describe a mechanical check that would find places the repository breaks this
 rule, using only what a resolved graph of definitions and a file tree can
@@ -233,14 +243,25 @@ different subject. Say so in `why` and set tests_the_rule to false.
 """
 
 
-def vocabulary_for(rule: Rule, graph: Optional[Graph], limit: int = 14) -> str:
-    """What this repository calls the things a rule talks about.
+def what_the_code_says(
+    rule: Rule, graph: Optional[Graph], root: Path, limit: int = 8
+) -> str:
+    """Passages from this repository about what the rule is about.
 
-    A rule says "knowledge base" and the repository says `corpus_id`; a rule
-    says "language-agnostic" and the repository says `SERVERS` and `SOURCE`.
-    Without the mapping a derivation writes patterns for words that appear
-    nowhere, and the check finds nothing for the wrong reason — reported as
-    "cannot be tested" when the truth is "did not know what to look for".
+    **Not a vocabulary mapping.** A rule says "one KB per repository" and the
+    code says `corpus_id` — and the reason those are the same thing is not that
+    two words should be paired in a table, but that `corpus_id`'s own docstring
+    begins "The id of the knowledge base for a repository". The connection is
+    written down in the repository. Nothing needs to guess it; something needs
+    to *read* it.
+
+    An earlier attempt offered definitions whose *names* shared words with the
+    rule. It surfaced unrelated tests — matching "partial" and "absent" — and
+    moved a correct verdict to a wrong one. Names are not evidence; what a
+    definition says about itself is.
+
+    Returns nothing when nothing in the repository speaks to the rule, which is
+    the honest answer and means the rule goes unchecked this time round.
     """
     if graph is None:
         return ""
@@ -248,30 +269,49 @@ def vocabulary_for(rule: Rule, graph: Optional[Graph], limit: int = 14) -> str:
     wanted = {
         word
         for word in re.findall(r"[a-z]{4,}", (rule.stated or rule.text).lower())
-        if word not in {"must", "this", "that", "with", "from", "into", "than",
-                        "must", "should", "there", "which", "where", "when",
-                        "each", "every", "another", "single", "shared", "across",
-                        "used", "using", "have", "been", "does", "make"}
+        if word not in STOP
     }
     if not wanted:
         return ""
 
-    scored = []
-    for node in graph.nodes.values():
-        spelled = set(re.findall(r"[a-z]{3,}", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", node.qualified).lower()))
-        shared = wanted & spelled
-        if shared:
-            scored.append((len(shared), node))
-    scored.sort(key=lambda pair: -pair[0])
+    scored: List[Tuple[int, str, str]] = []
+    for path, relative in _readable(root, r"\.(py|md|toml)$"):
+        try:
+            body = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # Docstrings and comments: where a codebase explains itself, and where
+        # "corpus_id — the id of the knowledge base" actually lives.
+        for block in re.findall(r'"""(.{40,900}?)"""', body, re.S):
+            spoken = set(re.findall(r"[a-z]{4,}", block.lower()))
+            shared = wanted & spoken
+            if len(shared) >= 2:
+                scored.append((len(shared), relative, " ".join(block.split())[:400]))
 
-    return "\n".join(
-        f"    {node.qualified}  ({node.path}:{node.line + 1})"
-        for _, node in scored[:limit]
+    scored.sort(key=lambda item: -item[0])
+    if not scored:
+        return ""
+
+    return "\n\n".join(
+        f"    from {where}:\n    {said}" for _, where, said in scored[:limit]
     )
 
 
+# Words that carry no subject, so sharing them is not evidence of relevance.
+STOP = {
+    "must", "this", "that", "with", "from", "into", "than", "should", "there",
+    "which", "where", "when", "each", "every", "another", "single", "shared",
+    "across", "used", "using", "have", "been", "does", "make", "them", "they",
+    "would", "could", "about", "other", "same", "such", "only", "also", "more",
+    "what", "will", "then", "than", "some", "many", "much", "very", "just",
+}
+
+
 def derive_check(
-    rule: Rule, model: Optional[str] = None, graph: Optional[Graph] = None
+    rule: Rule,
+    model: Optional[str] = None,
+    graph: Optional[Graph] = None,
+    root: Optional[Path] = None,
 ) -> Optional[Check]:
     """Turn a rule's prose into something executable, or say it cannot be."""
     import asyncio
@@ -279,7 +319,7 @@ def derive_check(
     from .structure import _ensure_data_dir
 
     _ensure_data_dir()
-    vocabulary = ""  # see vocabulary_for: offering weak matches made verdicts worse
+    vocabulary = what_the_code_says(rule, graph, Path(root) if root else Path.cwd())
     try:
         from pragmatos import llm
 
@@ -464,7 +504,7 @@ def against(
             said=rule.text,
             when=rule.last,
         )
-        check = derive_check(rule, model, graph)
+        check = derive_check(rule, model, graph, root)
         if check is None:
             finding.undecided = "no check could be derived"
         else:
