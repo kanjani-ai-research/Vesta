@@ -199,6 +199,81 @@ class Found(BaseModel):
         )
 
 
+class Worth(BaseModel):
+    """Whether an utterance is worth judging properly."""
+
+    worth_judging: bool = Field(
+        description=(
+            "True if this might state how work should be done in this "
+            "repository — a preference, a constraint, a correction, a naming "
+            "convention, anything a future change could contradict. Err "
+            "towards true: this only decides what gets read more carefully."
+        )
+    )
+
+
+SIFTING = """Does the following, said by a user to a coding agent, contain
+anything about how work should be done in their repository?
+
+Say yes for corrections, preferences, conventions, constraints, and standards —
+however casually put. Say no for questions, pure requests to do a task, and
+remarks that carry no expectation about future work.
+
+This only decides what is read more carefully afterwards, so lean towards yes.
+
+\"\"\"
+{said}
+\"\"\"
+"""
+
+
+def sift(turns: Sequence[str], model: Optional[str] = None) -> List[str]:
+    """Narrow many turns to those worth judging, by reading them.
+
+    Patterns were doing this and were too brittle: they dropped thirty-five
+    turns containing rule words outright, including "v3 is the namespace for
+    the family of rewrites" — a naming rule that was then broken. Negation is
+    the specific thing they cannot see, and it is the whole distinction between
+    "we should use postgres" and "we should not use postgres".
+
+    Falls back to the patterns when no model is reachable, because a brittle
+    sieve is better than none.
+    """
+    import asyncio
+
+    from .structure import _ensure_data_dir
+
+    _ensure_data_dir()
+    try:
+        from pragmatos import llm
+
+        extract = llm.build_extractor(model=model)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("no model to sift with, falling back to patterns: %s", exc)
+        return [t for t in turns if constrains(t)]
+
+    async def run() -> List[str]:
+        # Concurrently: two hundred turns one at a time is minutes of waiting
+        # for work that has no order to it. The gatherer already bounds its own
+        # concurrency, so this does not need to.
+        async def worth(said: str) -> Tuple[str, bool]:
+            try:
+                verdict = await extract(Worth, SIFTING.format(said=said[:1200]))
+            except Exception:  # noqa: BLE001 - one bad call is not a policy
+                verdict = None
+            # Unjudged goes forward: the expensive stage will settle it.
+            return said, (verdict is None or verdict.worth_judging)
+
+        answered = await asyncio.gather(*(worth(s) for s in turns))
+        return [said for said, keep in answered if keep]
+
+    try:
+        return asyncio.run(run())
+    except Exception as exc:  # noqa: BLE001
+        logger.info("could not sift: %s", exc)
+        return [t for t in turns if constrains(t)]
+
+
 # ── Noticing ─────────────────────────────────────────────────────────────
 
 
@@ -314,7 +389,10 @@ def derive(text: str) -> Tuple[str, str]:
 
 
 def from_sessions(
-    repo: Path | str, transcripts: Optional[Sequence[Path]] = None
+    repo: Path | str,
+    transcripts: Optional[Sequence[Path]] = None,
+    read_everything: bool = False,
+    model: Optional[str] = None,
 ) -> Found:
     """Recover what a user has decided, from what they said in this project."""
     root = Path(repo).expanduser().resolve()
@@ -327,10 +405,24 @@ def from_sessions(
 
     by_text: Dict[str, Rule] = {}
 
+    # Which turns are worth judging. Patterns are brittle and miss real rules;
+    # reading every turn costs a cheap call each. `read_everything` chooses.
+    admitted: Optional[Set[str]] = None
+    if read_everything:
+        every: List[str] = []
+        for path in transcripts:
+            every.extend(
+                said for said, _ in _turns(path) if 20 < len(said) < 600
+            )
+        admitted = set(sift(every, model))
+
     for path in transcripts:
         for said, stamp in _turns(path):
             found.considered += 1
-            if not constrains(said):
+            if admitted is not None:
+                if said not in admitted:
+                    continue
+            elif not constrains(said):
                 continue
 
             names = _names_in(said)
@@ -486,9 +578,10 @@ def judge(found: "Found", model: Optional[str] = None) -> "Found":
         return found
 
     async def run() -> List[Tuple["Rule", Optional["Judgement"]]]:
-        return [
-            (rule, await _judge_one(extract, rule.text)) for rule in found.rules
-        ]
+        verdicts = await asyncio.gather(
+            *(_judge_one(extract, rule.text) for rule in found.rules)
+        )
+        return list(zip(found.rules, verdicts))
 
     try:
         judged = asyncio.run(run())
