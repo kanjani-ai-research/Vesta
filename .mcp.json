@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "vesta": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "vesta.sidecar"],
+      "env": {
+        "PRAGMATOS_DATA_DIR": "${HOME}/.vesta/data"
+      }
+    }
+  }
+}

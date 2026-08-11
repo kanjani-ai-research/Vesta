@@ -33,9 +33,14 @@ dev = [
 theory = [
   "sentence-transformers>=3.0",  # embeddings; without it retrieval is lexical only
 ]
+# Running as a sidecar to a coding agent over MCP.
+sidecar = [
+  "mcp>=1.0",
+]
 
 [project.scripts]
 vesta = "vesta.cli:main"
+vesta-sidecar = "vesta.sidecar:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
