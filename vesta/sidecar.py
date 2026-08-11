@@ -32,6 +32,7 @@ from . import maturity
 from .acquire import Search
 from .consult import consult as _consult
 from .authority import settle
+from .dynamic import missed_by, scan
 from .harvest import anchor, from_sessions, keep, recall_notes
 from .held import graph_for
 from .propagate import from_files, is_test
@@ -310,6 +311,7 @@ def _touches(paths: List[str], project: Optional[Path], hops: int) -> str:
         graph = graph_for(project)
         found = from_files(graph, paths, hops=hops)
         harvest = from_sessions(graph, project)
+        blind = scan(project, graph)
 
     if not found.reached:
         return (
@@ -339,6 +341,24 @@ def _touches(paths: List[str], project: Optional[Path], hops: int) -> str:
             "  ⓘ already explained in earlier sessions — call known() rather "
             "than re-reading: " + ", ".join(sorted(set(explained))[:8])
         )
+
+    # References that reach these definitions by name rather than by a path a
+    # language server can follow. Not added as edges — a textual match cannot
+    # say which definition of a shared name is reached — but named, because a
+    # set presented as complete while missing them is a claim the evidence does
+    # not support. A live agent caught this by grepping when the graph reported
+    # two consumers of `why_not` and a recorded note claimed five.
+    missed = missed_by(
+        blind, graph, [r.node for r in found.reached] + list(found.changed)
+    )
+    if missed:
+        lines.append("")
+        lines.append(
+            f"  \u26a0 {len(missed)} reference(s) reach these by name and cannot "
+            "be resolved, so they are not in the set above:"
+        )
+        for entry in missed[:8]:
+            lines.append(f"      {entry.describe()[:112]}")
 
     tests = found.tests(graph)
     if tests:
