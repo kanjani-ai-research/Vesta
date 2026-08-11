@@ -127,6 +127,11 @@ class Rule(BaseModel):
     said: List[Said] = Field(default_factory=list)
     first: float = 0.0
     last: float = 0.0
+    # The rule as a reader could check it, written by whatever judged it. The
+    # user's own words are kept in `text` because provenance is the point.
+    stated: str = ""
+    # Why this was not a rule, when something decided it was not.
+    why_not: str = ""
 
     @property
     def times(self) -> int:
@@ -169,6 +174,9 @@ class Found(BaseModel):
 
     rules: List[Rule] = Field(default_factory=list)
     gaps: List[Gap] = Field(default_factory=list)
+    # Candidates something read and declined. Kept rather than dropped: what a
+    # sieve wrongly admits is the measure of the sieve.
+    rejected: List[Rule] = Field(default_factory=list)
     considered: int = 0
 
     @property
@@ -358,3 +366,133 @@ def keep(found: Found, repo: Path | str) -> Path:
     where = RULES / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
     where.write_text(found.model_dump_json(), encoding="utf-8")
     return where
+
+
+# ── Judging, by a model rather than by patterns ──────────────────────────
+#
+# Deciding whether an utterance is a standing rule is a semantic judgement, and
+# patterns cannot make it. The evidence is on record twice over: matching
+# `_resolve_with` to "resolve symbol references" worked by coincidence of
+# English, and matching "this is a failure and repurposing of the cause" — a
+# rebuke about mission drift — to "run the test suite" worked the same way.
+# Both were confident and both were wrong for the same reason.
+#
+# So the patterns above are a *sieve*, not a decision. They cheaply narrow
+# hundreds of turns to a few dozen candidates; what each candidate actually is
+# gets settled by something that reads it.
+
+class Judgement(BaseModel):
+    """What something a user said actually is.
+
+    A pydantic model rather than a schema dict: the extractor validates against
+    the class, so a malformed answer is a retry rather than a silent None.
+    """
+
+    is_rule: bool = Field(
+        description=(
+            "True only if this states a standing constraint on how work is done "
+            "in this repository — something a future change could violate. "
+            "False for questions, proposals inviting agreement, one-off task "
+            "instructions, permissions, praise, or complaints about the agent's "
+            "process rather than about the artifact."
+        )
+    )
+    rule: str = Field(
+        default="",
+        description=(
+            "The constraint stated plainly and impersonally, as a rule a reader "
+            "could check against a repository. Empty when is_rule is false."
+        ),
+    )
+    check: str = Field(
+        default=UNDERIVED,
+        description=(
+            "What evidence would show it violated: 'traversal' for a property of "
+            "how definitions refer to each other, 'behaviour' for what the code "
+            "does when run, 'artefact' for a property of a file or commit, "
+            "'underived' for a real constraint none of these settles."
+        ),
+    )
+    how: str = Field(
+        default="",
+        description=(
+            "What to look for, concretely, to find a violation. When check is "
+            "underived, what capability would be needed instead."
+        ),
+    )
+    why_not: str = Field(
+        default="", description="When is_rule is false, what this actually is."
+    )
+
+
+ASKING = """A user said the following to a coding agent working in their repository.
+
+Decide whether it states a standing rule — a constraint on how work is done
+here, which a future change could violate — or something else.
+
+Most utterances are something else. Questions, proposals put up for agreement,
+instructions scoped to the current task, permissions, and complaints about the
+agent's process are all not rules. Be strict: a rule wrongly recorded is
+enforced against the user later, which is worse than one missed.
+
+What they said:
+\"\"\"
+{said}
+\"\"\"
+"""
+
+
+async def _judge_one(extract, said: str) -> Optional["Judgement"]:
+    return await extract(Judgement, ASKING.format(said=said[:1500]))
+
+
+def judge(found: "Found", model: Optional[str] = None) -> "Found":
+    """Settle what each candidate actually is, by reading it.
+
+    Rewrites `found` in place: candidates the model rejects are dropped, the
+    rest carry the rule as stated plainly, and gaps are rebuilt from what
+    survives. The sieve above decides what is *asked about*; this decides what
+    is *true*.
+    """
+    import asyncio
+
+    from .structure import _ensure_data_dir
+
+    _ensure_data_dir()
+    try:
+        from pragmatos import llm
+
+        extract = llm.build_extractor(model=model)
+    except Exception as exc:  # noqa: BLE001 - unjudged is better than wrong
+        logger.info("no model available to judge rules: %s", exc)
+        return found
+
+    async def run() -> List[Tuple["Rule", Optional["Judgement"]]]:
+        return [
+            (rule, await _judge_one(extract, rule.text)) for rule in found.rules
+        ]
+
+    try:
+        judged = asyncio.run(run())
+    except Exception as exc:  # noqa: BLE001
+        logger.info("could not judge rules: %s", exc)
+        return found
+
+    kept: List["Rule"] = []
+    found.gaps = []
+    for rule, verdict in judged:
+        if verdict is None or not verdict.is_rule:
+            rule.why_not = (verdict.why_not if verdict else "not judged")[:200]
+            found.rejected.append(rule)
+            continue
+        rule.stated = verdict.rule[:300]
+        rule.check = verdict.check or UNDERIVED
+        rule.how = verdict.how[:300]
+        kept.append(rule)
+        if rule.check == UNDERIVED:
+            found.gaps.append(
+                Gap(text=rule.stated or rule.text, missing=rule.how, names=rule.names)
+            )
+
+    found.rules = kept
+    return found
