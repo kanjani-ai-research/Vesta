@@ -139,7 +139,16 @@ class Rule(BaseModel):
 
     @property
     def is_standing(self) -> bool:
-        """Whether this has outlived the moment it was said in."""
+        """Whether this constrains work beyond the moment it was said in.
+
+        A judged rule stands immediately. Requiring repetition was wrong: a
+        user states a rule once and expects it to hold, and something that has
+        read the utterance and written down what would violate it has better
+        evidence than a coincidence of restatement. Repetition still counts,
+        for rules nothing has judged yet.
+        """
+        if self.stated:
+            return True
         return self.times > 1 or (self.last - self.first) > 3600
 
     @property
@@ -427,13 +436,22 @@ class Judgement(BaseModel):
 
 ASKING = """A user said the following to a coding agent working in their repository.
 
-Decide whether it states a standing rule — a constraint on how work is done
-here, which a future change could violate — or something else.
+Decide what the user meant to bring about, not how they phrased it.
 
-Most utterances are something else. Questions, proposals put up for agreement,
-instructions scoped to the current task, permissions, and complaints about the
-agent's process are all not rules. Be strict: a rule wrongly recorded is
-enforced against the user later, which is worse than one missed.
+Users state rules casually. "There should be one .env for v3, not one per
+service" is phrased as a suggestion and is a rule: it says how the repository
+must be arranged, and a future change could violate it. Read for the intent —
+if the user would be annoyed to find work done contrary to this later, it is a
+rule, however softly it was put.
+
+What is genuinely not a rule: a question seeking an answer, a proposal put up
+for the agent's agreement and awaiting it, an instruction scoped to the task at
+hand and expiring with it, a permission, or a remark about the agent's conduct
+rather than about the repository.
+
+A rule missed is a rule the user has to state again. A question recorded as a
+rule is handed back to them later as an obligation they never made. Prefer to
+recognise the rule where the user plainly wanted something to hold.
 
 What they said:
 \"\"\"
