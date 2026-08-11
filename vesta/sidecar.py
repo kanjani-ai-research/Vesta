@@ -30,6 +30,8 @@ from typing import Any, Dict, List, Optional
 from . import maturity
 from .acquire import Search
 from .consult import consult as _consult
+from .held import graph_for
+from .propagate import from_files, is_test
 from .consult import corpus_for
 from .structure import THEORY_DIR, best_backend, repository_name, structure
 
@@ -262,6 +264,113 @@ def _acquisition(
     return "\n".join(lines)
 
 
+def _touches(paths: List[str], project: Optional[Path], hops: int) -> str:
+    """What a change to these files reaches, and what it does not.
+
+    The claim is a correctness claim — everything that could break is in the
+    set — so what the graph could not resolve is stated with it. A set that
+    looks complete and is not is worse than no set.
+    """
+    if project is None:
+        return "Could not tell which project this is."
+
+    with quiet_stdout():
+        graph = graph_for(project)
+        found = from_files(graph, paths, hops=hops)
+
+    if not found.reached:
+        return (
+            f"project: {project}\n"
+            f"Nothing in the graph refers to {', '.join(paths)}. Either it is "
+            "the outermost layer, or those paths are not in the graph — "
+            f"{graph.describe()}."
+        )
+
+    lines = [f"project: {project}", found.describe(graph), ""]
+    for entry in sorted(found.reached, key=lambda r: r.hops):
+        node = graph.nodes.get(entry.node)
+        if node:
+            lines.append(f"  [{entry.hops}] {node.qualified}  {node.path}:{node.line + 1}")
+
+    tests = found.tests(graph)
+    if tests:
+        lines.extend(["", "Tests covering this:"] + [f"  {t}" for t in sorted(tests)])
+    if not found.is_bounded:
+        lines.append("")
+        lines.append(
+            f"{len(found.unresolved)} file(s) could not be resolved, so the set "
+            "may be short."
+        )
+    return "\n".join(lines)
+
+
+def _uses(name: str, project: Optional[Path]) -> str:
+    """Where a definition lives and what refers to it, resolved not guessed."""
+    if project is None:
+        return "Could not tell which project this is."
+
+    with quiet_stdout():
+        graph = graph_for(project)
+
+    wanted = [
+        n for n in graph.nodes.values()
+        if n.name == name or n.qualified == name or n.qualified.endswith(f".{name}")
+    ]
+    if not wanted:
+        return f"project: {project}\nNo definition named {name!r} in the graph."
+
+    lines = [f"project: {project}"]
+    for node in wanted[:8]:
+        lines.append("")
+        lines.append(f"{node.qualified}  {node.path}:{node.line + 1}")
+        callers = graph.referenced_by(node.id)
+        uses = graph.depends_on(node.id)
+        lines.append(f"  referred to by {len(callers)}, refers to {len(uses)}")
+        for edge in callers[:12]:
+            other = graph.nodes.get(edge.source)
+            if other:
+                lines.append(f"    ← {other.qualified}  {other.path}:{other.line + 1}")
+        for edge in uses[:12]:
+            other = graph.nodes.get(edge.target)
+            if other:
+                lines.append(f"    → {other.qualified}  {other.path}:{other.line + 1}")
+    if len(wanted) > 8:
+        lines.append(f"\n… and {len(wanted) - 8} more definition(s) with that name")
+    return "\n".join(lines)
+
+
+def _shape(project: Optional[Path]) -> str:
+    """What the repository is made of, before reading any of it."""
+    if project is None:
+        return "Could not tell which project this is."
+
+    with quiet_stdout():
+        graph = graph_for(project)
+
+    by_file: Dict[str, int] = {}
+    for node in graph.nodes.values():
+        by_file[node.path] = by_file.get(node.path, 0) + 1
+
+    busiest = sorted(
+        graph.nodes.values(), key=lambda n: len(graph.referenced_by(n.id)), reverse=True
+    )[:12]
+
+    lines = [f"project: {project}", graph.describe(), ""]
+    lines.append("Most depended upon:")
+    for node in busiest:
+        count = len(graph.referenced_by(node.id))
+        if count:
+            lines.append(f"  {count:3} ← {node.qualified}  {node.path}:{node.line + 1}")
+    lines.extend(["", "Definitions per file:"])
+    for path, count in sorted(by_file.items(), key=lambda kv: -kv[1])[:12]:
+        lines.append(f"  {count:3}  {path}")
+    if graph.holes:
+        lines.append("")
+        lines.append(f"{len(graph.holes)} file(s) unresolved: " +
+                     ", ".join(sorted({h.path for h in graph.holes})[:6]))
+    return "\n".join(lines)
+
+
 def _quieten() -> None:
     """Keep everything off stdout.
 
@@ -300,13 +409,73 @@ def build_server():
     server = _Server(
         "vesta",
         instructions=(
-            "Supplies computer-science theory that is not in the repository — "
-            "the literature behind a hard problem. It does not read, search or "
-            "navigate code; use the host's own tools for that. Reach for "
-            "`recall` when a task turns on a non-trivial algorithm, protocol or "
-            "correctness property and the codebase does not explain it."
+            "Answers questions about a repository from a resolved graph of what "
+            "refers to what, and about the literature behind a hard problem.\n\n"
+            "`shape` orients you in an unfamiliar codebase. `uses` finds a "
+            "definition and everything that refers to it — resolved by a "
+            "language server, so it distinguishes four methods that share a "
+            "name. `touches` answers what a change affects, and which tests "
+            "cover it, before you edit.\n\n"
+            "Prefer these over reading files to establish structure: they answer "
+            "in hundreds of tokens what costs thousands to read, and they say "
+            "what they could not resolve rather than implying completeness. Use "
+            "the host's own tools to read the code once you know what to read.\n\n"
+            "`recall` supplies published theory a repository does not contain."
         ),
     )
+
+    @server.tool()
+    async def touches(
+        paths: List[str], hops: int = 3, context: Context = None
+    ) -> str:
+        """What a change to these files affects, resolved through the code.
+
+        Use this BEFORE editing, instead of grepping for callers. References are
+        resolved by a language server, so an edge means "this actually refers to
+        that" rather than "these names look alike" — and the answer names the
+        tests that cover the blast radius.
+
+        Answers in one call what otherwise takes many reads, and says what it
+        could not resolve rather than implying the set is complete.
+
+        Args:
+            paths: Repository-relative files about to change.
+            hops: How far to follow callers. 3 is usually enough.
+        """
+        project = await project_of(context)
+        import anyio
+
+        return await anyio.to_thread.run_sync(_touches, paths, project, hops)
+
+    @server.tool()
+    async def uses(name: str, context: Context = None) -> str:
+        """Where a definition is, what refers to it, and what it refers to.
+
+        Resolved, not matched: four methods named `describe` are four different
+        definitions here, and grep cannot tell them apart. Both directions are
+        answered — what breaks if I change this, and what would I have to change
+        to change this.
+
+        Args:
+            name: A function, method or class name, bare or qualified.
+        """
+        project = await project_of(context)
+        import anyio
+
+        return await anyio.to_thread.run_sync(_uses, name, project)
+
+    @server.tool()
+    async def shape(context: Context = None) -> str:
+        """What this repository is made of, before reading any of it.
+
+        Definition and reference counts, the most depended-upon definitions, and
+        where the code sits. Orientation for a codebase you have not read, in a
+        few hundred tokens rather than a directory walk.
+        """
+        project = await project_of(context)
+        import anyio
+
+        return await anyio.to_thread.run_sync(_shape, project)
 
     @server.tool()
     async def recall(
