@@ -424,7 +424,11 @@ def _known(name: str, project: Optional[Path]) -> str:
     # listed the three failure tiers — the part that was asked for — and the
     # agent had to read the file anyway. A note is an argument; half of one is
     # worse than a pointer to where the whole one is.
-    budget = 12_000
+    # Four thousand, not twelve. Twelve thousand characters is three thousand
+    # tokens of one tool answer, which is more context than the finding is
+    # worth — a live call returned fourteen thousand. The budget is a ceiling
+    # on the whole answer, and notes beyond it are counted rather than shown.
+    budget = 4_000
     for node in wanted[:4]:
         notes = harvest.for_node(node.id)
         if not notes:
@@ -435,7 +439,8 @@ def _known(name: str, project: Optional[Path]) -> str:
             if budget <= 0:
                 lines.append("")
                 lines.append(
-                    f"  … {len(notes) - notes.index(note)} further account(s) not shown."
+                    f"  … {len(notes) - notes.index(note)} further account(s) "
+                    "not shown; ask about a narrower name to see them."
                 )
                 break
             when = time.strftime("%Y-%m-%d", time.localtime(note.at))
