@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 from . import maturity
 from .acquire import Search
 from .consult import consult as _consult
-from .harvest import from_sessions, keep, recall_notes
+from .harvest import anchor, from_sessions, keep, recall_notes
 from .held import graph_for
 from .propagate import from_files, is_test
 from .consult import corpus_for
@@ -374,15 +374,31 @@ def _known(name: str, project: Optional[Path]) -> str:
 
     lines = [f"project: {project}", harvest.describe(), ""]
     said = False
+    # A budget across the whole answer rather than a cut per note. Truncating
+    # each at 900 characters severed an account mid-sentence exactly where it
+    # listed the three failure tiers — the part that was asked for — and the
+    # agent had to read the file anyway. A note is an argument; half of one is
+    # worse than a pointer to where the whole one is.
+    budget = 12_000
     for node in wanted[:4]:
         notes = harvest.for_node(node.id)
         if not notes:
             continue
         said = True
         lines.append(f"{node.qualified}  {node.path}:{node.line + 1}")
-        for note in notes[:3]:
+        for note in notes:
+            if budget <= 0:
+                lines.append("")
+                lines.append(
+                    f"  … {len(notes) - notes.index(note)} further account(s) not shown."
+                )
+                break
+            when = time.strftime("%Y-%m-%d", time.localtime(note.at))
             lines.append("")
-            lines.append(f"  [{time.strftime('%Y-%m-%d', time.localtime(note.at))}] {note.text[:900]}")
+            # Citations rewritten to paths this repository actually has, so a
+            # reader following one arrives somewhere.
+            lines.append(f"  [{when}] {anchor(note.text, graph)}")
+            budget -= len(note.text)
         lines.append("")
 
     if not said:

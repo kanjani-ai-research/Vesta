@@ -116,3 +116,34 @@ def test_a_note_carries_when_and_where_it_came_from(code: Graph, tmp_path: Path)
 
     assert got.notes[0].session
     assert got.notes[0].at > 0
+
+
+# ── Bugs a live agent found ──────────────────────────────────────────────
+
+
+def test_a_doubled_path_is_rewritten_to_one_the_graph_knows(code: Graph):
+    """A live agent said "the path was doubled" and read the file the long way.
+
+    An account cites paths relative to whatever root its session had; replayed
+    from a different root, `vesta/acquire.py` becomes `vesta/vesta/acquire.py`
+    and leads nowhere.
+    """
+    from vesta.harvest import anchor
+
+    said = anchor("the tiers are in vesta/vesta/acquire.py:464", code)
+
+    assert "vesta/vesta" not in said
+    assert "vesta/acquire.py:464" in said
+
+
+def test_a_bare_filename_is_rewritten_to_its_full_path(code: Graph):
+    from vesta.harvest import anchor
+
+    assert "vesta/acquire.py:464" in anchor("see acquire.py:464", code)
+
+
+def test_a_path_the_graph_does_not_know_is_left_alone(code: Graph):
+    """Rewriting a citation to something unrelated is worse than leaving it."""
+    from vesta.harvest import anchor
+
+    assert "vendor/thing.py:12" in anchor("see vendor/thing.py:12", code)

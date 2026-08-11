@@ -57,6 +57,30 @@ LEAST_USEFUL = 120
 MOST_USEFUL = 4000
 
 
+def anchor(text: str, graph: Graph) -> str:
+    """Rewrite the citations in an account to paths this graph knows.
+
+    An agent writes the path it was looking at, which is relative to whatever
+    root its session had. Replayed in another session that root may differ, and
+    a reader following `vesta/acquire.py` from inside the vesta repository lands
+    at `vesta/vesta/acquire.py` and finds nothing. A live agent hit exactly
+    this, said "the path was doubled", and read the file the long way.
+    """
+    known = {node.path for node in graph.nodes.values()}
+
+    def fix(match: "re.Match") -> str:
+        cited, line = match.group(1), match.group(2)
+        if cited in known:
+            return match.group(0)
+        bare = cited.lstrip("./")
+        for path in known:
+            if path == bare or path.endswith("/" + bare) or bare.endswith("/" + path):
+                return f"{path}:{line}"
+        return match.group(0)
+
+    return CITATION.sub(fix, text)
+
+
 class Note(BaseModel):
     """Something an agent worked out about a definition."""
 
