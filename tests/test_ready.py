@@ -107,3 +107,81 @@ def test_a_built_project_answers_without_preparing(tmp_path: Path):
     assert state.state == READY
     assert state.can_answer
     assert state.definitions >= 0
+
+
+# ── When preparation cannot finish ───────────────────────────────────────
+
+
+def test_a_failure_is_remembered_not_forgotten(tmp_path: Path):
+    """A cleared mark reads as "never attempted". The difference between that
+    and "attempted and could not" is the whole of what a user needs to act."""
+    import vesta.ready as ready
+
+    root = a_project(tmp_path)
+    ready._record_failure(root, "RuntimeError: no language server for .py")
+
+    state = readiness(root)
+    assert state.state == "failed"
+    assert "no language server" in state.why
+    assert "could not prepare" in state.describe()
+
+
+def test_a_failed_project_is_not_retried_on_every_prompt(tmp_path: Path):
+    """A broken environment must not spawn a build per message."""
+    import vesta.ready as ready
+
+    root = a_project(tmp_path)
+    ready._record_failure(root, "boom")
+
+    assert prepare(root).state == "failed"
+
+
+def test_a_failure_is_forgotten_eventually(tmp_path: Path, monkeypatch):
+    """Installing the missing thing should take effect without a restart."""
+    import vesta.ready as ready
+
+    root = a_project(tmp_path)
+    ready._record_failure(root, "boom")
+    monkeypatch.setattr(ready, "FORGET_FAILURE", 0.0)
+
+    assert readiness(root).state == NOTHING
+
+
+def test_a_build_that_raises_records_why(tmp_path: Path, monkeypatch):
+    import vesta.held
+    import vesta.ready as ready
+
+    root = a_project(tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("pyright is not installed")
+
+    monkeypatch.setattr(vesta.held, "graph_for", boom)
+    ready._build(str(root))
+
+    state = readiness(root)
+    assert state.state == "failed"
+    assert "pyright" in state.why
+
+
+def test_a_failure_is_written_where_readiness_looks(tmp_path: Path):
+    """These disagreed once: one resolved the path and the other did not, so
+    failures were written under one name and looked for under another."""
+    import vesta.ready as ready
+
+    root = a_project(tmp_path)
+    unresolved = Path(str(root).replace("/", "//", 1))
+    ready._record_failure(unresolved, "boom")
+
+    assert readiness(root).state == "failed"
+
+
+def test_injection_stays_silent_for_a_failed_project(tmp_path: Path):
+    """Silence is right, but it must not also mean re-attempting forever."""
+    from vesta.inject import context_for
+    import vesta.ready as ready
+
+    root = a_project(tmp_path)
+    ready._record_failure(root, "boom")
+
+    assert context_for("what does thing do", root) == ""

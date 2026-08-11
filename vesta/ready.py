@@ -50,6 +50,12 @@ STALE = 900.0
 NOTHING = "nothing"      # no graph, and none being built
 PREPARING = "preparing"  # a build is running now
 READY = "ready"          # a graph exists and can be answered from
+FAILED = "failed"        # a build was tried and could not finish
+
+# How long a failure is remembered before another attempt is made. Long enough
+# that a broken environment is not retried on every prompt; short enough that
+# installing the missing thing takes effect within a session.
+FORGET_FAILURE = 1800.0
 
 
 class Readiness(BaseModel):
@@ -59,12 +65,18 @@ class Readiness(BaseModel):
     project: str = ""
     since: float = 0.0
     definitions: int = 0
+    # Why a preparation could not finish. A failure that leaves no trace is
+    # indistinguishable from one that never happened, and a user watching
+    # nothing happen has no way to tell which they are looking at.
+    why: str = ""
 
     @property
     def can_answer(self) -> bool:
         return self.state == READY
 
     def describe(self) -> str:
+        if self.state == FAILED:
+            return f"could not prepare — {self.why}"
         if self.state == READY and not self.definitions:
             # Built, and there was nothing to build from. A new project is not
             # broken and not preparing; it simply has no structure yet, and
@@ -80,8 +92,15 @@ class Readiness(BaseModel):
 
 
 def _mark(root: Path) -> Path:
+    """Where a preparation's state is written.
+
+    Resolved first: `readiness` resolves its argument and `_record_failure` did
+    not, so a failure was written under one name and looked for under another,
+    and the whole mechanism silently did nothing.
+    """
     import hashlib
 
+    root = Path(root).expanduser().resolve()
     STATE.mkdir(parents=True, exist_ok=True)
     return STATE / f"{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
 
@@ -106,8 +125,20 @@ def readiness(project: Path | str) -> Readiness:
     mark = _mark(root)
     if mark.is_file():
         try:
-            started = json.loads(mark.read_text(encoding="utf-8")).get("since", 0)
-            if time.time() - started < STALE:
+            held = json.loads(mark.read_text(encoding="utf-8"))
+            started = held.get("since", 0)
+            if held.get("failed"):
+                # Remembered, then forgotten: a missing language server is
+                # worth reporting, and worth retrying once somebody has had a
+                # chance to install one.
+                if time.time() - started < FORGET_FAILURE:
+                    return Readiness(
+                        state=FAILED,
+                        project=str(root),
+                        since=started,
+                        why=held.get("why", "no reason recorded"),
+                    )
+            elif time.time() - started < STALE:
                 return Readiness(state=PREPARING, project=str(root), since=started)
         except (OSError, ValueError):
             pass
@@ -169,12 +200,29 @@ def _build(project: str) -> int:
         from_sessions(held(root), root)
     except Exception as exc:  # noqa: BLE001 - a failed preparation is not fatal
         logger.info("preparation failed for %s: %s", root, exc)
-    finally:
-        try:
-            _mark(root).unlink()
-        except OSError:
-            pass
+        _record_failure(root, f"{type(exc).__name__}: {exc}"[:200])
+        return 0
+    try:
+        _mark(root).unlink()
+    except OSError:
+        pass
     return 0
+
+
+def _record_failure(root: Path, why: str) -> None:
+    """Leave the mark in place, saying what went wrong.
+
+    Not deleted: a cleared mark reads as "never attempted", and the difference
+    between that and "attempted and could not" is the whole of what a user
+    needs to act.
+    """
+    try:
+        _mark(root).write_text(
+            json.dumps({"since": time.time(), "failed": True, "why": why}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def main() -> int:

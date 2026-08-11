@@ -239,6 +239,24 @@ def _status(args: argparse.Namespace) -> int:
         _say(f"  {harvest.describe()}")
         if graph.holes:
             _say(f"  {len(graph.holes)} file(s) the resolver could not read")
+    elif state.state == "failed":
+        # Say what to do about it. A user told only that something failed has
+        # to guess whether it is theirs to fix.
+        _say("")
+        if "language server" in state.why or "server" in state.why.lower():
+            _say("  No resolver for this project's languages. `vesta graph .`")
+            _say("  reports which files could not be read and why.")
+        _say("  Fix the cause and run `vesta status --prepare` to try again;")
+        _say("  it will also retry on its own after a while.")
+        if args.prepare:
+            from .ready import _mark
+
+            try:
+                _mark(where).unlink()
+            except OSError:
+                pass
+            prepare(where)
+            _say("  retrying now, in the background")
     elif not state.can_answer:
         if args.prepare:
             prepare(where)
