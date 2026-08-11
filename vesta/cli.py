@@ -167,6 +167,56 @@ def _knows(args: argparse.Namespace) -> int:
     return 0
 
 
+def _used(args: argparse.Namespace) -> int:
+    """What the sidecar was actually asked, and when.
+
+    Exists so a measurement does not depend on somebody watching a terminal.
+    """
+    import json
+    import time
+
+    from .structure import VESTA_HOME
+
+    log = VESTA_HOME / "used.jsonl"
+    if not log.is_file():
+        _say("The sidecar has not been called yet.")
+        return 0
+
+    calls = []
+    for line in log.read_text(encoding="utf-8").splitlines():
+        try:
+            calls.append(json.loads(line))
+        except ValueError:
+            continue
+
+    if args.since:
+        cutoff = time.time() - args.since * 60
+        calls = [c for c in calls if c.get("at", 0) >= cutoff]
+
+    if not calls:
+        _say("Nothing in that window.")
+        return 0
+
+    counts: dict = {}
+    chars = 0
+    for call in calls:
+        counts[call["tool"]] = counts.get(call["tool"], 0) + 1
+        chars += call.get("answer_chars", 0)
+
+    _say(f"{len(calls)} call(s)")
+    for tool, count in sorted(counts.items(), key=lambda kv: -kv[1]):
+        _say(f"  {count:3}  {tool}")
+    _say("")
+    _say(f"{chars:,} characters returned (~{chars // 4:,} tokens)")
+    if args.each:
+        _say("")
+        for call in calls[-args.each:]:
+            when = time.strftime("%H:%M:%S", time.localtime(call.get("at", 0)))
+            _say(f"  {when}  {call['tool']:8} {call.get('took', 0):5.1f}s  "
+                 f"{call.get('answer_chars', 0):6,} chars")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vesta",
@@ -235,6 +285,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # the configured one under plain `setdefault`, and the failure surfaces as
     # "API key is invalid" about a key the user never chose to use.
     _load_env(override=True)
+
+    used = sub.add_parser("used", help="what the sidecar was asked, and when")
+    used.add_argument("--since", type=float, default=0, help="minutes to look back")
+    used.add_argument("--each", type=int, default=0, help="show the last N calls")
+    used.set_defaults(run=_used)
 
     args = parser.parse_args(argv)
     # Whether the user actually asked for the service, rather than inheriting

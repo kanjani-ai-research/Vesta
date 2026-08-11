@@ -33,9 +33,38 @@ from .consult import consult as _consult
 from .held import graph_for
 from .propagate import from_files, is_test
 from .consult import corpus_for
-from .structure import THEORY_DIR, best_backend, repository_name, structure
+from .structure import THEORY_DIR, VESTA_HOME, best_backend, repository_name, structure
 
 logger = logging.getLogger("vesta.sidecar")
+
+# Every call this server answers, appended as one JSON line.
+#
+# Written because the alternative is asking a person to watch a terminal and
+# report what they saw. A measurement of "did the agent use the graph" cannot
+# rest on that: the tool knows when it was called, and a run nobody can audit
+# afterwards is not evidence of anything.
+USED = VESTA_HOME / "used.jsonl"
+
+
+def _record(tool: str, project: Optional[Path], took: float, size: int, **rest) -> None:
+    import json
+    import os
+    import time
+
+    try:
+        USED.parent.mkdir(parents=True, exist_ok=True)
+        with USED.open("a", encoding="utf-8") as out:
+            out.write(json.dumps({
+                "at": time.time(),
+                "tool": tool,
+                "project": str(project) if project else "",
+                "took": round(took, 3),
+                "answer_chars": size,
+                "session": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+                **rest,
+            }) + "\n")
+    except OSError:
+        pass  # a log that cannot be written must not break the answer
 
 # Imported at module scope so tool annotations resolve. `mcp` is an optional
 # dependency, so its absence must not stop the rest of the package importing —
@@ -445,7 +474,12 @@ def build_server():
         project = await project_of(context)
         import anyio
 
-        return await anyio.to_thread.run_sync(_touches, paths, project, hops)
+        import time
+
+        started = time.monotonic()
+        answer = await anyio.to_thread.run_sync(_touches, paths, project, hops)
+        _record("touches", project, time.monotonic() - started, len(answer))
+        return answer
 
     @server.tool()
     async def uses(name: str, context: Context = None) -> str:
@@ -462,7 +496,12 @@ def build_server():
         project = await project_of(context)
         import anyio
 
-        return await anyio.to_thread.run_sync(_uses, name, project)
+        import time
+
+        started = time.monotonic()
+        answer = await anyio.to_thread.run_sync(_uses, name, project)
+        _record("uses", project, time.monotonic() - started, len(answer))
+        return answer
 
     @server.tool()
     async def shape(context: Context = None) -> str:
@@ -475,7 +514,12 @@ def build_server():
         project = await project_of(context)
         import anyio
 
-        return await anyio.to_thread.run_sync(_shape, project)
+        import time
+
+        started = time.monotonic()
+        answer = await anyio.to_thread.run_sync(_shape, project)
+        _record("shape", project, time.monotonic() - started, len(answer))
+        return answer
 
     @server.tool()
     async def recall(
@@ -501,9 +545,14 @@ def build_server():
         # which is seconds of blocking work inside a C extension.
         import anyio
 
-        return await anyio.to_thread.run_sync(
+        import time
+
+        started = time.monotonic()
+        answer = await anyio.to_thread.run_sync(
             _consultation, question, intent, corpus, project
         )
+        _record("recall", project, time.monotonic() - started, len(answer))
+        return answer
 
     @server.tool()
     async def assess(intent: str, search: bool = True) -> str:
