@@ -44,11 +44,12 @@ seeded prior: a stranger's first derivations are shaped by what was noticed in
 this codebase. That is better than no prior and worse than their own, and it
 should decay as their own confirmed cases accumulate.
 
-**Whether a pattern was worth showing is answerable from the same place.** A
-user who is shown a finding says something next, and "yes" and "that's wrong"
-are as recoverable as the correction that produced the pattern. Nothing here
-uses that yet — patterns are validated against the code, which asks whether
-they *match*, not whether they were *worth surfacing*. That is the honest gap.
+**Whether a pattern was worth showing is answered the same way.** A user shown
+a finding says something next, and assent and rejection are as recoverable as
+the correction that produced the pattern in the first place. A pattern whose
+findings get dismissed stops being shown; one nobody objects to keeps its
+place. Without this the set only grows, and a survey that reports seventy-three
+things is a survey nobody reads.
 """
 
 from __future__ import annotations
@@ -77,6 +78,20 @@ TOO_COMMON = 0.35
 
 # And one matching nothing has not been shown to describe anything here.
 TOO_RARE = 1  # sites
+
+# A defect showing this many times is not a defect, it is the codebase. The
+# file-share gate misses these when they concentrate: a finder matching
+# eighty-one lines across four files passes "few files" and is still something
+# nobody can act on. A work item a reader cannot finish is not a work item.
+TOO_MANY = 25  # sites
+
+# Writing a finder is the sensitive step and is worth a stronger model. The
+# cheap one produced `git|GIT|subprocess\..*git`, which matches any line
+# mentioning git, and `(?:regex|pattern|match)\s*[=:]`, which matches most of
+# this codebase — both passed the "does it match" gate and neither describes a
+# defect. Judging *whether* an exchange named a defect is cheap; writing the
+# expression that finds it is not.
+SHARPER = "anthropic/claude-sonnet-4-5"
 
 
 class Pattern(BaseModel):
@@ -121,6 +136,21 @@ class Pattern(BaseModel):
     # own history. A stranger should be able to see which of their findings
     # come from their code and which from somebody else's priors.
     origin: str = "derived"
+    # How this pattern has fared when its findings were shown. A pattern is not
+    # good because it matches; it is good because what it surfaces is worth
+    # somebody's attention, and only they can say.
+    accepted: int = 0
+    dismissed: int = 0
+
+    @property
+    def is_welcome(self) -> bool:
+        """Whether this has earned its place.
+
+        Silence counts as neither. A pattern is dropped only once it has been
+        dismissed more than it has been accepted and dismissed at least twice —
+        one rejection is a mood, two is a signal.
+        """
+        return not (self.dismissed >= 2 and self.dismissed > self.accepted)
 
     def find(self, root: Path) -> List[Found]:
         """Run this pattern over a repository."""
@@ -210,6 +240,17 @@ Four defects found this way in this project, as calibration:
 
   the user asked a question about the design
   -> is_defect false: a question is not a defect
+
+The expression is the hard part. It must find the defect and nothing else:
+
+  `git` matches every line mentioning git, including imports, comments, and
+  the word in prose — it describes a topic, not a defect
+  `(?:regex|pattern|match)\\s*[=:]` matches most assignments in a codebase that
+  works with patterns at all
+
+If you cannot write an expression that separates the defect from the ordinary
+case, answer is_defect false. A finder that fires everywhere is worse than no
+finder, because a reader stops reading the whole channel.
 """
 
 
@@ -299,7 +340,7 @@ def from_history(
     try:
         from pragmatos import llm
 
-        extract = llm.build_extractor(model=model)
+        extract = llm.build_extractor(model=model or SHARPER)
     except Exception as exc:  # noqa: BLE001
         logger.info("no model available to derive patterns: %s", exc)
         return found
@@ -337,8 +378,17 @@ def from_history(
         pattern = verdict.pattern
         pattern.said, pattern.at = text[:300], when
 
+        # Two derivations of one defect are one defect. The same exchange
+        # described twice, or two exchanges about the same thing, produced
+        # "hardcoded language list" and "Language-specific hardcoded
+        # dependency" — and a survey reporting both reports one problem twice.
         key = pattern.pattern
-        if key in seen:
+        overlap = _covers_same_ground(pattern, found.patterns, root)
+        if key in seen or overlap:
+            if overlap:
+                found.dropped.append(
+                    f"{pattern.name}: finds the same sites as {overlap}"
+                )
             continue
         seen.add(key)
 
@@ -348,6 +398,11 @@ def from_history(
         files = len(hits)
         if sites < TOO_RARE:
             found.dropped.append(f"{pattern.name}: matches nothing here")
+            continue
+        if sites > TOO_MANY:
+            found.dropped.append(
+                f"{pattern.name}: {sites} sites — too many to be one work item"
+            )
             continue
         if total and files / total > TOO_COMMON:
             found.dropped.append(
@@ -361,6 +416,45 @@ def from_history(
     return found
 
 
+DISMISSED = re.compile(
+    r"\b(not a (defect|problem|bug)|that'?s (fine|intentional|deliberate|wrong)|"
+    r"false positive|noise|irrelevant|don'?t (care|report)|ignore (that|those|it)|"
+    r"by design|on purpose|not an issue|stop (reporting|showing))\b",
+    re.I,
+)
+ACCEPTED = re.compile(
+    r"\b(good (catch|find|point)|fixed|fixing|you'?re right|agreed|"
+    r"nice (catch|find)|correct|will fix|let'?s fix)\b",
+    re.I,
+)
+
+
+def weigh(learned: Learned, transcripts: Sequence[Path]) -> Learned:
+    """Count how a project's patterns have fared when they were shown.
+
+    Reads the same exchanges the patterns came from, looking for what a user
+    said after a finding was surfaced. Crude by necessity — it cannot know
+    which finding a remark was about — so a pattern is only dropped on repeated
+    dismissal, and assent merely protects.
+    """
+    from .rules import _turns
+
+    said: List[str] = []
+    for path in transcripts:
+        said.extend(text for text, _ in _turns(path))
+
+    for pattern in learned.patterns:
+        name = pattern.name.lower()
+        for text in said:
+            if name not in text.lower():
+                continue
+            if DISMISSED.search(text):
+                pattern.dismissed += 1
+            elif ACCEPTED.search(text):
+                pattern.accepted += 1
+    return learned
+
+
 def everything(repo: Path | str) -> List[Pattern]:
     """Every pattern that applies to a repository: the floor plus its own.
 
@@ -372,6 +466,10 @@ def everything(repo: Path | str) -> List[Pattern]:
     learned = recall(repo)
     by_name = {p.name.lower(): p for p in seeded()}
     for pattern in learned.patterns:
+        # Dropped once its findings have been dismissed more than welcomed. A
+        # survey reporting seventy-three things is one nobody reads.
+        if not pattern.is_welcome:
+            continue
         by_name[pattern.name.lower()] = pattern
     return list(by_name.values())
 
@@ -412,6 +510,36 @@ def seeded() -> List[Pattern]:
             origin="seeded",
         ),
     ]
+
+
+def _covers_same_ground(
+    pattern: Pattern, already: Sequence[Pattern], root: Path, share: float = 0.6
+) -> str:
+    """The name of an existing pattern this one mostly duplicates.
+
+    Compared by what they *find*, not by what they say: two finders worded
+    differently that land on the same lines are one finding for a reader, and
+    only the sites can settle that.
+    """
+    mine = {
+        (site.where, site.line)
+        for finding in pattern.find(root)
+        for site in finding.sites
+    }
+    if not mine:
+        return ""
+    for other in already:
+        theirs = {
+            (site.where, site.line)
+            for finding in other.find(root)
+            for site in finding.sites
+        }
+        if not theirs:
+            continue
+        common = len(mine & theirs)
+        if common / min(len(mine), len(theirs)) >= share:
+            return other.name
+    return ""
 
 
 def keep(learned: Learned, repo: Path | str) -> Path:

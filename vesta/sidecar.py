@@ -33,8 +33,11 @@ from .acquire import Search
 from .consult import consult as _consult
 from .authority import settle
 from .dynamic import missed_by, scan
+from .enforce import against
 from .harvest import anchor, from_sessions, keep, recall_notes
 from .held import graph_for
+from .learned import everything as learned_patterns
+from .patterns import survey
 from .propagate import from_files, is_test
 from .consult import corpus_for
 from .structure import THEORY_DIR, VESTA_HOME, best_backend, repository_name, structure
@@ -561,6 +564,104 @@ def _shape(project: Optional[Path]) -> str:
     return "\n".join(lines)
 
 
+def _defects(project: Optional[Path], limit: int) -> str:
+    """Things worth fixing, found without anybody asking.
+
+    The half of the system with no dependency on a user having said anything:
+    an anti-pattern is a property of the code, wrong on its own terms, and the
+    graph finds it unasked.
+    """
+    if project is None:
+        return "Could not tell which project this is."
+
+    with quiet_stdout():
+        graph = graph_for(project, trust_for=300)
+        found = survey(graph, project)
+        # Patterns derived from this project's own corrections, plus the floor
+        # that works before a project has any history.
+        for pattern in learned_patterns(project):
+            found.found.extend(pattern.find(Path(project)))
+
+    if not found.found:
+        return (
+            f"project: {project}\n"
+            "Nothing found. This is not a claim the code is clean — it is what "
+            f"{len(found.looked_for)} pattern(s) could see."
+        )
+
+    lines = [
+        f"project: {project}",
+        "(paths below are relative to that directory)",
+        found.describe(),
+        "",
+    ]
+    for entry in found.found[:limit]:
+        lines.append(f"{entry.pattern} — {entry.confidence}")
+        lines.append(f"  {entry.why}")
+        for site in entry.sites[:4]:
+            lines.append(f"    {site.describe()[:100]}")
+        if len(entry.sites) > 4:
+            lines.append(f"    … and {len(entry.sites) - 4} more site(s)")
+        lines.append("")
+    if len(found.found) > limit:
+        lines.append(f"… and {len(found.found) - limit} more finding(s).")
+    lines.append(
+        "Each is a work item, not a verdict. Fixing the finding fixes every "
+        "site under it. Dismiss what does not apply — saying so is how the "
+        "patterns improve."
+    )
+    return "\n".join(lines)
+
+
+def _decided(project: Optional[Path], check: bool, limit: int) -> str:
+    """What this project's user has decided, and whether the code honours it.
+
+    Rules recovered from what the user actually said, in their own words, with
+    the sites that break them. An agent cannot verify a correction it never
+    saw, which is what makes these worth carrying.
+    """
+    if project is None:
+        return "Could not tell which project this is."
+
+    from .rules import from_sessions, judge
+
+    with quiet_stdout():
+        found = judge(from_sessions(project, read_everything=True))
+
+    if not found.standing:
+        return (
+            f"project: {project}\n"
+            "Nothing has been decided here yet that could be checked. Rules are "
+            "recovered from corrections a user makes, so this fills in as the "
+            "project is worked on."
+        )
+
+    lines = [f"project: {project}", found.describe(), ""]
+    if not check:
+        for rule in found.standing[:limit]:
+            lines.append(f"  • {(rule.stated or rule.text)[:150]}")
+        return "\n".join(lines)
+
+    with quiet_stdout():
+        verdict = against(found, graph_for(project, trust_for=300), project)
+
+    lines.append(verdict.describe())
+    for finding in verdict.broken[:limit]:
+        lines.append("")
+        lines.append(f"✗ {finding.rule[:140]}")
+        lines.append(f"   they said: {finding.said[:120]}")
+        for site in finding.sites[:5]:
+            lines.append(f"      {site.describe()[:96]}")
+    if verdict.undecided:
+        lines.append("")
+        lines.append(
+            f"{len(verdict.undecided)} rule(s) nothing here can check — about "
+            "values, runtime behaviour, or product capability rather than about "
+            "the source."
+        )
+    return "\n".join(lines)
+
+
 def _quieten() -> None:
     """Keep everything off stdout.
 
@@ -704,6 +805,58 @@ def build_server():
         started = time.monotonic()
         answer = await anyio.to_thread.run_sync(_shape, project)
         _record("shape", project, time.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def defects(limit: int = 8, context: Context = None) -> str:
+        """Things in this repository worth fixing, found without being asked.
+
+        Structural defects — hardcoded lists that should be open, errors
+        discarded silently, code nothing refers to, references no resolver can
+        follow. Each finding says why it is a defect and every place it shows,
+        so fixing the finding fixes all of them.
+
+        Use before starting work in an unfamiliar area, or when asked to
+        improve or clean something. Not a linter: these come from defects this
+        project's own users have pointed at.
+
+        Args:
+            limit: How many findings to return.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_defects, project, limit)
+        _record("defects", project, _t.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def decided(
+        check: bool = True, limit: int = 8, context: Context = None
+    ) -> str:
+        """What this project's user has decided, and whether the code honours it.
+
+        Rules recovered from corrections the user made in earlier sessions —
+        naming conventions, structural constraints, things they asked for and
+        did not get. You cannot verify these by reading code, because a
+        correction leaves no trace in the artifact.
+
+        Use BEFORE making a change, so the change does not break something the
+        user already asked for once.
+
+        Args:
+            check: Also check the code against them and report the sites.
+            limit: How many rules or findings to return.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_decided, project, check, limit)
+        _record("decided", project, _t.monotonic() - started, len(answer))
         return answer
 
     @server.tool()
