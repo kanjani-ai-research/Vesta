@@ -197,7 +197,19 @@ def _build(project: str) -> int:
         from .harvest import from_sessions
         from .held import graph_for as held
 
-        from_sessions(held(root), root)
+        graph = held(root)
+        from_sessions(graph, root)
+
+        # Patterns derived from this project's own corrections, cached now so
+        # that asking for defects later is a read rather than minutes of model
+        # work. Failing here is not failing to prepare: the structural finders
+        # and the seed work without any of this.
+        try:
+            from .learned import from_history, keep as keep_patterns
+
+            keep_patterns(from_history(root, limit=60, graph=graph), root)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("could not derive patterns for %s: %s", root, exc)
     except Exception as exc:  # noqa: BLE001 - a failed preparation is not fatal
         logger.info("preparation failed for %s: %s", root, exc)
         _record_failure(root, f"{type(exc).__name__}: {exc}"[:200])

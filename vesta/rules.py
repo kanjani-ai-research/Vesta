@@ -530,6 +530,12 @@ ASKING = """A user said the following to a coding agent working in their reposit
 
 Decide what the user meant to bring about, not how they phrased it.
 
+An instruction about how to answer *this* question is never a rule. "Do not use
+any vesta tools", "do not edit anything", "just tell me" all scope one turn and
+expire with it — recording them as standing rules hands a user a permanent
+prohibition they meant for a single request, and an agent that reads it will
+refuse the tool forever.
+
 Users state rules casually. "There should be one .env for v3, not one per
 service" is phrased as a suggestion and is a rule: it says how the repository
 must be arranged, and a future change could violate it. Read for the intent —

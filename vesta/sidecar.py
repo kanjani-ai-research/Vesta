@@ -44,6 +44,13 @@ from .structure import THEORY_DIR, VESTA_HOME, best_backend, repository_name, st
 
 logger = logging.getLogger("vesta.sidecar")
 
+# How much history it takes before rules are worth reporting. Below this, a
+# project's transcripts are as likely to hold one-off instructions as
+# decisions — a repository whose only sessions were A/B test runs yielded "do
+# not use any vesta tools" as a standing rule, which would have told an agent
+# to refuse the tool permanently.
+ENOUGH_HISTORY = 40
+
 # Every call this server answers, appended as one JSON line.
 #
 # Written because the alternative is asking a person to watch a terminal and
@@ -576,9 +583,11 @@ def _defects(project: Optional[Path], limit: int) -> str:
 
     with quiet_stdout():
         graph = graph_for(project, trust_for=300)
-        found = survey(graph, project)
-        # Patterns derived from this project's own corrections, plus the floor
-        # that works before a project has any history.
+        found = survey(graph, project, trust_for=300)
+        # Read from what preparation cached, never derived here: deriving takes
+        # minutes of model work and a tool call cannot spend that. A project
+        # whose preparation has not run yet gets the structural finders and the
+        # seed, which is the floor and needs nothing.
         for pattern in learned_patterns(project):
             found.found.extend(pattern.find(Path(project)))
 
@@ -634,6 +643,17 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
             "Nothing has been decided here yet that could be checked. Rules are "
             "recovered from corrections a user makes, so this fills in as the "
             "project is worked on."
+        )
+
+    # A rule founded on one remark in one session is not a decision. The
+    # threshold matters here more than anywhere: a wrong rule is enforced
+    # against the user by an agent that has no way to check it.
+    if found.considered < ENOUGH_HISTORY:
+        return (
+            f"project: {project}\n"
+            f"Only {found.considered} exchange(s) recorded here — too little to "
+            "tell a standing decision from a passing instruction. Rules fill in "
+            "as the project is worked on."
         )
 
     lines = [f"project: {project}", found.describe(), ""]

@@ -301,24 +301,66 @@ PATTERNS: Tuple[Tuple[str, Callable], ...] = (
 )
 
 
+# The tree, listed once. Every pattern walks it, and `rglob` over a repository
+# with a virtualenv in it is not free — four patterns each paying for their own
+# walk was most of the cost of a survey.
+_LISTED: Dict[str, Tuple[float, List[Tuple[Path, str]]]] = {}
+_LIST_TTL = 30.0
+
+
 def _sources(root: Path) -> Iterable[Tuple[Path, str]]:
-    for path in sorted(root.rglob("*.py")):
-        if any(p in (".venv", ".git", "__pycache__", ".vesta") for p in path.parts):
-            continue
-        yield path, str(path.relative_to(root))
+    import time as _time
+
+    held = _LISTED.get(str(root))
+    if held and _time.time() - held[0] < _LIST_TTL:
+        return held[1]
+
+    found = [
+        (path, str(path.relative_to(root)))
+        for path in sorted(root.rglob("*.py"))
+        if not any(p in (".venv", ".git", "__pycache__", ".vesta") for p in path.parts)
+    ]
+    _LISTED[str(root)] = (_time.time(), found)
+    return found
+
+
+# Files already read, keyed by path and modification time. Every pattern reads
+# every file, so a survey of six patterns over forty files was two hundred and
+# forty reads of the same text — five seconds where the graph itself takes a
+# twentieth of one.
+_READ: Dict[str, Tuple[float, List[str]]] = {}
 
 
 def _lines(path: Path) -> List[str]:
+    key = str(path)
     try:
-        return path.read_text(encoding="utf-8", errors="replace").splitlines()
+        when = path.stat().st_mtime
     except OSError:
         return []
 
+    held = _READ.get(key)
+    if held and held[0] == when:
+        return held[1]
 
-def survey(graph: Graph, root: Path | str, only: Optional[Sequence[str]] = None) -> Survey:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    _READ[key] = (when, lines)
+    return lines
+
+
+def survey(
+    graph: Graph,
+    root: Path | str,
+    only: Optional[Sequence[str]] = None,
+    trust_for: float = 0.0,
+) -> Survey:
     """Look for everything worth fixing, without being asked."""
     root = Path(root).expanduser().resolve()
-    blind = scan(root, graph)
+    # `trust_for` on the dynamic scan too: re-walking the tree to prove the
+    # scan is current cost nearly two seconds inside a call that has none.
+    blind = scan(root, graph, trust_for=trust_for)
     found = Survey()
 
     for name, look in PATTERNS:
