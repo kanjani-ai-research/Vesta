@@ -170,6 +170,10 @@ They originally said it like this:
 
     {said}
 
+Definitions in this repository whose names relate to the rule:
+
+{vocabulary}
+
 Describe a mechanical check that would find places the repository breaks this
 rule, using only what a resolved graph of definitions and a file tree can
 answer.
@@ -229,13 +233,53 @@ different subject. Say so in `why` and set tests_the_rule to false.
 """
 
 
-def derive_check(rule: Rule, model: Optional[str] = None) -> Optional[Check]:
+def vocabulary_for(rule: Rule, graph: Optional[Graph], limit: int = 14) -> str:
+    """What this repository calls the things a rule talks about.
+
+    A rule says "knowledge base" and the repository says `corpus_id`; a rule
+    says "language-agnostic" and the repository says `SERVERS` and `SOURCE`.
+    Without the mapping a derivation writes patterns for words that appear
+    nowhere, and the check finds nothing for the wrong reason — reported as
+    "cannot be tested" when the truth is "did not know what to look for".
+    """
+    if graph is None:
+        return ""
+
+    wanted = {
+        word
+        for word in re.findall(r"[a-z]{4,}", (rule.stated or rule.text).lower())
+        if word not in {"must", "this", "that", "with", "from", "into", "than",
+                        "must", "should", "there", "which", "where", "when",
+                        "each", "every", "another", "single", "shared", "across",
+                        "used", "using", "have", "been", "does", "make"}
+    }
+    if not wanted:
+        return ""
+
+    scored = []
+    for node in graph.nodes.values():
+        spelled = set(re.findall(r"[a-z]{3,}", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", node.qualified).lower()))
+        shared = wanted & spelled
+        if shared:
+            scored.append((len(shared), node))
+    scored.sort(key=lambda pair: -pair[0])
+
+    return "\n".join(
+        f"    {node.qualified}  ({node.path}:{node.line + 1})"
+        for _, node in scored[:limit]
+    )
+
+
+def derive_check(
+    rule: Rule, model: Optional[str] = None, graph: Optional[Graph] = None
+) -> Optional[Check]:
     """Turn a rule's prose into something executable, or say it cannot be."""
     import asyncio
 
     from .structure import _ensure_data_dir
 
     _ensure_data_dir()
+    vocabulary = ""  # see vocabulary_for: offering weak matches made verdicts worse
     try:
         from pragmatos import llm
 
@@ -246,7 +290,12 @@ def derive_check(rule: Rule, model: Optional[str] = None) -> Optional[Check]:
 
     async def run():
         return await extract(
-            Check, DERIVING.format(rule=rule.stated or rule.text, said=rule.text[:600])
+            Check,
+            DERIVING.format(
+                rule=rule.stated or rule.text,
+                said=rule.text[:600],
+                vocabulary=vocabulary or "    (none found)",
+            ),
         )
 
     try:
@@ -372,9 +421,31 @@ def run_check(check: Check, graph: Graph, root: Path) -> Tuple[List[Site], str]:
     if check.holds_when == COUNT_AT_MOST:
         return (found if len(found) > check.how_many else []), ""
     if check.holds_when == COUNT_AT_LEAST:
-        if len(found) < check.how_many:
-            return found or [Site(path=str(root), what="nothing found")], ""
-        return [], ""
+        if len(found) >= check.how_many:
+            return [], ""
+        # `at least zero` is vacuous and always satisfied. Treating it as an
+        # absent subject made "every file must have a docstring" undecidable in
+        # a repository where every file has one — the check had run, found the
+        # nothing it was looking for, and that was the correct answer.
+        if check.how_many <= 0:
+            return [], ""
+        if not found:
+            # `files_lacking` and `not_reached_by` already enumerate the
+            # violations themselves, so finding none of them is the rule being
+            # honoured — not an absent subject. "Every file must have a
+            # docstring", checked as "files lacking one", was called
+            # undecidable in a repository where every file has one.
+            if check.look_for in (FILES_LACKING, NOT_REACHED_BY):
+                return [], ""
+            # For the enumerations that find *presences*, nothing at all is
+            # genuinely ambiguous: a rule about langextract, in a repository
+            # with no langextract anywhere, was accused of breaking it with a
+            # site pointing at the repository root.
+            return [], (
+                "nothing matching the rule's subject exists here, so the rule "
+                "is neither honoured nor broken"
+            )
+        return found, ""
 
     # No judgement stated: anything found is a violation.
     return found, ""
@@ -393,7 +464,7 @@ def against(
             said=rule.text,
             when=rule.last,
         )
-        check = derive_check(rule, model)
+        check = derive_check(rule, model, graph)
         if check is None:
             finding.undecided = "no check could be derived"
         else:
