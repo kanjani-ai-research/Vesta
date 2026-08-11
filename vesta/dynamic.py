@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Set
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -110,7 +110,15 @@ class Blindspot(BaseModel):
         )
 
 
-def scan(root: Path | str, graph: Optional[Graph] = None) -> Blindspot:
+# Scans already done, keyed by the state of the tree. Re-reading every source
+# file took two and a half seconds on an ordinary repository, on a path that
+# runs before every prompt — the one place where seconds are not available.
+_SCANNED: Dict[str, Tuple[str, "Blindspot"]] = {}
+
+
+def scan(
+    root: Path | str, graph: Optional[Graph] = None, trust_for: float = 0.0
+) -> Blindspot:
     """Find references that reach a name without a path a server can follow.
 
     Textual by necessity. The point is not to resolve them — that cannot be done
@@ -118,6 +126,50 @@ def scan(root: Path | str, graph: Optional[Graph] = None) -> Blindspot:
     can say what it may have missed.
     """
     root = Path(root).expanduser().resolve()
+
+    from .held import GRAPH_DIR, _shape
+
+    # On the prompt path a caller passes `trust_for`, and re-walking the tree
+    # to prove the scan is current costs more than every other step combined.
+    if trust_for:
+        import hashlib as _h
+
+        recent = GRAPH_DIR / f"scan-{_h.sha256(str(root).encode()).hexdigest()[:12]}.json"
+        try:
+            import time as _time
+
+            if recent.is_file() and _time.time() - recent.stat().st_mtime < trust_for:
+                import json as _j
+
+                found = Blindspot.model_validate(
+                    _j.loads(recent.read_text(encoding="utf-8"))["scan"]
+                )
+                return found
+        except (OSError, ValueError, KeyError):
+            pass
+
+    state = _shape(root)
+    remembered = _SCANNED.get(str(root))
+    if remembered and remembered[0] == state:
+        return remembered[1]
+
+    # On disk as well as in memory. Every hook invocation is a new process, so
+    # an in-memory cache is never read: the second prompt paid the full scan
+    # again exactly as the first did.
+    import hashlib
+    import json as _json
+
+    kept = GRAPH_DIR / f"scan-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
+    if kept.is_file():
+        try:
+            payload = _json.loads(kept.read_text(encoding="utf-8"))
+            if payload.get("state") == state:
+                found = Blindspot.model_validate(payload["scan"])
+                _SCANNED[str(root)] = (state, found)
+                return found
+        except (OSError, ValueError, KeyError):
+            pass
+
     found = Blindspot()
 
     by_name: Dict[str, List[str]] = {}
@@ -169,6 +221,15 @@ def scan(root: Path | str, graph: Optional[Graph] = None) -> Blindspot:
                         )
                     )
 
+    _SCANNED[str(root)] = (state, found)
+    try:
+        GRAPH_DIR.mkdir(parents=True, exist_ok=True)
+        kept.write_text(
+            _json.dumps({"state": state, "scan": found.model_dump(mode="json")}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
     return found
 
 

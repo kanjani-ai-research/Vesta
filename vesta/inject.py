@@ -50,6 +50,10 @@ BUDGET = 3000
 # in a way this can help with.
 LEAST = 1
 
+# How long a cached graph is used without re-checking the tree. Long enough to
+# cover a working session, short enough that a rebuild is never far away.
+TRUST_FOR = 300.0
+
 # Words that are definition names in this codebase and also ordinary English.
 # Matching them would inject on almost every prompt.
 TOO_COMMON = {
@@ -84,8 +88,30 @@ def context_for(prompt: str, project: Path | str, budget: int = BUDGET) -> str:
     time and is the point.
     """
     root = Path(project).expanduser().resolve()
+
+    # Never build here. A graph takes eight to twelve seconds on an ordinary
+    # repository, and a hook that spends that on a user's first message has
+    # made the session worse whether or not it later helps. If nothing is
+    # ready, start preparing and say nothing — the next prompt may be able to
+    # answer, and this one was never owed an answer.
+    from .ready import prepare, readiness
+
+    state = readiness(root)
+    if not state.can_answer:
+        prepare(root)
+        return ""
+
     try:
-        graph = graph_for(root)
+        # Trust a recently written graph without re-walking the tree to check.
+        #
+        # The staleness fingerprint stats every file, which costs about one and
+        # three quarter seconds on an ordinary repository — an order of
+        # magnitude more than everything else here combined, on the one path
+        # that runs before every prompt. A graph written in the last few minutes
+        # is close enough: the cost of being briefly out of date is a stale line
+        # number in an injected note, and the cost of checking is a pause the
+        # user feels on every message.
+        graph = graph_for(root, trust_for=TRUST_FOR)
     except Exception as exc:  # noqa: BLE001 - a hook must never break a session
         logger.info("no graph for %s: %s", root, exc)
         return ""
@@ -96,7 +122,7 @@ def context_for(prompt: str, project: Path | str, budget: int = BUDGET) -> str:
 
     harvest = from_sessions(graph, root)
     standing = settle(graph, harvest.notes, root)
-    blind = scan(root, graph)
+    blind = scan(root, graph, trust_for=TRUST_FOR)
 
     lines: List[str] = [
         "Vesta already holds analysis of what this prompt names. This is not a "

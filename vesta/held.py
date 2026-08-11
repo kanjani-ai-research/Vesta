@@ -40,8 +40,26 @@ GRAPH_DIR = VESTA_HOME / "graphs"
 IGNORED = (".venv", "node_modules", ".git", "target", "__pycache__", ".vesta")
 
 
+_SHAPES: Dict[str, Tuple[str, float]] = {}
+
+# How long a fingerprint is reused within one process. Two seconds covers the
+# several callers of a single prompt and expires long before anything else.
+_SHAPE_TTL = 2.0
+
+
 def _shape(root: Path) -> str:
-    """A fingerprint of every file the graph could have been built from."""
+    """A fingerprint of every file the graph could have been built from.
+
+    Memoised for the life of the process. Walking the tree costs a second and a
+    half on an ordinary repository, and three separate callers — the graph, the
+    dynamic scan, and the readiness check — each walked it on every prompt.
+    """
+    # Memoised only briefly. A hook is a short-lived process and cannot see a
+    # change it makes itself, but a long-lived one — the sidecar, a test — must
+    # not be told the tree is unchanged forever.
+    remembered = _SHAPES.get(str(root))
+    if remembered and time.time() - remembered[1] < _SHAPE_TTL:
+        return remembered[0]
     marks = []
     for path in sorted(root.rglob("*")):
         if any(part in IGNORED for part in path.parts):
@@ -52,7 +70,9 @@ def _shape(root: Path) -> str:
                 marks.append(f"{path}:{stat.st_size}:{int(stat.st_mtime)}")
         except OSError:
             continue
-    return hashlib.sha256("\n".join(marks).encode("utf-8")).hexdigest()[:16]
+    found = hashlib.sha256("\n".join(marks).encode("utf-8")).hexdigest()[:16]
+    _SHAPES[str(root)] = (found, time.time())
+    return found
 
 
 def _where(root: Path) -> Path:
@@ -65,9 +85,29 @@ def _where(root: Path) -> Path:
 _HELD: Dict[str, Tuple[str, Graph]] = {}
 
 
-def graph_for(repo: Path | str, rebuild: bool = False) -> Graph:
-    """The repository's graph, built if there is not a current one."""
+def graph_for(
+    repo: Path | str, rebuild: bool = False, trust_for: float = 0.0
+) -> Graph:
+    """The repository's graph, built if there is not a current one.
+
+    `trust_for` lets a caller on a latency-critical path use a recently written
+    graph without re-walking the tree to prove it is current. The walk is the
+    expensive part by an order of magnitude, and a caller answering a prompt
+    cannot spend it.
+    """
     root = Path(repo).expanduser().resolve()
+
+    if trust_for:
+        cached = _where(root)
+        try:
+            if cached.is_file() and time.time() - cached.stat().st_mtime < trust_for:
+                payload = json.loads(cached.read_text(encoding="utf-8"))
+                found = Graph.model_validate(payload["graph"])
+                _HELD[str(root)] = (payload.get("shape", ""), found)
+                return found
+        except (OSError, ValueError, KeyError):
+            pass
+
     shape = _shape(root)
 
     remembered = _HELD.get(str(root))
