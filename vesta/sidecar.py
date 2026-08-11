@@ -308,6 +308,7 @@ def _touches(paths: List[str], project: Optional[Path], hops: int) -> str:
     with quiet_stdout():
         graph = graph_for(project)
         found = from_files(graph, paths, hops=hops)
+        harvest = from_sessions(graph, project)
 
     if not found.reached:
         return (
@@ -322,6 +323,21 @@ def _touches(paths: List[str], project: Optional[Path], hops: int) -> str:
         node = graph.nodes.get(entry.node)
         if node:
             lines.append(f"  [{entry.hops}] {node.qualified}  {node.path}:{node.line + 1}")
+
+    # Which of the reached definitions someone has already explained. An agent
+    # about to read them to understand the blast radius should know the
+    # reasoning may already exist.
+    explained = [
+        graph.nodes[r.node].name
+        for r in found.reached
+        if r.node in graph.nodes and harvest.for_node(r.node)
+    ]
+    if explained:
+        lines.append("")
+        lines.append(
+            "  ⓘ already explained in earlier sessions — call known() rather "
+            "than re-reading: " + ", ".join(sorted(set(explained))[:8])
+        )
 
     tests = found.tests(graph)
     if tests:
@@ -390,6 +406,7 @@ def _uses(name: str, project: Optional[Path]) -> str:
 
     with quiet_stdout():
         graph = graph_for(project)
+        harvest = from_sessions(graph, project)
 
     wanted = [
         n for n in graph.nodes.values()
@@ -400,6 +417,19 @@ def _uses(name: str, project: Optional[Path]) -> str:
 
     lines = [f"project: {project}"]
     for node in wanted[:8]:
+        # Say when understanding already exists. An agent cannot ask for what it
+        # does not know is there: a live run called `uses` and `touches` and
+        # never `known`, then re-read four files to re-derive an analysis that
+        # was already recorded. Announcing it is the difference between a tool
+        # that is available and one that is used.
+        held = harvest.for_node(node.id)
+        if held:
+            lines.append("")
+            lines.append(
+                f"  ⓘ {len(held)} recorded account(s) of what {node.name} does and "
+                f"how it fails — call known({node.name!r}) instead of reading the "
+                "file to re-derive it."
+            )
         lines.append("")
         lines.append(f"{node.qualified}  {node.path}:{node.line + 1}")
         callers = graph.referenced_by(node.id)
