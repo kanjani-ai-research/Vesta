@@ -26,9 +26,14 @@ knowledge bases whatever it is called, and `build` is about whatever it builds.
 
 ## What to do
 
-1. Read the repository's own account of itself. Its README, and the module
-   docstrings of its largest source files — `Glob` for source files, `Read` the
-   opening of each. Twelve to twenty files is enough; the largest carry the purpose.
+1. Read the repository's own account of itself: the module docstrings of its
+   largest source files — `Glob` for source files, `Read` the opening of each.
+   Twelve to twenty files is enough; the largest carry the purpose. A README is
+   worth reading where one exists, and many repositories have none, so check
+   before reading rather than assuming.
+
+   Ignore anything under `.claude/` — those are instructions to agents, not work
+   this repository performs.
 
 2. Name the work, as three kinds of term:
    - **domain** — an area this project works in. Five to twelve.
