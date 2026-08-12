@@ -56,11 +56,24 @@ TRUST_FOR = 300.0
 
 # Words that are definition names in this codebase and also ordinary English.
 # Matching them would inject on almost every prompt.
+# Words that are ordinary English as often as they are identifiers. A prompt
+# saying "tell me what you would change" names no definition, and answering it
+# with everything called `Change` teaches an agent to skim past this channel —
+# which costs more than the occasional real match is worth.
+#
+# Extended after a live session: "change", "work", "rule", "rules" and the
+# other verbs below each pulled an unrelated definition into a prompt that was
+# plainly not about them.
 TOO_COMMON = {
     "build", "run", "read", "write", "check", "test", "tests", "main", "get",
     "set", "add", "map", "list", "text", "path", "line", "name", "type", "kind",
     "found", "where", "about", "known", "used", "keep", "note", "notes", "term",
     "graph", "node", "edge", "search", "answer", "result", "results", "session",
+    "change", "changes", "changed", "work", "works", "rule", "rules", "said",
+    "say", "ask", "asked", "show", "make", "made", "call", "calls", "called",
+    "use", "uses", "using", "look", "find", "help", "start", "stop", "open",
+    "close", "hold", "held", "move", "point", "value", "values", "data",
+    "field", "fields", "item", "items", "state", "status", "context", "prompt",
 }
 
 
@@ -200,11 +213,23 @@ def main() -> int:
     prompt = str(payload.get("prompt") or "")
     project = payload.get("cwd") or "."
 
+    parts = []
     try:
-        said = context_for(prompt, project)
+        parts.append(context_for(prompt, project))
     except Exception as exc:  # noqa: BLE001 - never break the session
         logger.info("could not build context: %s", exc)
-        said = ""
+
+    # A rule the user is stating right now, and a rule already in doubt for
+    # what they are about to change. Both belong here rather than in a skill:
+    # a skill loads when its description matches, and a user who states a rule
+    # in the course of asking for something else does not match a description
+    # about asking. Verified the hard way — in a live session the instruction
+    # was never in front of the agent, so nothing was recorded.
+    for offer in (_a_rule_stated(prompt), _a_rule_in_doubt(prompt, project)):
+        if offer:
+            parts.append(offer)
+
+    said = "\n\n".join(p for p in parts if p)
 
     if said:
         _note(prompt, project, len(said))
@@ -216,6 +241,49 @@ def main() -> int:
             sys.stdout,
         )
     return 0
+
+
+def _a_rule_stated(prompt: str) -> str:
+    """What to say when the user has just stated a standing rule.
+
+    The regex only decides whether to *mention* it. Whether the sentence really
+    is a standing rule is the agent's judgement, and it has the whole prompt —
+    including everything a pattern cannot see. Being wrong here costs one line
+    of context; being silent costs the rule.
+    """
+    from .rules import constrains
+
+    if not constrains(prompt):
+        return ""
+
+    return (
+        "The user may have just stated a standing rule for this project. If "
+        "they did — a constraint on the code rather than on this turn, said "
+        "rather than mused — call the `declare` tool with it in their own "
+        "words, say in one line that it was recorded, and carry on with what "
+        "they actually asked for. If it only scopes this turn, do nothing."
+    )
+
+
+def _a_rule_in_doubt(prompt: str, project: str) -> str:
+    """A rule the user set that the files they name no longer match.
+
+    Raised here rather than waiting to be asked, because nobody runs a command
+    to find out whether they are about to break their own rule.
+    """
+    import re as _re
+
+    paths = _re.findall(r"[\w./-]+\.[a-zA-Z]{1,6}\b", prompt)
+    if not paths:
+        return ""
+
+    try:
+        from .sidecar import _bears_on
+
+        return _bears_on(paths[:6], Path(project))
+    except Exception as exc:  # noqa: BLE001 - never break the session
+        logger.info("could not check what bears on this: %s", exc)
+        return ""
 
 
 def _note(prompt: str, project: str, size: int) -> None:

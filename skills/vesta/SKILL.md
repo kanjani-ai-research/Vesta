@@ -1,6 +1,6 @@
 ---
 name: vesta
-description: Understand an unfamiliar repository, find what is worth fixing in it, or recall what its user has already decided. Use when asked what a codebase does, where some kind of work happens in it, what a change would affect, what to clean up or improve, why something is done a particular way, or when starting work in a repository you have not seen before.
+description: Understand an unfamiliar repository, find what is worth fixing in it, recall what its user has already decided, and record a rule the moment they state one. Use when asked what a codebase does, where some kind of work happens in it, what a change would affect, what to clean up or improve, why something is done a particular way, when starting work in a repository you have not seen before, and whenever the user states a standing constraint on the code — "every module must open with a docstring", "one .env for the whole project", "never a bare except" — which must be recorded as they say it rather than looked up.
 tools: Read, Grep, Glob, Bash
 ---
 

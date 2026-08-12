@@ -76,7 +76,7 @@ PREDICTS_NOTHING = re.compile(
 # constraint would hand back somebody's open question as an obligation. What
 # separates them is that a proposal invites an answer and a rule does not.
 DELIBERATES = re.compile(
-    r"(\?\s*$|\bdo you (agree|think)\b|\bwhat do you think\b|"
+    r"(\bdo you (agree|think)\b|\bwhat do you think\b|"
     r"\bi think\b.*\b(should|could|might|would)\b|"
     r"\b(thoughts|your take|makes sense|sound right|y or n|y o n)\b|"
     r"\bi (hope|wonder|suspect|wish)\b|\bmaybe\b|\bperhaps\b)",
@@ -84,9 +84,27 @@ DELIBERATES = re.compile(
 )
 
 # A correction that scopes one turn. These expire; they are not standing rules.
+#
+# Widened after a live test recorded "don't edit anything yet, just tell me
+# what you would change" as a standing rule — the most turn-scoped sentence
+# imaginable, admitted because none of the old phrases matched it. What marks
+# these is a constraint on *what to do next*, not on what the code must be:
+# "yet", "for now", "just tell me", "hold off".
 THIS_TURN = re.compile(
     r"\b(for (?:this|now)|right now|in this (?:case|turn|session)|"
-    r"do not edit anything|for the time being|just this once)\b",
+    r"do (?:not|n'?t) edit anything|for the time being|just this once|"
+    r"(?:do)?n'?t .{0,30}\byet\b|\byet,? just\b|just tell me|"
+    r"hold off|wait (?:on|before)|before you (?:start|begin|do))\b",
+    re.I,
+)
+
+# A rule that happens to be asked about in the same breath. "every module must
+# open with a docstring — does resolve.py follow that?" states a constraint and
+# then asks a question about it; the question is not what makes it uncertain.
+# So a trailing question mark disqualifies a statement only when the constraint
+# itself is what is being questioned.
+ASKS_ABOUT_IT = re.compile(
+    r"^\s*(should|must|do|does|is|are|can|could|would|why|what|how|when)\b",
     re.I,
 )
 
@@ -320,6 +338,11 @@ def constrains(text: str) -> bool:
         return False
     if THIS_TURN.search(said):
         # Scoped to a turn: real, and expiring. Not a standing rule.
+        return False
+    if said.endswith("?") and ASKS_ABOUT_IT.match(said):
+        # The constraint itself is the question, not a statement followed by
+        # one. "must every module have a docstring?" asks; "every module must
+        # have a docstring — does this one?" states and then asks.
         return False
     if DELIBERATES.search(said):
         # A proposal or a question. Recording it would return a user's own open

@@ -172,3 +172,83 @@ def test_the_newest_is_first(tmp_path):
     confirm.record(tmp_path, "newer", confirm.IS_A_RULE, at=now)
     lately = confirm.recall(tmp_path).lately(now - 86400)
     assert [v.text for v in lately] == ["newer", "older"]
+
+
+# ── What a live session found ───────────────────────────────────────────────
+#
+# Three defects, none visible from any test that existed. Capture never fired
+# because the instruction lived in a skill that was never selected; the rule
+# was rejected and the turn-scoped instruction accepted; and the injection
+# matched an ordinary English word to an unrelated definition.
+
+
+def test_a_stated_rule_is_recognised_even_when_a_question_follows():
+    """The live failure. "every module must open with a docstring — does
+    resolve.py follow that?" states a rule and then asks about it; the question
+    mark made it read as deliberation and the rule was thrown away."""
+    from vesta.rules import constrains
+
+    assert constrains(
+        "in this project every module must open with a docstring saying what "
+        "it is for. can you check whether resolve.py follows that?"
+    )
+
+
+def test_a_turn_scoped_instruction_is_still_refused():
+    """The same live session recorded this as a standing rule — the most
+    turn-scoped sentence imaginable."""
+    from vesta.rules import constrains
+
+    assert not constrains(
+        "don't edit anything yet, just tell me what you would change in vesta/cli.py"
+    )
+    assert not constrains("hold off on the refactor for now")
+    assert not constrains("just tell me what you would do, don't change it yet")
+
+
+def test_a_constraint_that_is_itself_the_question_is_refused():
+    """Asking whether a rule should exist is not stating one."""
+    from vesta.rules import constrains
+
+    assert not constrains("must every module have a docstring?")
+    assert not constrains("should we pin every dependency?")
+
+
+def test_the_hook_tells_the_agent_to_record_a_stated_rule():
+    """The mechanism, and why it moved. A skill loads when its description
+    matches; a user who states a rule while asking for something else matches
+    no description about asking, so the instruction was never in front of the
+    agent and nothing was recorded."""
+    from vesta.inject import _a_rule_stated
+
+    said = _a_rule_stated(
+        "in this project every module must open with a docstring saying what "
+        "it is for. can you check whether resolve.py follows that?"
+    )
+    assert "declare" in said
+    assert "own words" in said
+    # And it leaves the judgement with the agent rather than asserting.
+    assert "may have" in said
+    assert "if it only scopes this turn, do nothing" in said.lower()
+
+
+def test_the_hook_says_nothing_about_a_turn_scoped_instruction():
+    from vesta.inject import _a_rule_stated
+
+    assert _a_rule_stated("don't edit anything yet, just tell me") == ""
+    assert _a_rule_stated("add a field to the form") == ""
+
+
+def test_an_ordinary_english_word_is_not_a_definition():
+    """"tell me what you would change" named no definition, and answering it
+    with everything called `Change` teaches an agent to skim past the channel."""
+    from vesta.inject import TOO_COMMON
+
+    for word in ("change", "work", "rule", "said", "use", "value", "state"):
+        assert word in TOO_COMMON
+
+
+def test_the_skill_description_covers_stating_a_rule():
+    """It is what decides whether the skill is selected at all."""
+    said = _flat(SKILL.read_text(encoding="utf-8").split("---")[1])
+    assert "states a standing constraint" in said or "record a rule the moment" in said
