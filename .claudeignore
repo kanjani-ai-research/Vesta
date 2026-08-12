@@ -1,0 +1,9 @@
+# Not part of the plugin. A copied virtualenv has absolute paths baked into it,
+# so it is not merely wasted space — it is an interpreter that cannot run.
+.venv/
+var/
+doc/
+tests/
+.pytest_cache/
+*.egg-info/
+__pycache__/
