@@ -314,45 +314,19 @@ STOP = {
 }
 
 
-def derive_check(
-    rule: Rule,
-    model: Optional[str] = None,
-    graph: Optional[Graph] = None,
-    root: Optional[Path] = None,
-) -> Optional[Check]:
-    """Turn a rule's prose into something executable, or say it cannot be."""
-    import asyncio
-
-    from .structure import _ensure_data_dir
-
-    _ensure_data_dir()
-    vocabulary = what_the_code_says(rule, graph, Path(root) if root else Path.cwd())
-    try:
-        from pragmatos import llm
-
-        extract = llm.build_extractor(model=model)
-    except Exception as exc:  # noqa: BLE001
-        logger.info("no model available to derive a check: %s", exc)
+def _check_on(rule: Rule) -> Optional[Check]:
+    """The executable check a rule carries, if it carries one."""
+    if not getattr(rule, "look_for", "") or not getattr(rule, "pattern", ""):
         return None
-
-    async def run():
-        # Substituted by replacement, not by `format`. The passages come from
-        # source, and source contains braces — an f-string in a docstring made
-        # `format` read `{node.name}` as a placeholder and fail the whole
-        # derivation, which surfaced as "no check could be derived" for a rule
-        # whose subject the repository describes plainly.
-        prompt = (
-            DERIVING.replace("{rule}", rule.stated or rule.text)
-            .replace("{said}", rule.text[:600])
-            .replace("{vocabulary}", vocabulary or "    (none found)")
-        )
-        return await extract(Check, prompt)
-
-    try:
-        return asyncio.run(run())
-    except Exception as exc:  # noqa: BLE001
-        logger.info("could not derive a check: %s", exc)
-        return None
+    return Check(
+        look_for=rule.look_for,
+        pattern=rule.pattern,
+        within=rule.within or r"\.py$",
+        holds_when=rule.holds_when,
+        how_many=rule.how_many,
+        why=rule.how,
+        tests_the_rule=True,
+    )
 
 
 def _readable(root: Path, within: str) -> Iterable[Tuple[Path, str]]:
@@ -514,9 +488,18 @@ def against(
             said=rule.text,
             when=rule.last,
         )
-        check = derive_check(rule, model, graph, root)
+        # The check the agent wrote, never one derived here. Deriving is model
+        # work and this runs inside a tool call, which has none — an earlier
+        # version called a model here and, when it could not, reported every
+        # rule as "could not be checked" rather than failing. Degrading to
+        # useless is worse than degrading to honest.
+        check = _check_on(rule)
         if check is None:
-            finding.undecided = "no check could be derived"
+            finding.undecided = (
+                "no check was written for this rule"
+                if rule.check != UNDERIVED
+                else "nothing here can check a rule of this kind"
+            )
         else:
             sites, why = run_check(check, graph, root)
             finding.sites = sites[:20]

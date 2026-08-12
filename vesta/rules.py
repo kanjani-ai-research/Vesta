@@ -132,6 +132,15 @@ class Rule(BaseModel):
     stated: str = ""
     # Why this was not a rule, when something decided it was not.
     why_not: str = ""
+    # How to look for a violation, written by whatever judged the rule. Held on
+    # the rule rather than derived when needed: deriving is model work, and the
+    # place that needs it is a tool call, which has no model. A rule without one
+    # is reported as unchecked rather than silently passing.
+    look_for: str = ""
+    pattern: str = ""
+    within: str = ""
+    holds_when: str = ""
+    how_many: int = 0
 
     @property
     def times(self) -> int:
@@ -225,56 +234,6 @@ This only decides what is read more carefully afterwards, so lean towards yes.
 {said}
 \"\"\"
 """
-
-
-def sift(turns: Sequence[str], model: Optional[str] = None) -> List[str]:
-    """Narrow many turns to those worth judging, by reading them.
-
-    Patterns were doing this and were too brittle: they dropped thirty-five
-    turns containing rule words outright, including "v3 is the namespace for
-    the family of rewrites" — a naming rule that was then broken. Negation is
-    the specific thing they cannot see, and it is the whole distinction between
-    "we should use postgres" and "we should not use postgres".
-
-    Falls back to the patterns when no model is reachable, because a brittle
-    sieve is better than none.
-    """
-    import asyncio
-
-    from .structure import _ensure_data_dir
-
-    _ensure_data_dir()
-    try:
-        from pragmatos import llm
-
-        extract = llm.build_extractor(model=model)
-    except Exception as exc:  # noqa: BLE001
-        logger.info("no model to sift with, falling back to patterns: %s", exc)
-        return [t for t in turns if constrains(t)]
-
-    async def run() -> List[str]:
-        # Concurrently: two hundred turns one at a time is minutes of waiting
-        # for work that has no order to it. The gatherer already bounds its own
-        # concurrency, so this does not need to.
-        async def worth(said: str) -> Tuple[str, bool]:
-            try:
-                verdict = await extract(Worth, SIFTING.format(said=said[:1200]))
-            except Exception:  # noqa: BLE001 - one bad call is not a policy
-                verdict = None
-            # Unjudged goes forward: the expensive stage will settle it.
-            return said, (verdict is None or verdict.worth_judging)
-
-        answered = await asyncio.gather(*(worth(s) for s in turns))
-        return [said for said, keep in answered if keep]
-
-    try:
-        return asyncio.run(run())
-    except Exception as exc:  # noqa: BLE001
-        logger.info("could not sift: %s", exc)
-        return [t for t in turns if constrains(t)]
-
-
-# ── Noticing ─────────────────────────────────────────────────────────────
 
 
 def _names_in(text: str) -> List[str]:
@@ -562,59 +521,6 @@ async def _judge_one(extract, said: str) -> Optional["Judgement"]:
     return await extract(Judgement, ASKING.format(said=said[:1500]))
 
 
-def judge(found: "Found", model: Optional[str] = None) -> "Found":
-    """Settle what each candidate actually is, by reading it.
-
-    Rewrites `found` in place: candidates the model rejects are dropped, the
-    rest carry the rule as stated plainly, and gaps are rebuilt from what
-    survives. The sieve above decides what is *asked about*; this decides what
-    is *true*.
-    """
-    import asyncio
-
-    from .structure import _ensure_data_dir
-
-    _ensure_data_dir()
-    try:
-        from pragmatos import llm
-
-        extract = llm.build_extractor(model=model)
-    except Exception as exc:  # noqa: BLE001 - unjudged is better than wrong
-        logger.info("no model available to judge rules: %s", exc)
-        return found
-
-    async def run() -> List[Tuple["Rule", Optional["Judgement"]]]:
-        verdicts = await asyncio.gather(
-            *(_judge_one(extract, rule.text) for rule in found.rules)
-        )
-        return list(zip(found.rules, verdicts))
-
-    try:
-        judged = asyncio.run(run())
-    except Exception as exc:  # noqa: BLE001
-        logger.info("could not judge rules: %s", exc)
-        return found
-
-    kept: List["Rule"] = []
-    found.gaps = []
-    for rule, verdict in judged:
-        if verdict is None or not verdict.is_rule:
-            rule.why_not = (verdict.why_not if verdict else "not judged")[:200]
-            found.rejected.append(rule)
-            continue
-        rule.stated = verdict.rule[:300]
-        rule.check = verdict.check or UNDERIVED
-        rule.how = verdict.how[:300]
-        kept.append(rule)
-        if rule.check == UNDERIVED:
-            found.gaps.append(
-                Gap(text=rule.stated or rule.text, missing=rule.how, names=rule.names)
-            )
-
-    found.rules = kept
-    return found
-
-
 def keep_rules(found: Found, repo: Path | str) -> Path:
     """Write what was judged, so a tool can read it without a model."""
     import hashlib
@@ -650,12 +556,29 @@ def recall_rules(repo: Path | str) -> Optional[Found]:
 # How a judged rule is written by an agent: `check | rule | what they said`.
 JUDGED = re.compile(r"^\s*(traversal|behaviour|artefact|underived)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*$", re.I)
 
+# An executable check, when the agent could write one:
+#   check: files_matching /\.env$/ at_most 1
+CHECK = re.compile(
+    r"^\s*check:\s*(\w+)\s+/(.+?)/\s+(at_most|at_least)\s+(\d+)\s*$", re.I
+)
+
 
 def read_judged(text: str) -> List[Rule]:
     """Parse the rules an agent kept, ignoring whatever else it wrote."""
     found: List[Rule] = []
     for line in text.splitlines():
         line = line.lstrip("-*• \t")
+
+        # A check belongs to the rule above it.
+        checked = CHECK.match(line)
+        if checked and found:
+            look_for, pattern, holds, many = checked.groups()
+            found[-1].look_for = look_for.lower()
+            found[-1].pattern = pattern
+            found[-1].holds_when = f"count_{holds.lower()}"
+            found[-1].how_many = int(many)
+            continue
+
         matched = JUDGED.match(line)
         if not matched:
             continue

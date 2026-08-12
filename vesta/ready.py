@@ -200,31 +200,12 @@ def _build(project: str) -> int:
         graph = held(root)
         from_sessions(graph, root)
 
-        # Patterns derived from this project's own corrections, cached now so
-        # that asking for defects later is a read rather than minutes of model
-        # work. Failing here is not failing to prepare: the structural finders
-        # and the seed work without any of this.
-        try:
-            from .learned import from_history, keep as keep_patterns
-
-            keep_patterns(from_history(root, limit=60, graph=graph), root)
-        except Exception as exc:  # noqa: BLE001
-            logger.info("could not derive patterns for %s: %s", root, exc)
-
-        # The ontology of what this repository's work is, and the reading of
-        # its definitions against it. This is the expensive half — a model
-        # naming the work, then reading each definition — and it is why the
-        # crossing between code and concept costs nothing when asked for.
-        try:
-            from .domain import as_terms, derive
-            from .traverse import keep as keep_map
-            from .traverse import read_in
-
-            ontology = derive(root)
-            if ontology is not None and ontology.terms:
-                keep_map(read_in(graph, as_terms(ontology), root, limit=200), root)
-        except Exception as exc:  # noqa: BLE001
-            logger.info("could not read %s against its ontology: %s", root, exc)
+        # Nothing here calls a model. Deriving patterns, naming a domain and
+        # reading code against it are judgement, and judgement belongs to the
+        # `vesta-domain`, `vesta-rules` and `vesta-defects` agents, which run on
+        # the host's inference and cost the user no API key. Preparation builds
+        # what is mechanical — the graph, the harvest — so that when an agent
+        # has judged, asking is a read.
     except Exception as exc:  # noqa: BLE001 - a failed preparation is not fatal
         logger.info("preparation failed for %s: %s", root, exc)
         _record_failure(root, f"{type(exc).__name__}: {exc}"[:200])

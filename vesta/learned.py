@@ -315,121 +315,6 @@ def _exchanges(paths: Sequence[Path]) -> List[Tuple[str, str, float]]:
     return found
 
 
-def from_history(
-    repo: Path | str,
-    limit: int = 40,
-    model: Optional[str] = None,
-    graph: Optional[Graph] = None,
-    transcripts: Optional[Sequence[Path]] = None,
-) -> Learned:
-    """Derive finders from moments somebody noticed a defect.
-
-    Every proposal is run against the repository before it is kept. One that
-    matches nothing has not been shown to describe anything here; one that
-    matches most of the tree describes the language. Both are dropped.
-    """
-    import asyncio
-
-    from .harvest import _sessions_for
-    from .rules import _turns
-    from .structure import _ensure_data_dir
-
-    root = Path(repo).expanduser().resolve()
-    found = Learned()
-    _ensure_data_dir()
-
-    try:
-        from pragmatos import llm
-
-        extract = llm.build_extractor(model=model or SHARPER)
-    except Exception as exc:  # noqa: BLE001
-        logger.info("no model available to derive patterns: %s", exc)
-        return found
-
-    exchanges = _exchanges(transcripts if transcripts is not None else _sessions_for(root))
-    exchanges = exchanges[-limit:] if limit else exchanges
-    found.considered = len(exchanges)
-
-    async def notice(did: str, text: str) -> Optional[Noticed]:
-        try:
-            return await extract(
-                Noticed,
-                NOTICING.replace("{did}", did[:900]).replace("{said}", text[:700]),
-            )
-        except Exception:  # noqa: BLE001 - one bad call is not a policy
-            return None
-
-    async def run() -> List[Optional[Noticed]]:
-        return list(
-            await asyncio.gather(*(notice(did, text) for did, text, _ in exchanges))
-        )
-
-    try:
-        noticed = asyncio.run(run())
-    except Exception as exc:  # noqa: BLE001
-        logger.info("could not derive patterns: %s", exc)
-        return found
-
-    total = sum(1 for _ in _sources(root))
-    seen: set = set()
-
-    for (_, text, when), verdict in zip(exchanges, noticed):
-        if verdict is None or not verdict.is_defect or verdict.pattern is None:
-            continue
-        pattern = verdict.pattern
-        pattern.said, pattern.at = text[:300], when
-
-        # Two derivations of one defect are one defect. The same exchange
-        # described twice, or two exchanges about the same thing, produced
-        # "hardcoded language list" and "Language-specific hardcoded
-        # dependency" — and a survey reporting both reports one problem twice.
-        key = pattern.pattern
-        overlap = _covers_same_ground(pattern, found.patterns, root)
-        if key in seen or overlap:
-            if overlap:
-                found.dropped.append(
-                    f"{pattern.name}: finds the same sites as {overlap}"
-                )
-            continue
-        seen.add(key)
-
-        # Tried against the repository before anyone sees it.
-        hits = pattern.find(root)
-        sites = sum(len(f.sites) for f in hits)
-        files = len(hits)
-        if sites < TOO_RARE:
-            found.dropped.append(f"{pattern.name}: matches nothing here")
-            continue
-        if sites > TOO_MANY:
-            found.dropped.append(
-                f"{pattern.name}: {sites} sites — too many to be one work item"
-            )
-            continue
-        if total and files / total > TOO_COMMON:
-            found.dropped.append(
-                f"{pattern.name}: matches {files} of {total} files — describes "
-                "the language, not a defect"
-            )
-            continue
-
-        found.patterns.append(pattern)
-
-    return found
-
-
-DISMISSED = re.compile(
-    r"\b(not a (defect|problem|bug)|that'?s (fine|intentional|deliberate|wrong)|"
-    r"false positive|noise|irrelevant|don'?t (care|report)|ignore (that|those|it)|"
-    r"by design|on purpose|not an issue|stop (reporting|showing))\b",
-    re.I,
-)
-ACCEPTED = re.compile(
-    r"\b(good (catch|find|point)|fixed|fixing|you'?re right|agreed|"
-    r"nice (catch|find)|correct|will fix|let'?s fix)\b",
-    re.I,
-)
-
-
 def weigh(learned: Learned, transcripts: Sequence[Path]) -> Learned:
     """Count how a project's patterns have fared when they were shown.
 
@@ -623,6 +508,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     root = Path(args.repo).expanduser().resolve()
 
     if args.exchanges:
+        from .derive import _waiting
+
+        waiting = _waiting(root)
+        if waiting:
+            print(waiting, file=sys.stderr)
+            return 2
+
         from .harvest import _sessions_for
 
         for did, said, _ in _exchanges(_sessions_for(root))[-args.limit :]:

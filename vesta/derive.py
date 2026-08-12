@@ -164,6 +164,27 @@ def write_attachments(repo: Path | str, text: str) -> Tuple[Map, List[str]]:
     return mapped, refused
 
 
+def _waiting(root: Path) -> Optional[str]:
+    """What to say when the graph is not built, rather than saying nothing.
+
+    An agent asked for definitions and got an empty list, which reads as "this
+    repository has none" — a false answer that would send it away. Preparation
+    is started and the caller is told, because a silence and an answer must not
+    look alike.
+    """
+    from .ready import prepare, readiness
+
+    state = readiness(root)
+    if state.can_answer:
+        return None
+    prepare(root)
+    return (
+        f"{state.describe()}. Nothing is being claimed about this repository "
+        "yet — the graph is being built in the background. Carry on; ask again "
+        "in a minute and this will answer."
+    )
+
+
 def definitions_worth_reading(repo: Path | str, limit: int = 80) -> List[str]:
     """The definitions an agent should read, most depended upon first.
 
@@ -203,6 +224,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     root = Path(args.repo).expanduser().resolve()
 
     if args.definitions:
+        waiting = _waiting(root)
+        if waiting:
+            print(waiting, file=sys.stderr)
+            return 2  # nothing to read yet, and not an error in the caller
         for line in definitions_worth_reading(root, args.limit):
             print(line)
         return 0
@@ -213,6 +238,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.attach:
+        waiting = _waiting(root)
+        if waiting:
+            print(waiting, file=sys.stderr)
+            return 2
         mapped, refused = write_attachments(root, sys.stdin.read())
         print(f"kept {len(mapped.attachments)} attachment(s) for {root}")
         for why in refused[:8]:
