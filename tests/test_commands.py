@@ -109,17 +109,22 @@ def test_every_command_declares_the_runner_it_calls(path):
 
 
 def test_the_runner_never_shows_a_traceback():
-    """Installed or not, a user gets a sentence rather than a stack."""
+    """Installed or not, a user gets an answer or a sentence — never a stack.
+
+    Run from a checkout this finds the virtualenv beside the source and
+    answers; the copied-plugin case, where there is nothing to find, is
+    covered separately below.
+    """
     done = subprocess.run(
         [str(RUNNER), "shape"],
         capture_output=True,
         text=True,
-        env={"PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": "/nonexistent"},
+        env={"PATH": "/usr/bin:/bin"},
         cwd=str(HERE),
+        timeout=120,
     )
     assert "Traceback" not in done.stdout + done.stderr
-    assert "not installed" in done.stdout
-    # Exits cleanly: a command that fails noisily reads as a broken session.
+    assert "command not found" not in done.stdout + done.stderr
     assert done.returncode == 0
 
 
@@ -217,8 +222,128 @@ def test_no_component_runs_a_bare_interpreter():
     a plugin is installed by the framework, not into a virtualenv."""
     for script in list((HERE / "hooks").glob("*.sh")) + list((HERE / "bin").iterdir()):
         text = script.read_text(encoding="utf-8")
-        if "vesta." not in text:
+        if "vesta." not in text or script.name == "vesta-python":
             continue
-        assert "VESTA_PYTHON" in text, (
-            f"{script.name} runs an interpreter without resolving which one"
+        # Either it asks the resolver, or it is the resolver.
+        assert "vesta-python" in text, (
+            f"{script.name} runs an interpreter without asking which one"
         )
+
+
+# ── Reaching an interpreter that can actually run Vesta ─────────────────────
+
+
+def _copied(tmp_path):
+    """The plugin as the framework installs it: a copy, with a dead venv.
+
+    The install copies the repository. A virtualenv does not survive that —
+    `bin/python` is a symlink to the interpreter it was built from — so the
+    directory arrives intact with nothing runnable inside it.
+    """
+    import shutil
+
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    for name in ("vesta-python", "vesta-run", "vesta-sidecar"):
+        shutil.copy(HERE / "bin" / name, tmp_path / "bin" / name)
+    shutil.copy(HERE / "hooks" / "notice.sh", tmp_path / "hooks" / "notice.sh")
+    (tmp_path / ".venv" / "bin" / "python").symlink_to("/nonexistent/python")
+    return tmp_path
+
+
+BARE = {"PATH": "/usr/bin:/bin"}
+
+
+def test_a_command_in_a_copied_plugin_says_why(tmp_path):
+    """`/bin/sh: python: command not found` is what the user saw. A command
+    must answer or explain, never leak a shell error."""
+    import subprocess
+
+    copied = _copied(tmp_path)
+    done = subprocess.run(
+        [str(copied / "bin" / "vesta-run"), "guide"],
+        capture_output=True,
+        text=True,
+        env=BARE,
+        timeout=60,
+    )
+    assert "command not found" not in done.stdout + done.stderr
+    assert "Traceback" not in done.stdout + done.stderr
+    assert "VESTA_PYTHON" in done.stdout
+    assert done.returncode == 0
+
+
+def test_the_hook_in_a_copied_plugin_is_silent(tmp_path):
+    """It runs on every prompt. An error here appears above every one of them."""
+    import subprocess
+
+    copied = _copied(tmp_path)
+    done = subprocess.run(
+        [str(copied / "hooks" / "notice.sh")],
+        input='{"prompt":"x","cwd":"/tmp"}',
+        capture_output=True,
+        text=True,
+        env=BARE,
+        timeout=60,
+    )
+    assert done.stdout.strip() == ""
+    assert done.stderr.strip() == ""
+    assert done.returncode == 0
+
+
+def test_the_sidecar_in_a_copied_plugin_says_why_on_stderr(tmp_path):
+    """A server that cannot start is otherwise simply absent, with every tool
+    missing and nothing said about it."""
+    import subprocess
+
+    copied = _copied(tmp_path)
+    done = subprocess.run(
+        [str(copied / "bin" / "vesta-sidecar")],
+        input="",
+        capture_output=True,
+        text=True,
+        env=BARE,
+        timeout=60,
+    )
+    assert "no interpreter" in done.stderr
+    assert "command not found" not in done.stderr
+
+
+def test_a_copied_plugin_works_when_told_where_to_look(tmp_path):
+    import subprocess
+    import sys
+
+    copied = _copied(tmp_path)
+    done = subprocess.run(
+        [str(copied / "bin" / "vesta-run"), "guide"],
+        capture_output=True,
+        text=True,
+        env={**BARE, "VESTA_PYTHON": sys.executable},
+        timeout=90,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "Vesta" in done.stdout
+
+
+def test_a_dead_symlink_is_never_treated_as_an_interpreter(tmp_path):
+    """`command -v` succeeds for a path whose symlink target is gone. Every
+    candidate must be executed, not merely looked at."""
+    import subprocess
+
+    copied = _copied(tmp_path)
+    done = subprocess.run(
+        [str(copied / "bin" / "vesta-python")],
+        capture_output=True,
+        text=True,
+        env=BARE,
+        timeout=60,
+    )
+    assert ".venv" not in done.stdout
+    assert done.returncode == 1
+
+
+def test_the_venv_is_not_shipped():
+    """It cannot work in a copy, so shipping it only creates the dead path."""
+    ignored = (HERE / ".claudeignore").read_text(encoding="utf-8")
+    assert ".venv/" in ignored

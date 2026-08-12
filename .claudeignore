@@ -1,9 +1,15 @@
-# Not part of the plugin. A copied virtualenv has absolute paths baked into it,
-# so it is not merely wasted space — it is an interpreter that cannot run.
+# A virtualenv does not survive being copied: `bin/python` is a symlink to the
+# interpreter it was built from, so the directory arrives with a dead link in
+# it. Shipping it means every entry point probes a path that exists and cannot
+# run — which is exactly what printed `python: command not found` above every
+# prompt in a session.
 .venv/
-var/
-doc/
+venv/
+
+# Not part of what the plugin does.
 tests/
+doc/
+var/
 .pytest_cache/
 *.egg-info/
 __pycache__/

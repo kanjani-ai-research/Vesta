@@ -1,0 +1,56 @@
+#!/bin/sh
+# Print an interpreter that can actually run Vesta, or nothing.
+#
+# Sourced by every entry point so there is one answer to "which python", rather
+# than three scripts each guessing differently and disagreeing when it matters.
+#
+# **A path that exists is not an interpreter that runs.** The plugin install
+# copies the repository, and a virtualenv does not survive being copied: its
+# `bin/python` is a symlink to the interpreter it was built from, so the
+# directory arrives intact with a dead link inside it. `command -v` says yes,
+# `/bin/sh` then says `python: command not found`, and a hook that was supposed
+# to be silent prints an error on every prompt. So each candidate is executed,
+# not merely looked at.
+#
+# **The order is deliberate.** What the user set wins, because they set it. A
+# console script next, since `pip install vesta` is the ordinary case. Then a
+# virtualenv beside the *source*, which is where one really lives — never one
+# beside the plugin copy, which is the broken case above. The shell's own
+# python last: it is the least likely to have Vesta and the most likely to be
+# some system interpreter nobody manages.
+set -u
+
+_runs() {
+    [ -n "${1:-}" ] || return 1
+    "$1" -c "import vesta.cli" >/dev/null 2>&1
+}
+
+# Whatever the user pointed at.
+if _runs "${VESTA_PYTHON:-}"; then
+    echo "${VESTA_PYTHON}"
+    exit 0
+fi
+
+# Installed properly, as a package.
+for candidate in python3 python; do
+    if _runs "$candidate"; then
+        echo "$candidate"
+        exit 0
+    fi
+done
+
+# A virtualenv beside a checkout of the source. `VESTA_SOURCE` names one
+# explicitly; otherwise the directory this script was run from is tried, which
+# covers running from a clone without installing anything.
+here=$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)
+for root in "${VESTA_SOURCE:-}" "$here"; do
+    [ -n "$root" ] || continue
+    for candidate in "$root/.venv/bin/python" "$root/venv/bin/python"; do
+        if _runs "$candidate"; then
+            echo "$candidate"
+            exit 0
+        fi
+    done
+done
+
+exit 1
