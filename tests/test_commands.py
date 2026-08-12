@@ -142,3 +142,77 @@ def test_the_guide_only_shows_commands_that_exist(command):
     """A guide that drifts is worse than none, because it is believed."""
     word = command.split()[1]
     assert word in SUBCOMMANDS, f"the guide shows `{command}`, which does not exist"
+
+
+# ── The manifest the framework reads ────────────────────────────────────────
+
+
+def _manifest() -> dict:
+    import json
+
+    return json.loads(
+        (HERE / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+
+
+def test_the_manifest_does_not_name_the_standard_hooks_file():
+    """`hooks/hooks.json` is loaded on its own.
+
+    Naming it in the manifest loads it twice, and the whole plugin then fails
+    to load — every command, agent and tool absent, over one redundant line.
+    The manifest may only point at *additional* hook files.
+    """
+    named = _manifest().get("hooks")
+    if named is None:
+        return
+    named = [named] if isinstance(named, str) else named
+    for entry in named:
+        assert "hooks/hooks.json" not in str(entry), (
+            "the manifest names the standard hooks file, which is already "
+            "loaded automatically — the plugin will refuse to load"
+        )
+
+
+def test_the_manifest_declares_the_mcp_server():
+    """A root `.mcp.json` is not enough; a plugin declares its own servers.
+
+    Without this the plugin loads and every tool is simply missing, with
+    nothing said about why.
+    """
+    servers = _manifest().get("mcpServers", {})
+    assert "vesta" in servers, "the plugin does not declare its MCP server"
+    assert "vesta-sidecar" in servers["vesta"]["command"]
+
+
+def test_the_declared_server_command_exists_and_runs():
+    command = _manifest()["mcpServers"]["vesta"]["command"]
+    path = HERE / command.replace("${CLAUDE_PLUGIN_ROOT}/", "")
+    assert path.is_file(), f"{path} is declared but not present"
+    assert path.stat().st_mode & 0o111, f"{path} is not executable"
+
+
+def test_every_skill_directory_holds_a_skill():
+    """An empty skill directory is a leftover, and a loader may reject it."""
+    for directory in (HERE / "skills").iterdir():
+        if not directory.is_dir():
+            continue
+        assert (directory / "SKILL.md").is_file(), (
+            f"{directory.name}/ has no SKILL.md"
+        )
+
+
+def test_hook_scripts_are_executable():
+    for script in (HERE / "hooks").glob("*.sh"):
+        assert script.stat().st_mode & 0o111, f"{script.name} is not executable"
+
+
+def test_no_component_runs_a_bare_interpreter():
+    """`python3 -m vesta.x` assumes the shell's python has Vesta. It does not:
+    a plugin is installed by the framework, not into a virtualenv."""
+    for script in list((HERE / "hooks").glob("*.sh")) + list((HERE / "bin").iterdir()):
+        text = script.read_text(encoding="utf-8")
+        if "vesta." not in text:
+            continue
+        assert "VESTA_PYTHON" in text, (
+            f"{script.name} runs an interpreter without resolving which one"
+        )

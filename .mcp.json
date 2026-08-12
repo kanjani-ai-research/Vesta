@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "vesta": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/vesta-sidecar"
-    }
-  }
-}

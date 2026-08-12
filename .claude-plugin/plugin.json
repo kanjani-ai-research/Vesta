@@ -6,7 +6,6 @@
   "author": {
     "name": "Causum"
   },
-  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "vesta": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/vesta-sidecar"
