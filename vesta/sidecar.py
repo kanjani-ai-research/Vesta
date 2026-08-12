@@ -1158,10 +1158,18 @@ def build_server():
             )
 
         settled = 0
+        abstained = 0
         for rule in found:
             answer = await _ask_about(context, rule)
             if answer is None:
-                break  # they closed it; asking again would be nagging
+                # Closing the dialog is a signal, not a verdict. Recorded as
+                # its own state so it is neither enforced nor dismissed, and
+                # so the same question is not put again in passing.
+                await anyio.to_thread.run_sync(
+                    confirming.record, here, rule.text, confirming.ABSTAINED, ""
+                )
+                abstained += 1
+                continue
             await anyio.to_thread.run_sync(
                 confirming.record, here, rule.text, answer[0], answer[1]
             )
@@ -1169,10 +1177,51 @@ def build_server():
 
         asked = await anyio.to_thread.run_sync(confirming.recall, here)
         _record("learn", here, _t.monotonic() - started, settled)
+
+        lines = [f"project: {here}", f"{settled} confirmed just now. {asked.describe()}."]
+        if abstained:
+            lines.append(
+                f"{abstained} left unanswered — those stay out of enforcement "
+                "until settled, and are not asked about again unprompted."
+            )
+        lines.append("Standing rules are checked by `decided` with check=true.")
+        lines.append(
+            "A rule nobody ever had to correct leaves no trace to recover; "
+            "`declare` records one outright."
+        )
+        return "\n".join(lines)
+
+    @server.tool()
+    async def declare(rule: str, context: Context = None) -> str:
+        """Record a rule this project keeps that nothing could have recovered.
+
+        Vesta reads transcripts, so it finds only constraints somebody happened
+        to state to an agent. One they have simply always observed — never
+        argued about, never corrected — leaves no trace, and no amount of
+        reading finds it. Only its author can supply it.
+
+        Use when the user states a standing rule directly rather than in
+        correction, or when `learn` reports there is nothing left to confirm
+        and they say there are rules Vesta has not found.
+
+        Args:
+            rule: The rule, in the user's own words.
+        """
+        import time as _t
+
+        here = await project_of(context)
+        if here is None:
+            return "Could not tell which project this is."
+
+        import anyio
+
+        started = _t.monotonic()
+        asked = await anyio.to_thread.run_sync(confirming.declare, here, rule)
+        _record("declare", here, _t.monotonic() - started, len(rule))
         return (
             f"project: {here}\n"
-            f"{settled} confirmed just now. {asked.describe()}.\n"
-            "Standing rules are checked by `decided` with check=true."
+            f"Recorded as a standing rule: {rule.strip()}\n"
+            f"{asked.describe()}."
         )
 
     @server.tool()

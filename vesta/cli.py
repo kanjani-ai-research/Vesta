@@ -188,13 +188,21 @@ def _rules(args: argparse.Namespace) -> int:
     `vesta-rules` agent does that and writes the answer down, and this reports
     what it wrote. A CLI that judged would need a key the user should not need.
     """
+    from . import confirm
     from .enforce import against
     from .held import graph_for
     from .rules import from_sessions
 
     where = Path(args.root).expanduser().resolve()
-    found = from_sessions(where)
+    # What the user themselves said about these, applied over what was
+    # recovered — including rules they declared outright, which appear in no
+    # transcript and so cannot be recovered at all.
+    found = confirm.apply(from_sessions(where), where)
     _say(found.describe())
+
+    asked = confirm.recall(where)
+    if asked.waiting:
+        _say(f"  {len(asked.waiting)} candidate(s) waiting on you — `vesta learn`")
 
     if not args.check:
         for rule in found.standing[: args.show]:
@@ -279,6 +287,18 @@ def _learn(args: argparse.Namespace) -> int:
     from .rules import from_sessions
 
     where = Path(args.root).expanduser().resolve()
+
+    if args.declare:
+        confirm.declare(where, args.declare)
+        _say(f"declared: {args.declare}")
+        _say(confirm.recall(where).describe())
+        return 0
+
+    if args.reopen:
+        confirm.reopen(where, args.reopen)
+        _say("put back into question; `vesta learn` will ask about it again")
+        return 0
+
     if args.text:
         confirm.record(where, args.text, args.verdict, args.stated or "")
         _say(confirm.recall(where).describe())
@@ -289,8 +309,34 @@ def _learn(args: argparse.Namespace) -> int:
     asked = confirm.recall(where)
     _say(asked.describe())
 
+    # What the user saw and did not settle. Reported before anything new,
+    # because a question already put to somebody is owed an answer before
+    # another one is asked.
+    if asked.waiting:
+        _say("")
+        _say(f"{len(asked.waiting)} waiting on you:")
+        for verdict in asked.waiting[: args.show]:
+            _say(f"  {verdict.text[:100]}")
+        if len(asked.waiting) > args.show:
+            _say(f"  … and {len(asked.waiting) - args.show} more")
+        _say("")
+        # What it costs to leave them. A list of chores nobody has a reason to
+        # finish does not get finished; the reason is that these are the rules
+        # agents are not being held to.
+        _say(
+            f"Until these are settled, {len(asked.waiting)} constraint(s) you "
+            "stated are not enforced —"
+        )
+        _say("agents working here will not be held to them.")
+        _say("")
+        _say("  vesta learn --text '<the candidate>' --verdict rule|note|lapsed")
+
     if not waiting:
-        _say("Nothing new to confirm.")
+        if not asked.waiting:
+            _say("Nothing new to confirm.")
+        _say("")
+        _say("A rule nobody ever had to correct leaves no trace to recover:")
+        _say("  vesta learn --declare '<the rule, in your own words>'")
         return 0
 
     _say("")
@@ -303,6 +349,10 @@ def _learn(args: argparse.Namespace) -> int:
     _say("Say which it is:")
     _say("  vesta learn --text '<the candidate>' --verdict rule|note|lapsed")
     _say("  … or use /vesta:learn in a session, which asks you directly.")
+    _say("")
+    _say("Changed your mind, or Vesta never saw the rule at all:")
+    _say("  vesta learn --reopen '<the candidate>'")
+    _say("  vesta learn --declare '<a rule you have simply always kept>'")
     return 0
 
 
@@ -402,6 +452,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--verdict", default="rule", choices=("rule", "note", "lapsed")
     )
     learn.add_argument("--stated", default="", help="the rule, said cleanly")
+    learn.add_argument(
+        "--declare", default="", help="a rule nothing recovered, stated outright"
+    )
+    learn.add_argument(
+        "--reopen", default="", help="put a settled candidate back into question"
+    )
     learn.set_defaults(run=_learn)
 
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")

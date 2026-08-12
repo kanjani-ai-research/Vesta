@@ -99,3 +99,119 @@ def test_whitespace_and_case_do_not_make_a_new_candidate(tmp_path):
 def test_applying_nothing_changes_nothing(tmp_path):
     found = _found()
     assert len(confirm.apply(found, tmp_path).rules) == 3
+
+
+# ── Abstention, reversal, and the void ──────────────────────────────────────
+
+
+def test_abstention_is_neither_enforced_nor_dismissed(tmp_path):
+    """Closing a dialog is a signal, not a verdict. Reading it as "not a rule"
+    would discard a rule the user might have kept."""
+    found = _found()
+    confirm.record(tmp_path, "never use a bare except", confirm.ABSTAINED)
+    kept = confirm.apply(found, tmp_path)
+
+    standing = [r.text for r in kept.rules]
+    assert "never use a bare except" not in standing  # not enforced
+    assert confirm.recall(tmp_path).waiting  # and not dismissed either
+
+
+def test_what_is_waiting_is_reported(tmp_path):
+    confirm.record(tmp_path, "a", confirm.ABSTAINED)
+    confirm.record(tmp_path, "b", confirm.IS_A_RULE)
+    asked = confirm.recall(tmp_path)
+    assert len(asked.waiting) == 1
+    assert "waiting on you" in asked.describe()
+    assert "1 rule(s)" in asked.describe()
+
+
+def test_an_abstention_is_not_asked_again_in_passing(tmp_path):
+    """The user saw it and moved on. Putting it back in the queue is nagging."""
+    found = _found()
+    first = confirm.worth_asking(found, tmp_path)
+    confirm.record(tmp_path, first[0].text, confirm.ABSTAINED)
+    again = [r.text for r in confirm.worth_asking(found, tmp_path)]
+    assert first[0].text not in again
+
+
+def test_a_note_can_become_a_rule(tmp_path):
+    """"Said once about one place" becomes "this holds everywhere" often
+    enough that a terminal verdict would lose real rules."""
+    found = _found()
+    confirm.record(tmp_path, "never use a bare except", confirm.NOT_A_RULE)
+    assert "never use a bare except" not in [
+        r.text for r in confirm.apply(_found(), tmp_path).rules
+    ]
+
+    confirm.record(tmp_path, "never use a bare except", confirm.IS_A_RULE)
+    kept = confirm.apply(_found(), tmp_path)
+    assert "never use a bare except" in [r.text for r in kept.rules]
+
+
+def test_changing_your_mind_is_recorded(tmp_path):
+    """When somebody reversed a decision is part of the decision."""
+    confirm.record(tmp_path, "a rule", confirm.NOT_A_RULE)
+    confirm.record(tmp_path, "a rule", confirm.IS_A_RULE)
+    verdict = confirm.recall(tmp_path).verdicts[0]
+    assert verdict.was == confirm.NOT_A_RULE
+    assert "was not a rule" in verdict.describe()
+
+
+def test_answering_the_same_way_twice_is_not_a_change(tmp_path):
+    confirm.record(tmp_path, "a rule", confirm.IS_A_RULE)
+    confirm.record(tmp_path, "a rule", confirm.IS_A_RULE)
+    assert confirm.recall(tmp_path).verdicts[0].was == ""
+
+
+def test_reopening_puts_a_candidate_back_in_question(tmp_path):
+    found = _found()
+    confirm.record(tmp_path, "never use a bare except", confirm.NOT_A_RULE)
+    assert "never use a bare except" not in [
+        r.text for r in confirm.worth_asking(found, tmp_path)
+    ]
+
+    confirm.reopen(tmp_path, "never use a bare except")
+    assert "never use a bare except" in [
+        r.text for r in confirm.worth_asking(found, tmp_path)
+    ]
+
+
+def test_a_declared_rule_stands_though_nothing_recovered_it(tmp_path):
+    """The void: Vesta reads transcripts, so a constraint nobody ever had to
+    correct leaves no trace. Filtering what was recovered can never surface it."""
+    confirm.declare(tmp_path, "every module opens with a docstring")
+    kept = confirm.apply(_found(), tmp_path)
+    texts = [r.text for r in kept.rules]
+    assert "every module opens with a docstring" in texts
+    assert len(texts) == 4  # the three recovered, plus the one declared
+
+
+def test_a_declared_rule_carries_a_check_where_one_fits(tmp_path):
+    confirm.declare(tmp_path, "every module opens with a docstring")
+    rule = next(
+        r
+        for r in confirm.apply(_found(), tmp_path).rules
+        if "docstring" in r.text
+    )
+    assert rule.stated
+    assert rule.check
+
+
+def test_declaring_nothing_records_nothing(tmp_path):
+    confirm.declare(tmp_path, "   ")
+    assert confirm.recall(tmp_path).verdicts == []
+
+
+def test_a_declared_rule_is_marked_as_such(tmp_path):
+    confirm.declare(tmp_path, "a standing rule")
+    verdict = confirm.recall(tmp_path).verdicts[0]
+    assert verdict.declared
+    assert "declared" in verdict.describe()
+
+
+def test_a_declared_rule_survives_being_reconsidered(tmp_path):
+    """Set aside and restored, it is still a rule Vesta could not have found."""
+    confirm.declare(tmp_path, "a standing rule")
+    confirm.record(tmp_path, "a standing rule", confirm.NO_LONGER)
+    confirm.record(tmp_path, "a standing rule", confirm.IS_A_RULE)
+    assert confirm.recall(tmp_path).verdicts[0].declared

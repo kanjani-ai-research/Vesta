@@ -67,6 +67,7 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
             ("vesta decided", "the rules recovered from your own corrections"),
             ("vesta decided --check", "whether the code still honours them"),
             ("vesta learn", "confirm which of them are actually binding"),
+            ("vesta learn --declare '<a rule>'", "state one Vesta could not have found"),
         ],
     ),
     (

@@ -17,6 +17,18 @@ has ruled on is never asked about again — that is the whole value, and asking
 twice would spend the goodwill that makes the first question worth answering.
 The answer is kept per repository, beside everything else Vesta derives.
 
+**No answer is final.** "Said once about one place" becomes "this holds
+everywhere" often enough that treating a note as terminal would lose real
+rules. Asked once means not asked *again unprompted*; a user who says so can
+change any verdict, and the earlier one is kept rather than overwritten,
+because when somebody changed their mind is part of what they decided.
+
+**And what was never said cannot be recovered at all.** Vesta reads
+transcripts, so it knows only the constraints a user happened to state to an
+agent — everything they never had to correct is invisible. Those gaps are a
+void only the user can fill, so a rule can also be declared outright rather
+than confirmed.
+
 **Nothing here elicits.** This decides what is worth asking and records what
 came back; the asking belongs to whatever surface is in front of the user, and
 `sidecar` does it over MCP. Keeping the two apart is what lets the same verdicts
@@ -34,7 +46,7 @@ from typing import Dict, List, Optional, Sequence
 from pydantic import BaseModel, Field
 
 from .home import kept_at
-from .rules import UNDERIVED, Found, Rule
+from .rules import UNDERIVED, Found, Rule, derive
 
 logger = logging.getLogger("vesta.confirm")
 
@@ -43,7 +55,20 @@ IS_A_RULE = "rule"          # binding, and worth checking the code against
 NOT_A_RULE = "note"         # said once, about one place; do not raise it again
 NO_LONGER = "lapsed"        # was a rule, is not now
 
-VERDICTS = (IS_A_RULE, NOT_A_RULE, NO_LONGER)
+# And what they can decline to say.
+#
+# **Abstention is a signal, not an absence.** Somebody who closes the dialog has
+# told us something real: this one is not answerable in a moment, or not now.
+# Recording it as "not a rule" would discard a rule they might have kept, and
+# recording nothing would ask them the same question tomorrow — the surest way
+# to make a useful question into a nuisance.
+#
+# So it is kept as its own state, and it yields: an abstained candidate is not
+# enforced, not dismissed, and stays on a list the user can settle deliberately
+# rather than in passing.
+ABSTAINED = "abstained"
+
+VERDICTS = (IS_A_RULE, NOT_A_RULE, NO_LONGER, ABSTAINED)
 
 # How many to put in front of someone at once. A list of twenty-nine questions
 # is not answered; it is closed.
@@ -59,14 +84,35 @@ class Verdict(BaseModel):
     # did. A rule stated cleanly is a rule that can be checked.
     stated: str = ""
     at: float = 0.0
+    # What this was before, if the user has changed their mind. Kept because
+    # when somebody reversed a decision is part of the decision.
+    was: str = ""
+    # Declared outright rather than recovered from a transcript. A rule Vesta
+    # could never have found, because it was never said to an agent.
+    declared: bool = False
 
     @property
     def binding(self) -> bool:
         return self.verdict == IS_A_RULE
 
+    @property
+    def settled(self) -> bool:
+        """Whether the user has actually decided. Abstention has not."""
+        return self.verdict != ABSTAINED
+
     def describe(self) -> str:
-        said = {IS_A_RULE: "a rule", NOT_A_RULE: "not a rule", NO_LONGER: "no longer"}
-        return f"{said.get(self.verdict, self.verdict)}: {(self.stated or self.text)[:80]}"
+        said = {
+            IS_A_RULE: "a rule",
+            NOT_A_RULE: "not a rule",
+            NO_LONGER: "no longer",
+            ABSTAINED: "waiting on you",
+        }
+        how = said.get(self.verdict, self.verdict)
+        if self.was:
+            how = f"{how} (was {said.get(self.was, self.was)})"
+        if self.declared:
+            how = f"{how}, declared"
+        return f"{how}: {(self.stated or self.text)[:80]}"
 
 
 class Asked(BaseModel):
@@ -77,14 +123,24 @@ class Asked(BaseModel):
     def by_text(self) -> Dict[str, Verdict]:
         return {_key(v.text): v for v in self.verdicts}
 
+    @property
+    def waiting(self) -> List[Verdict]:
+        """Candidates the user has seen and not yet decided."""
+        return [v for v in self.verdicts if not v.settled]
+
     def describe(self) -> str:
-        if not self.verdicts:
+        decided = [v for v in self.verdicts if v.settled]
+        if not decided and not self.waiting:
             return "nothing has been confirmed yet"
-        binding = sum(1 for v in self.verdicts if v.binding)
-        return (
-            f"{len(self.verdicts)} confirmed: {binding} rule(s), "
-            f"{len(self.verdicts) - binding} set aside"
+
+        binding = sum(1 for v in decided if v.binding)
+        said = (
+            f"{len(decided)} confirmed: {binding} rule(s), "
+            f"{len(decided) - binding} set aside"
         )
+        if self.waiting:
+            said += f"; {len(self.waiting)} waiting on you"
+        return said
 
 
 def _key(text: str) -> str:
@@ -137,10 +193,11 @@ def worth_asking(found: Found, repo: Path | str, limit: int = AT_ONCE) -> List[R
     said twice in the same words. Never asked before comes first regardless —
     asking twice is how a useful question becomes an annoyance.
     """
-    already = recall(repo).by_text()
-    candidates = [
-        rule for rule in found.rules if _key(rule.text) not in already
-    ]
+    # Anything already decided is done with. An abstention is not decided, but
+    # it is not asked again in passing either — the user has seen it once and
+    # moved on, and `waiting` is where it is settled deliberately.
+    seen = recall(repo).by_text()
+    candidates = [rule for rule in found.rules if _key(rule.text) not in seen]
 
     def usefulness(rule: Rule) -> tuple:
         return (
@@ -159,6 +216,7 @@ def record(
     verdict: str,
     stated: str = "",
     at: Optional[float] = None,
+    declared: bool = False,
 ) -> Asked:
     """Keep what the user said about one candidate.
 
@@ -172,6 +230,7 @@ def record(
 
     asked = recall(repo)
     key = _key(text)
+    before = asked.by_text().get(key)
     kept = [v for v in asked.verdicts if _key(v.text) != key]
     kept.append(
         Verdict(
@@ -179,10 +238,50 @@ def record(
             verdict=verdict,
             stated=stated.strip(),
             at=at if at is not None else time.time(),
+            # What it was, when this reverses something. Only a real change is
+            # recorded: answering the same way twice is not a change of mind.
+            was=before.verdict if before and before.verdict != verdict else "",
+            declared=declared or bool(before and before.declared),
         )
     )
     asked.verdicts = kept
     keep(asked, repo)
+    return asked
+
+
+def declare(
+    repo: Path | str, rule: str, at: Optional[float] = None
+) -> Asked:
+    """Record a rule the user states outright, that nothing recovered.
+
+    Vesta reads transcripts, so it finds only what somebody happened to say to
+    an agent. A constraint they have simply always observed — never argued
+    about, never corrected — leaves no trace to recover, and no amount of
+    reading finds it. That gap is a void only its author can fill.
+
+    A declared rule is a standing rule from the moment it is said: it was not a
+    guess in need of confirmation, so there is nothing to confirm.
+    """
+    said = rule.strip()
+    if not said:
+        return recall(repo)
+    return record(repo, said, IS_A_RULE, stated=said, at=at, declared=True)
+
+
+def reopen(repo: Path | str, text: str) -> Asked:
+    """Put a candidate back into question.
+
+    Because a verdict is not a life sentence. "Said once, about one place"
+    becomes "this holds everywhere" often enough that treating a note as final
+    would lose real rules — and a rule that stops applying needs a way back
+    that is not deleting the file.
+    """
+    asked = recall(repo)
+    key = _key(text)
+    remaining = [v for v in asked.verdicts if _key(v.text) != key]
+    if len(remaining) != len(asked.verdicts):
+        asked.verdicts = remaining
+        keep(asked, repo)
     return asked
 
 
@@ -193,6 +292,11 @@ def apply(found: Found, repo: Path | str) -> Found:
     cleaner statement they gave. Where they said it is not, it is dropped —
     not marked, dropped: a candidate the user has already dismissed should not
     appear in a count of what they have decided.
+
+    **An abstention yields.** It is neither enforced nor dropped: the user has
+    not said it is a rule, so nothing is held to it, and they have not said it
+    is not, so it stays to be settled. It leaves the standing set and joins the
+    list of what is waiting on them.
     """
     said = recall(repo).by_text()
     if not said:
@@ -204,11 +308,34 @@ def apply(found: Found, repo: Path | str) -> Found:
         if verdict is None:
             standing.append(rule)
             continue
+        if verdict.verdict == ABSTAINED:
+            continue  # yields: not enforced, and not dismissed either
         if not verdict.binding:
             continue
         if verdict.stated:
             rule.stated = verdict.stated
         standing.append(rule)
+
+    # Rules the user declared outright. These are in no transcript, so nothing
+    # recovered them and nothing above could have kept them — filtering alone
+    # would silently discard exactly the constraints only the user could supply.
+    have = {_key(r.text) for r in standing}
+    for verdict in said.values():
+        if not verdict.declared or not verdict.binding:
+            continue
+        if _key(verdict.text) in have:
+            continue
+        kind, how = derive(verdict.stated or verdict.text)
+        standing.append(
+            Rule(
+                text=verdict.text,
+                stated=verdict.stated or verdict.text,
+                check=kind,
+                how=how,
+                first=verdict.at,
+                last=verdict.at,
+            )
+        )
 
     found.rules = standing
     found.gaps = [r for r in found.gaps if _key(r.text) in {_key(x.text) for x in standing}]
