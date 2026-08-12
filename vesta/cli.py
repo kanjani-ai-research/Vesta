@@ -18,12 +18,9 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from . import maturity
-from .acquire import Search, _load_env
-from .consult import known
 from .graph import build
 from .propagate import from_files
-from .structure import THEORY_DIR, Pragmatos, _slug, best_backend, structure
+from .home import _slug
 
 
 def _say(text: str = "") -> None:
@@ -76,97 +73,6 @@ def _touches(args: argparse.Namespace) -> int:
     return 0
 
 
-def _judge(args: argparse.Namespace) -> int:
-    search = Search.from_environment() if args.search else None
-    judged = maturity.judge(args.intent, search=search)
-
-    _say(judged.describe())
-    for aspect in judged.aspects:
-        _say(f"  {aspect.describe()}")
-        for reason in aspect.because:
-            _say(f"      {reason}")
-    _say("")
-    _say(judged.ask())
-    return 0
-
-
-def _learn(args: argparse.Namespace) -> int:
-    search = Search.from_environment()
-    judged = maturity.judge(args.intent, search=search)
-
-    _say(judged.ask())
-    _say("")
-
-    # Every aspect is kept, not only the ones judged to need theory.
-    #
-    # The classifier's verdict is about whether a *field* is settled; it says
-    # nothing about whether the user has read it. Judging "derive ontology
-    # axioms ... conservative extensions" as established work is correct — and
-    # the search behind that verdict returned the conservativity survey that is
-    # exactly what someone building it should read. Withholding the readings
-    # because the field turned out to be mature would discard the useful half
-    # of the result and keep the half that is only a label.
-    aspects = judged.aspects if not args.only_novel else judged.needs_theory
-    if not aspects:
-        _say("Nothing to look up.")
-        return 0
-
-    # Absolute by default. A relative default wrote readings into whatever
-    # directory the command happened to be run from — `/tmp/theory` on a cold
-    # start — while the corpus was built under the home directory, so the two
-    # halves of one run landed in different places and the corpus came out
-    # empty. Acquired theory is about a subject, not about a working directory.
-    into = Path(args.into).expanduser() if args.into else THEORY_DIR
-    for aspect in aspects:
-        query = aspect.would_search[0]
-        found = search.for_(query)
-        _say(f"{aspect.name}: {found.describe()} for {query!r}")
-        for reading in found.readings[: args.show]:
-            _say(f"    {reading.describe()}")
-            _say(f"      {reading.url}")
-
-        if args.structure:
-            built = structure(
-                found,
-                f"{args.intent} {aspect.name}",
-                into / _slug(aspect.name),
-                # The library where it is importable, the service otherwise:
-                # a corpus is a file, and requiring a running process to write
-                # one would be a dependency the data does not have.
-                pragmatos=(
-                    Pragmatos(args.pragmatos)
-                    if args.pragmatos_url_given
-                    else best_backend()
-                ),
-                ontology=args.ontology,
-            )
-            _say(f"    → {built.describe()}")
-        else:
-            from .structure import write
-
-            written = write(found, into / _slug(aspect.name), query=query)
-            _say(f"    → {len(written)} file(s) in {into / _slug(aspect.name)}")
-        _say("")
-
-    if judged.could_not_search:
-        _say(f"({judged.could_not_search})")
-    return 0
-
-
-def _knows(args: argparse.Namespace) -> int:
-    """What the acquired theory already says, before anything is searched."""
-    for found in known(args.questions, intent=args.intent, corpus_id=args.corpus):
-        _say(f"{found.question}")
-        _say(f"  {found.describe()}")
-        for cite in found.cites[: args.show]:
-            _say(f"    {cite.score:.2f}  {cite.text[:160]}")
-        if not found.knew and not found.unavailable:
-            # Nothing held is a result: it is the signal to go and acquire.
-            _say("    (nothing acquired covers this — `vesta learn` would look)")
-        _say("")
-    return 0
-
-
 def _used(args: argparse.Namespace) -> int:
     """What the sidecar was actually asked, and when.
 
@@ -175,7 +81,7 @@ def _used(args: argparse.Namespace) -> int:
     import json
     import time
 
-    from .structure import VESTA_HOME
+    from .home import VESTA_HOME
 
     log = VESTA_HOME / "used.jsonl"
     if not log.is_file():
@@ -344,49 +250,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     touches.add_argument("--hops", type=int, default=3)
     touches.set_defaults(run=_touches)
 
-    judge = sub.add_parser("judge", help="whether a brief needs theory")
-    judge.add_argument("intent")
-    judge.add_argument(
-        "--no-search",
-        dest="search",
-        action="store_false",
-        help="judge without looking anything up",
-    )
-    judge.set_defaults(run=_judge)
 
-    learn = sub.add_parser("learn", help="acquire the theory a brief needs")
-    learn.add_argument("intent")
-    learn.add_argument(
-        "--into",
-        default="",
-        help="where to write readings (default: ~/.vesta/theory)",
-    )
-    learn.add_argument("--show", type=int, default=5)
-    learn.add_argument(
-        "--only-novel",
-        action="store_true",
-        help="acquire only for aspects judged to need theory (settled fields "
-        "still have literature worth reading, so this is off by default)",
-    )
-    learn.add_argument(
-        "--structure",
-        action="store_true",
-        help="build a Pragmatos corpus over what was found",
-    )
-    learn.add_argument(
-        "--pragmatos",
-        default="http://localhost:8000",
-        help="build through a running service instead of the library",
-    )
-    learn.add_argument("--ontology", default=None)
-    learn.set_defaults(run=_learn)
 
-    knows = sub.add_parser("knows", help="what acquired theory already says")
-    knows.add_argument("questions", nargs="+")
-    knows.add_argument("--intent", default="", help="the intent its corpus was built for")
-    knows.add_argument("--corpus", default="", help="an explicit corpus id")
-    knows.add_argument("--show", type=int, default=3)
-    knows.set_defaults(run=_knows)
 
     # The project's own `.env` wins over whatever the shell happens to carry.
     # A stale ANTHROPIC_API_KEY exported months ago in another project shadows

@@ -36,7 +36,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from pydantic import BaseModel, Field
 
 from .graph import Graph
-from .structure import VESTA_HOME
+from .home import VESTA_HOME
 
 logger = logging.getLogger("vesta.domain")
 
@@ -128,9 +128,16 @@ def _mark(root: Path, said: Sequence[Tuple[str, str]]) -> str:
 
 
 def _where(root: Path) -> Path:
-    ONTOLOGIES.mkdir(parents=True, exist_ok=True)
-    name = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:12]
-    return ONTOLOGIES / f"{root.name}-{name}.json"
+    """Where a repository's ontology is kept.
+
+    One naming rule, shared with maps, rules and patterns. Two of them resolved
+    the path and two did not, so a repository reached by `/tmp/x` and the same
+    one reached by `/private/tmp/x` kept their records in different places and
+    each read back nothing.
+    """
+    from .home import kept_at
+
+    return kept_at(root, "ontologies")
 
 
 def recall(repo: Path | str) -> Optional[Ontology]:

@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from .graph import Graph, build
-from .structure import VESTA_HOME
+from .home import VESTA_HOME
 
 logger = logging.getLogger("vesta.held")
 

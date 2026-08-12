@@ -38,10 +38,6 @@ dev = [
 #   pip install -e '../pragmatos[pipelines]' -e ../metis -e ../deps/stroma -e ../deps/kanon
 # `kanon` in particular is deliberately not a named dependency anywhere — an
 # unrelated package owns that name on PyPI.
-theory = [
-  "sentence-transformers>=3.0",  # embeddings; without it retrieval is lexical only
-  "pypdf>=4.0",                  # paper bodies; most CS literature is PDF
-]
 # Running as a sidecar to a coding agent over MCP.
 # Both majors work: 2.0 renamed FastMCP to MCPServer and moved the injected
 # Context class, and `sidecar.py` accommodates each. Verified against 1.28 and

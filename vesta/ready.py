@@ -35,7 +35,7 @@ from typing import Dict, Optional
 
 from pydantic import BaseModel
 
-from .structure import VESTA_HOME
+from .home import VESTA_HOME
 
 logger = logging.getLogger("vesta.ready")
 

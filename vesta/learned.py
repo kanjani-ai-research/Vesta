@@ -65,7 +65,7 @@ from pydantic import BaseModel, Field
 
 from .graph import Graph
 from .patterns import CLEAR, LIKELY, WORTH_A_LOOK, Found, Site, _lines, _sources
-from .structure import VESTA_HOME
+from .home import VESTA_HOME
 
 logger = logging.getLogger("vesta.learned")
 

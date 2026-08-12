@@ -222,7 +222,7 @@ def _note(prompt: str, project: str, size: int) -> None:
     """Record what was injected, so an experiment can account for it."""
     import time
 
-    from .structure import VESTA_HOME
+    from .home import VESTA_HOME
 
     try:
         VESTA_HOME.mkdir(parents=True, exist_ok=True)

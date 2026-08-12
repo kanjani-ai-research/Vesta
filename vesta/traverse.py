@@ -341,12 +341,11 @@ def keep(mapped: Map, repo: Path | str) -> Path:
     """Write a map, because reading a repository costs a call per definition."""
     import hashlib
 
-    from .structure import VESTA_HOME
+    from .home import VESTA_HOME
 
-    root = Path(repo).expanduser().resolve()
-    where_at = VESTA_HOME / "maps"
-    where_at.mkdir(parents=True, exist_ok=True)
-    path = where_at / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
+    from .home import kept_at
+
+    path = kept_at(repo, "maps")
     path.write_text(mapped.model_dump_json(), encoding="utf-8")
     return path
 
@@ -355,13 +354,11 @@ def recall(repo: Path | str) -> Optional[Map]:
     """The map already read for this repository, if there is one."""
     import hashlib
 
-    from .structure import VESTA_HOME
+    from .home import VESTA_HOME
 
-    root = Path(repo).expanduser().resolve()
-    path = (
-        VESTA_HOME / "maps"
-        / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
-    )
+    from .home import kept_at
+
+    path = kept_at(repo, "maps")
     if not path.is_file():
         return None
     try:

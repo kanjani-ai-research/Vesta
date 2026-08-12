@@ -49,6 +49,7 @@ def test_every_tool_answers_without_an_external_model(no_api, repo):
         _uses,
     )
 
+
     calls = [
         ("shape", lambda: _shape(repo)),
         ("uses", lambda: _uses("graph_for", repo)),
@@ -64,15 +65,19 @@ def test_every_tool_answers_without_an_external_model(no_api, repo):
 
 
 def test_no_module_in_the_graph_half_calls_a_model(repo):
-    """A grep, because a test can only catch what it exercises. The judging
-    modules were converted; this fails if a call comes back."""
+    """A grep, because a test can only catch what it exercises.
+
+    No exemptions. There were three — the modules that acquired literature and
+    built knowledge bases — and they were removed rather than exempted: a
+    plugin that needs its own search key and its own model is not a plugin, and
+    a version reduced to what a plugin may do would duplicate what the host
+    already does. What remains needs neither.
+    """
     import re
 
     calling = re.compile(r"\b(build_extractor|analyze_async)\s*\(")
     offenders = []
     for path in sorted((repo / "vesta").glob("*.py")):
-        if path.name in ("maturity.py", "acquire.py", "structure.py"):
-            continue  # the theory half, which is explicitly optional
         for number, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(), start=1
         ):

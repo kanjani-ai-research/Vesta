@@ -38,7 +38,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from pydantic import BaseModel, Field
 
-from .structure import VESTA_HOME
+from .home import VESTA_HOME
 
 logger = logging.getLogger("vesta.rules")
 
