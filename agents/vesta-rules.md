@@ -94,5 +94,16 @@ back to them later as an obligation they never made.
    and write no check. That is a common and useful answer. Claiming to check
    what you cannot is the one thing that must not happen.
 
+## Rules the user declared outright
+
+Some rules were never recovered from a transcript at all: the user stated them
+directly and Vesta wrote them down as standing. They arrive already decided —
+there is nothing to judge, and you must not re-litigate whether they are rules.
+
+What they lack is a check, because writing one is your work. A declared rule
+with no check is never raised when somebody edits the code it governs, so it
+sits there being true and doing nothing. Give each one a check by the same
+standard as the rest, or mark it `underived` where none of the five kinds fits.
+
 Report how many you kept, how many carry a check, and how many candidates you
 rejected, with one example of each. Do not list them all.

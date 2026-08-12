@@ -886,6 +886,80 @@ async def _ask_about(context, rule):
     return answer.data.verdict, answer.data.stated
 
 
+def _bears_on(paths: List[str], project: Optional[Path]) -> str:
+    """Whether a rule the user set disagrees with the work in hand.
+
+    Everything here already exists: `enforce` finds violations, rules name what
+    they are about, and `confirm` holds what has been settled. What is new is
+    only asking at the moment somebody cares.
+    """
+    from . import bearing
+    from .enforce import against
+    from .rules import from_sessions, recall_rules
+
+    if project is None:
+        return ""
+
+    with quiet_stdout():
+        found = recall_rules(project) or from_sessions(project)
+        found = confirming.apply(found, project)
+        if not found.standing:
+            return ""
+
+        # Only the rules that are about these files, and only then is anything
+        # checked. Checking all eleven standing rules costs eleven seconds on
+        # this repository to answer a question nobody asked — and this runs
+        # before an edit, so a tool that pauses work to say nothing gets
+        # turned off.
+        covers = [r for r in found.standing if bearing._covers(r, paths)]
+        if not covers:
+            return ""
+
+        from .rules import Found
+
+        graph = graph_for(project, trust_for=300)
+        verdict = against(Found(rules=covers), graph, project)
+
+    raised = bearing.worth_raising(verdict.findings, covers, paths, repo=project)
+    # Rules governing this work that nothing could check. Not raised — there is
+    # nothing the user could usefully do mid-edit — but not silent either: a
+    # rule that was never checked must not pass as one that held.
+    unanswered = bearing.unanswered(verdict.findings, covers, paths, repo=project)
+
+    if not raised and not unanswered:
+        return ""
+
+    lines: List[str] = []
+    if raised:
+        one = raised[0]
+        lines.append(one.ask())
+        lines.append("")
+        lines.append(
+            "If it stands, the code needs changing. If it does not, say so and "
+            "it stops being enforced: tell the user to run "
+            f"`vesta learn {one.name} lapsed`."
+        )
+
+    if unanswered:
+        if lines:
+            lines.append("")
+        lines.append(
+            f"{len(unanswered)} rule(s) here could not be checked at all, so "
+            "nothing was verified about them:"
+        )
+        for one in unanswered[:3]:
+            lines.append(f"  {one.said or one.rule}")
+        lines.append(
+            "Mention this once; do not stop work for it. The `vesta-rules` "
+            "agent writes the checks these lack."
+        )
+        # Kept, so what Vesta could not answer is settleable deliberately
+        # rather than being absent.
+        bearing.queue(verdict.findings, covers, paths, project)
+
+    return "\n".join(lines)
+
+
 def _quieten() -> None:
     """Keep everything off stdout.
 
@@ -1190,6 +1264,35 @@ def build_server():
             "`declare` records one outright."
         )
         return "\n".join(lines)
+
+    @server.tool()
+    async def bears_on(paths: List[str], context: Context = None) -> str:
+        """Whether a rule this project's user set disagrees with these files.
+
+        Call before changing files, alongside `touches`. Answers with nothing
+        at all unless a standing rule covers this work *and* the code no longer
+        matches it — which is uncommon, and is exactly when the user wants to
+        know.
+
+        When it does answer, put the question to the user in their own words
+        and wait. Do not decide on their behalf whether their own rule still
+        stands.
+
+        Args:
+            paths: The files about to be changed.
+        """
+        import time as _t
+
+        here = await project_of(context)
+        if here is None:
+            return "Could not tell which project this is."
+
+        import anyio
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_bears_on, paths, here)
+        _record("bears_on", here, _t.monotonic() - started, len(answer))
+        return answer or "No rule you have set is in doubt for these files."
 
     @server.tool()
     async def declare(rule: str, context: Context = None) -> str:

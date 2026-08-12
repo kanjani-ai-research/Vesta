@@ -46,7 +46,7 @@ from typing import Dict, List, Optional, Sequence
 from pydantic import BaseModel, Field
 
 from .home import kept_at
-from .rules import UNDERIVED, Found, Rule, derive
+from .rules import UNDERIVED, Found, Rule, _names_in, derive
 
 logger = logging.getLogger("vesta.confirm")
 
@@ -362,13 +362,18 @@ def apply(found: Found, repo: Path | str) -> Found:
             continue
         if _key(verdict.text) in have:
             continue
-        kind, how = derive(verdict.stated or verdict.text)
+        said = verdict.stated or verdict.text
+        kind, how = derive(said)
         standing.append(
             Rule(
                 text=verdict.text,
-                stated=verdict.stated or verdict.text,
+                stated=said,
                 check=kind,
                 how=how,
+                # What the rule is about. Without this a declared rule bears on
+                # nothing — it can never be raised when work touches what it
+                # governs, which is most of the value of having stated it.
+                names=_names_in(said),
                 first=verdict.at,
                 last=verdict.at,
             )
