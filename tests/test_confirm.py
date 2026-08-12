@@ -1,0 +1,101 @@
+"""Asking the user which corrections are rules, and keeping the answer."""
+
+from __future__ import annotations
+
+import pytest
+
+from vesta import confirm
+from vesta.rules import Found, Rule
+
+
+def _found() -> Found:
+    return Found(
+        rules=[
+            Rule(text="never use a bare except", check="behaviour", how="x"),
+            Rule(text="do not log in this one spot", check="underived", how="y"),
+            Rule(text="type every public function", check="traversal", how="z"),
+        ]
+    )
+
+
+def test_nothing_confirmed_yet(tmp_path):
+    assert confirm.recall(tmp_path).describe() == "nothing has been confirmed yet"
+
+
+def test_a_verdict_is_kept(tmp_path):
+    confirm.record(tmp_path, "never use a bare except", confirm.IS_A_RULE)
+    kept = confirm.recall(tmp_path)
+    assert len(kept.verdicts) == 1
+    assert kept.verdicts[0].binding
+
+
+def test_the_same_candidate_is_never_asked_twice(tmp_path):
+    """The whole value. Asking again is how a good question becomes a nuisance."""
+    found = _found()
+    first = confirm.worth_asking(found, tmp_path)
+    assert len(first) == 3
+
+    confirm.record(tmp_path, first[0].text, confirm.NOT_A_RULE)
+    again = confirm.worth_asking(found, tmp_path)
+    assert first[0].text not in [r.text for r in again]
+    assert len(again) == 2
+
+
+def test_candidates_with_evidence_come_first(tmp_path):
+    """Ranking uncheckable first looked right and surfaced conversational
+    asides. A candidate some check recognises is one there is evidence for."""
+    asking = confirm.worth_asking(_found(), tmp_path)
+    assert asking[0].check != "underived"
+    assert asking[-1].check == "underived"
+
+
+def test_a_dismissed_candidate_stops_counting(tmp_path):
+    found = _found()
+    confirm.record(tmp_path, "do not log in this one spot", confirm.NOT_A_RULE)
+    kept = confirm.apply(found, tmp_path)
+    assert "do not log in this one spot" not in [r.text for r in kept.rules]
+    assert len(kept.rules) == 2
+
+
+def test_a_cleaner_statement_is_carried_onto_the_rule(tmp_path):
+    found = _found()
+    confirm.record(
+        tmp_path, "never use a bare except", confirm.IS_A_RULE, "no bare except anywhere"
+    )
+    kept = confirm.apply(found, tmp_path)
+    rule = next(r for r in kept.rules if r.text == "never use a bare except")
+    assert rule.stated == "no bare except anywhere"
+
+
+def test_a_lapsed_rule_stops_standing(tmp_path):
+    found = _found()
+    confirm.record(tmp_path, "type every public function", confirm.NO_LONGER)
+    kept = confirm.apply(found, tmp_path)
+    assert "type every public function" not in [r.text for r in kept.rules]
+
+
+def test_a_verdict_nobody_recognises_is_kept_safely(tmp_path):
+    """The answer came from a person. Losing it to a typo is worse than
+    recording the safe reading."""
+    confirm.record(tmp_path, "something", "nonsense")
+    kept = confirm.recall(tmp_path)
+    assert kept.verdicts[0].verdict == confirm.NOT_A_RULE
+
+
+def test_answering_again_replaces_rather_than_duplicates(tmp_path):
+    confirm.record(tmp_path, "a rule", confirm.NOT_A_RULE)
+    confirm.record(tmp_path, "a rule", confirm.IS_A_RULE)
+    kept = confirm.recall(tmp_path)
+    assert len(kept.verdicts) == 1
+    assert kept.verdicts[0].binding
+
+
+def test_whitespace_and_case_do_not_make_a_new_candidate(tmp_path):
+    confirm.record(tmp_path, "Never   Use A Bare Except", confirm.IS_A_RULE)
+    remaining = confirm.worth_asking(_found(), tmp_path)
+    assert "never use a bare except" not in [r.text for r in remaining]
+
+
+def test_applying_nothing_changes_nothing(tmp_path):
+    found = _found()
+    assert len(confirm.apply(found, tmp_path).rules) == 3

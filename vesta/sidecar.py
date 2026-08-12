@@ -26,12 +26,13 @@ import contextlib
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from .authority import settle
 from .dynamic import missed_by, scan
 from .enforce import against
 from .harvest import anchor, from_sessions, keep, recall_notes
+from . import confirm as confirming
 from .across import known as known_projects
 from .across import loaded, refer, release, resolve
 from .domain import recall as recall_ontology
@@ -572,12 +573,24 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
         if found is None:
             found = from_sessions(project)  # patterns only, no model
 
+        # What the user themselves said about these. Applied last, over both
+        # the agent's judgement and the patterns': they are guesses about
+        # whether a remark was a decision, and this is the person who made it.
+        found = confirming.apply(found, project)
+
     if not found.standing:
+        asked = confirming.recall(project)
+        settle_it = (
+            "\nThere are candidates waiting on you — `learn` asks about them."
+            if not asked.verdicts
+            else ""
+        )
         return (
             f"project: {project}\n"
             "No rules have been recovered for this repository yet.\n"
             "Run the `vesta-rules` agent on it to recover what its user has "
             "already decided, from what they said in earlier sessions."
+            f"{settle_it}"
         )
 
     # A rule founded on one remark in one session is not a decision. The
@@ -818,6 +831,61 @@ def _projects(project: Optional[Path]) -> str:
     return "\n".join(lines)
 
 
+def _candidates(project: Path) -> list:
+    """Candidate rules worth putting to the user, most useful first."""
+    from .rules import from_sessions as rules_from_sessions
+
+    with quiet_stdout():
+        found = rules_from_sessions(project)
+    return confirming.worth_asking(found, project)
+
+
+async def _ask_about(context, rule):
+    """Put one candidate to the user, and return what they said.
+
+    Elicitation is the only way a plugin reaches the user directly, and the
+    host enforces a flat schema of primitives — so the question is one enum and
+    one optional line, which is also all anybody will answer five times.
+
+    Returns None where the user declined or cancelled. That is not a verdict
+    and must not be recorded as one: a person who closes a dialog has said
+    nothing about the rule, and writing "not a rule" would silently discard a
+    real one and never ask again.
+    """
+    from pydantic import BaseModel as _Model
+    from pydantic import Field as _Field
+
+    class Answer(_Model):
+        verdict: Literal["rule", "note", "lapsed"] = _Field(
+            description=(
+                "rule: binding here, check the code against it. "
+                "note: said once about one place. "
+                "lapsed: was a rule, is not now."
+            ),
+        )
+        stated: str = _Field(
+            default="",
+            description="Optional: the rule in one clean sentence.",
+        )
+
+    said = rule.text.strip()
+    if len(said) > 300:
+        said = said[:300] + "…"
+
+    try:
+        answer = await context.elicit(
+            message=f"Is this a standing rule for this project?\n\n{said}",
+            schema=Answer,
+        )
+    except Exception as exc:  # noqa: BLE001 - a client that cannot ask is not an error
+        logger.info("could not ask: %s", exc)
+        return None
+
+    if getattr(answer, "action", "") != "accept" or answer.data is None:
+        return None
+    return answer.data.verdict, answer.data.stated
+
+
 def _quieten() -> None:
     """Keep everything off stdout.
 
@@ -1053,6 +1121,53 @@ def build_server():
         answer = await anyio.to_thread.run_sync(_projects, here)
         _record("projects", here, _t.monotonic() - started, len(answer))
         return answer
+
+    @server.tool()
+    async def learn(context: Context = None) -> str:
+        """Confirm which of your corrections are standing rules.
+
+        Vesta recovers candidate rules from what you told agents in this
+        project, but a passing remark and a standing decision look identical in
+        a transcript. This asks you about the ones where an answer would change
+        something, and never asks about the same one twice.
+
+        Use when the user asks to confirm rules, or when `decided` reports
+        candidates that nothing can check yet.
+        """
+        import time as _t
+
+        here = await project_of(context)
+        started = _t.monotonic()
+        if here is None:
+            return "Could not tell which project this is."
+
+        import anyio
+
+        found = await anyio.to_thread.run_sync(_candidates, here)
+        if not found:
+            return (
+                f"project: {here}\n"
+                "Nothing new to confirm — every candidate recovered here has "
+                "already been ruled on."
+            )
+
+        settled = 0
+        for rule in found:
+            answer = await _ask_about(context, rule)
+            if answer is None:
+                break  # they closed it; asking again would be nagging
+            await anyio.to_thread.run_sync(
+                confirming.record, here, rule.text, answer[0], answer[1]
+            )
+            settled += 1
+
+        asked = await anyio.to_thread.run_sync(confirming.recall, here)
+        _record("learn", here, _t.monotonic() - started, settled)
+        return (
+            f"project: {here}\n"
+            f"{settled} confirmed just now. {asked.describe()}.\n"
+            "Standing rules are checked by `decided` with check=true."
+        )
 
     @server.tool()
     async def defects(limit: int = 8, context: Context = None) -> str:

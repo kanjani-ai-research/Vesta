@@ -20,8 +20,8 @@ COMMANDS = [
     ["status"],
     ["status", "--prepare"],
     ["used"],
-    ["rules"],
-    ["patterns"],
+    ["decided"],
+    ["defects"],
 ]
 
 
@@ -35,7 +35,7 @@ def test_help_does_not_raise(capsys):
 @pytest.mark.parametrize("argv", COMMANDS)
 def test_every_subcommand_runs(argv, tmp_path, capsys):
     """Not that the answer is right — that the command exists and returns."""
-    if argv[0] in {"status", "rules", "patterns"}:
+    if argv[0] in {"status", "decided", "defects"}:
         argv = argv + [str(tmp_path)] if argv[0] != "status" else [argv[0], str(tmp_path)] + argv[1:]
     assert main(argv) == 0
 

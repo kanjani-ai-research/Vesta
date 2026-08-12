@@ -55,7 +55,7 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         "Name another project by name or by path. The project you are in stays "
         "authoritative; the other is consulted, not merged.",
         [
-            ("vesta elsewhere 'fuzzy search' indexer", "how that project does it"),
+            ("vesta elsewhere fuzzy search --in indexer", "how that project does it"),
             ("vesta projects", "what can be referred to, and what currently is"),
         ],
     ),
@@ -66,6 +66,7 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         [
             ("vesta decided", "the rules recovered from your own corrections"),
             ("vesta decided --check", "whether the code still honours them"),
+            ("vesta learn", "confirm which of them are actually binding"),
         ],
     ),
     (
@@ -88,6 +89,22 @@ reading, and you do not pay twice for the same understanding."""
 STANDING = """Vesta runs on your agent's own inference. It holds no API key and
 makes no network calls of its own. Everything it derives is kept under
 ~/.vesta and can be deleted; nothing leaves your machine."""
+
+
+# Terminals are narrower than source files. A guide that runs off the right of
+# the window is a guide nobody finishes reading.
+WIDTH = 76
+
+
+def _wrapped(text: str, indent: str = "  ") -> List[str]:
+    import textwrap
+
+    return textwrap.wrap(
+        " ".join(text.split()),
+        width=WIDTH,
+        initial_indent=indent,
+        subsequent_indent=indent,
+    )
 
 
 def _snippet(command: str, what: str) -> str:
@@ -119,19 +136,19 @@ def guide(topic: str = "") -> str:
     if not wanted:
         lines.append("Vesta")
         lines.append("")
-        lines.append(PURPOSE)
+        lines.extend(_wrapped(PURPOSE, ""))
         lines.append("")
 
     for title, why, snippets in sections:
         lines.append(title)
-        lines.append(f"  {why}")
+        lines.extend(_wrapped(why))
         lines.append("")
         for command, what in snippets:
             lines.append(_snippet(command, what))
         lines.append("")
 
     if not wanted:
-        lines.append(STANDING)
+        lines.extend(_wrapped(STANDING, ""))
     return "\n".join(lines).rstrip() + "\n"
 
 

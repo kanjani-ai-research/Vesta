@@ -268,6 +268,44 @@ def _asked(args: argparse.Namespace) -> int:
     return 0
 
 
+def _learn(args: argparse.Namespace) -> int:
+    """Confirm which recovered corrections are standing rules.
+
+    A terminal can only ask one question at a time and cannot render a form, so
+    this lists what is waiting and takes one verdict per invocation. The same
+    verdicts the `learn` tool records over MCP — one store, two doors.
+    """
+    from . import confirm
+    from .rules import from_sessions
+
+    where = Path(args.root).expanduser().resolve()
+    if args.text:
+        confirm.record(where, args.text, args.verdict, args.stated or "")
+        _say(confirm.recall(where).describe())
+        return 0
+
+    found = from_sessions(where)
+    waiting = confirm.worth_asking(found, where, limit=args.show)
+    asked = confirm.recall(where)
+    _say(asked.describe())
+
+    if not waiting:
+        _say("Nothing new to confirm.")
+        return 0
+
+    _say("")
+    _say(f"{len(waiting)} candidate(s) worth settling:")
+    for rule in waiting:
+        _say("")
+        _say(f"  {rule.text[:150]}")
+        _say(f"    checkable as: {rule.check}")
+    _say("")
+    _say("Say which it is:")
+    _say("  vesta learn --text '<the candidate>' --verdict rule|note|lapsed")
+    _say("  … or use /vesta:learn in a session, which asks you directly.")
+    return 0
+
+
 def _guide(args: argparse.Namespace) -> int:
     """What Vesta is and what a user can do with it.
 
@@ -355,6 +393,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     projects = sub.add_parser("projects", help="what can be referred to")
     projects.add_argument("--root", default=".")
     projects.set_defaults(run=_asked)
+
+    learn = sub.add_parser("learn", help="confirm which corrections are rules")
+    learn.add_argument("root", nargs="?", default=".")
+    learn.add_argument("--show", type=int, default=5)
+    learn.add_argument("--text", default="", help="the candidate being ruled on")
+    learn.add_argument(
+        "--verdict", default="rule", choices=("rule", "note", "lapsed")
+    )
+    learn.add_argument("--stated", default="", help="the rule, said cleanly")
+    learn.set_defaults(run=_learn)
 
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")
     guide.add_argument("topic", nargs="?", default="")
