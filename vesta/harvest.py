@@ -125,18 +125,68 @@ class Harvest(BaseModel):
         return ", ".join(parts)
 
 
-def _sessions_for(repo: Path) -> List[Path]:
-    """Transcript files the host wrote for this repository.
+# How many times a session must name a repository before it counts as being
+# about it. One mention is somebody pasting a path; a session that worked on a
+# repository names it constantly.
+MENTIONS_ENOUGH = 20
 
-    The host names a project directory after its path with separators replaced,
-    which is a convention rather than a contract — so a miss returns nothing
-    and the caller carries on rather than failing.
+# Sessions already matched to a repository, keyed by the state of the
+# transcript directory. Scanning every transcript for path mentions is not
+# free, and it does not change between two questions asked a second apart.
+_MATCHED: Dict[str, Tuple[str, List[Path]]] = {}
+
+
+def _sessions_for(repo: Path) -> List[Path]:
+    """Transcripts of work on this repository, wherever they were recorded.
+
+    **Not only the directory named after it.** The host keys a project by where
+    the agent was *launched*, not by what it worked on, so a session started one
+    level up records months of work on a repository under a different name
+    entirely. Vesta's own history is the case: seventeen sessions sit under its
+    own name, all of them test runs, while the three thousand turns that built
+    it live under the directory the agent happened to start in. Keyed by launch
+    directory, a project cannot see its own past.
+
+    So the directory named after the repository is taken, and every other
+    transcript that names the repository often enough to have been working on
+    it. A path mentioned once is somebody pasting it; a repository being worked
+    on is named constantly.
     """
-    slug = str(repo).replace("/", "-")
-    directory = TRANSCRIPTS / slug
-    if not directory.is_dir():
+    import hashlib
+
+    if not TRANSCRIPTS.is_dir():
         return []
-    return sorted(directory.glob("*.jsonl"))
+
+    named = str(repo).replace("/", "-")
+    obvious = TRANSCRIPTS / named
+    found = sorted(obvious.glob("*.jsonl")) if obvious.is_dir() else []
+
+    # What the transcript directory looks like now, so the scan is done once.
+    try:
+        marks = sorted(
+            f"{d.name}:{int(d.stat().st_mtime)}" for d in TRANSCRIPTS.iterdir()
+        )
+    except OSError:
+        return found
+    state = hashlib.sha256("\n".join(marks).encode("utf-8")).hexdigest()[:16]
+
+    remembered = _MATCHED.get(str(repo))
+    if remembered and remembered[0] == state:
+        return remembered[1]
+
+    wanted = str(repo).encode("utf-8")
+    for directory in sorted(TRANSCRIPTS.iterdir()):
+        if not directory.is_dir() or directory.name == named:
+            continue
+        for path in sorted(directory.glob("*.jsonl")):
+            try:
+                if path.read_bytes().count(wanted) >= MENTIONS_ENOUGH:
+                    found.append(path)
+            except OSError:
+                continue
+
+    _MATCHED[str(repo)] = (state, found)
+    return found
 
 
 def _prose(payload: dict) -> Iterable[str]:
