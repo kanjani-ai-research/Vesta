@@ -349,3 +349,26 @@ def test_the_venv_is_not_shipped():
     """It cannot work in a copy, so shipping it only creates the dead path."""
     ignored = (HERE / ".claudeignore").read_text(encoding="utf-8")
     assert ".venv/" in ignored
+
+
+def test_no_project_setting_runs_a_bare_interpreter():
+    """A `.claude/settings.json` hook running `python -m vesta.x` printed
+    `python: command not found` above every prompt — from outside the plugin,
+    so nothing in the plugin could fix it."""
+    import json
+
+    settings = HERE / ".claude" / "settings.json"
+    if not settings.is_file():
+        return
+    text = settings.read_text(encoding="utf-8")
+    found = json.loads(text)
+    commands = [
+        entry.get("command", "")
+        for group in found.get("hooks", {}).values()
+        for block in group
+        for entry in block.get("hooks", [])
+    ]
+    for command in commands:
+        assert not command.strip().startswith(("python ", "python3 ")), (
+            f"a project hook runs a bare interpreter: {command!r}"
+        )
