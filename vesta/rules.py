@@ -613,3 +613,104 @@ def judge(found: "Found", model: Optional[str] = None) -> "Found":
 
     found.rules = kept
     return found
+
+
+def keep_rules(found: Found, repo: Path | str) -> Path:
+    """Write what was judged, so a tool can read it without a model."""
+    import hashlib
+
+    root = Path(repo).expanduser().resolve()
+    RULES.mkdir(parents=True, exist_ok=True)
+    where = RULES / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
+    where.write_text(found.model_dump_json(), encoding="utf-8")
+    return where
+
+
+def recall_rules(repo: Path | str) -> Optional[Found]:
+    """What was judged for this repository, if anything has been.
+
+    Returns None rather than an empty result, so a caller can tell "nobody has
+    judged this yet" from "there is nothing here" — the first is a prompt to
+    run the agent, the second is an answer.
+    """
+    import hashlib
+
+    root = Path(repo).expanduser().resolve()
+    where = RULES / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
+    if not where.is_file():
+        return None
+    try:
+        return Found.model_validate_json(where.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+# ── The seam an agent calls ──────────────────────────────────────────────
+
+# How a judged rule is written by an agent: `check | rule | what they said`.
+JUDGED = re.compile(r"^\s*(traversal|behaviour|artefact|underived)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*$", re.I)
+
+
+def read_judged(text: str) -> List[Rule]:
+    """Parse the rules an agent kept, ignoring whatever else it wrote."""
+    found: List[Rule] = []
+    for line in text.splitlines():
+        line = line.lstrip("-*• \t")
+        matched = JUDGED.match(line)
+        if not matched:
+            continue
+        kind, stated, said = matched.groups()
+        if len(stated) < 10:
+            continue
+        found.append(
+            Rule(
+                text=said.strip(),
+                stated=stated.strip(),
+                check=kind.lower(),
+                how="",
+                said=[Said(text=said.strip(), at=time.time())],
+                first=time.time(),
+                last=time.time(),
+            )
+        )
+    return found
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Hand an agent the candidates; take back what it judged."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="vesta-rules", description="Record the rules an agent recovered."
+    )
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--candidates", action="store_true")
+    parser.add_argument("--write", action="store_true")
+    parser.add_argument("--limit", type=int, default=60)
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+    root = Path(args.repo).expanduser().resolve()
+
+    if args.candidates:
+        # Patterns only: narrowing hundreds of turns to a few dozen needs no
+        # model, and what each one *is* needs one that reads it.
+        found = from_sessions(root)
+        for rule in found.rules[: args.limit]:
+            print(f"--- {rule.text[:600]}")
+        return 0
+
+    if args.write:
+        kept = read_judged(sys.stdin.read())
+        found = Found(rules=kept, considered=len(kept))
+        keep_rules(found, root)
+        print(f"kept {len(kept)} rule(s) for {root}")
+        return 0
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

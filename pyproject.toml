@@ -53,6 +53,9 @@ sidecar = [
 [project.scripts]
 vesta = "vesta.cli:main"
 vesta-sidecar = "vesta.sidecar:main"
+vesta-domain = "vesta.derive:main"
+vesta-rules = "vesta.rules:main"
+vesta-defects = "vesta.learned:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

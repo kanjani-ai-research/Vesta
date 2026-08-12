@@ -1,0 +1,7 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "vesta",
+  "description": "A traversable graph of a repository: what refers to what, what the work is called, what its user has decided, and what is worth fixing.",
+  "version": "0.1.0",
+  "author": {"name": "Causum"}
+}

@@ -671,10 +671,17 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
     if waiting:
         return waiting
 
-    from .rules import from_sessions, judge
+    from .rules import from_sessions, recall_rules
 
     with quiet_stdout():
-        found = judge(from_sessions(project, read_everything=True))
+        # Read what was judged, never judge here. Judging is model work, and a
+        # tool that calls a model calls it through an API the user must hold a
+        # key for — in a plugin to an agent that already has one. The
+        # `vesta-rules` agent does the judging on the host's inference and
+        # writes the result down; this reads it.
+        found = recall_rules(project)
+        if found is None:
+            found = from_sessions(project)  # patterns only, no model
 
     if not found.standing:
         return (

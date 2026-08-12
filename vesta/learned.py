@@ -57,6 +57,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -563,3 +564,103 @@ def recall(repo: Path | str) -> Learned:
         return Learned.model_validate_json(where.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return Learned()
+
+
+# ── The seam an agent calls ──────────────────────────────────────────────
+
+FIELD = re.compile(r"^\s*(name|why|find|skip|from|within)\s*:\s*(.+?)\s*$", re.I)
+
+
+def read_finders(text: str) -> List[Pattern]:
+    """Parse the finders an agent wrote, one block of fields per finder."""
+    found: List[Pattern] = []
+    current: Dict[str, str] = {}
+
+    def flush() -> None:
+        if current.get("name") and current.get("find"):
+            found.append(
+                Pattern(
+                    name=current["name"][:60],
+                    why=current.get("why", "")[:300],
+                    pattern=current["find"],
+                    not_reported=current.get("skip", ""),
+                    exclude=current.get("skip", ""),
+                    within=current.get("within", r"\.py$"),
+                    said=current.get("from", "")[:300],
+                    at=time.time(),
+                    origin="derived",
+                )
+            )
+        current.clear()
+
+    for line in text.splitlines():
+        matched = FIELD.match(line.lstrip("-*• \t"))
+        if not matched:
+            continue
+        key, value = matched.group(1).lower(), matched.group(2)
+        if key == "name" and current:
+            flush()
+        current[key] = value
+    flush()
+    return found
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Hand an agent the exchanges; take back the finders it wrote."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="vesta-defects", description="Record the finders an agent derived."
+    )
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--exchanges", action="store_true")
+    parser.add_argument("--write", action="store_true")
+    parser.add_argument("--limit", type=int, default=40)
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+    root = Path(args.repo).expanduser().resolve()
+
+    if args.exchanges:
+        from .harvest import _sessions_for
+
+        for did, said, _ in _exchanges(_sessions_for(root))[-args.limit :]:
+            print(f"--- AGENT DID: {did[:500]}")
+            print(f"    USER SAID: {said[:500]}")
+        return 0
+
+    if args.write:
+        wrote = read_finders(sys.stdin.read())
+        # Checked against the repository before being kept, exactly as a
+        # derivation of its own would be: one that matches nothing has not been
+        # shown to describe anything here, and one matching most of the tree
+        # describes the language.
+        kept, dropped = [], []
+        total = sum(1 for _ in _sources(root))
+        for pattern in wrote:
+            hits = pattern.find(root)
+            sites = sum(len(f.sites) for f in hits)
+            if sites < TOO_RARE:
+                dropped.append(f"{pattern.name}: matches nothing here")
+                continue
+            if sites > TOO_MANY:
+                dropped.append(f"{pattern.name}: {sites} sites, too many to act on")
+                continue
+            if total and len(hits) / total > TOO_COMMON:
+                dropped.append(f"{pattern.name}: matches most of the tree")
+                continue
+            kept.append(pattern)
+
+        keep(Learned(patterns=kept, considered=len(wrote), dropped=dropped), root)
+        print(f"kept {len(kept)} finder(s) for {root}")
+        for why in dropped:
+            print(f"  dropped: {why}")
+        return 0
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
