@@ -1,13 +1,18 @@
 """Vesta from a terminal.
 
-Four things, matching the four things the library does: build a graph of a
-codebase, ask what a change touches, ask whether a brief needs theory, and go
-and get that theory.
+The same things the library does: build a graph of a codebase, ask what a
+change touches, ask whether Vesta can answer here yet, report what the user has
+decided and whether the code honours it, and report what is worth fixing.
+
+**Nothing here judges.** Deciding whether a correction is a rule, or what a
+definition is about, needs a model — and Vesta's model is the host's, reached
+through a plugin agent rather than an API key the user has to hold. These
+commands read what was decided and check what can be checked mechanically.
 
 **Every command reports what it could not establish.** A propagation set over a
-graph with holes, a judgement made without a web search, a corpus built from two
-sources of three: each is printed, because a result that looks complete and is
-not is the failure mode this whole project is shaped against.
+graph with holes, a rule nothing can check, a file the resolver could not read:
+each is printed, because a result that looks complete and is not is the failure
+mode this whole project is shaped against.
 """
 
 from __future__ import annotations
@@ -177,15 +182,18 @@ def _rules(args: argparse.Namespace) -> int:
 
     Reachable because a survey found `enforce.against` referred to by nothing —
     an entry point nobody could call is a feature nobody has.
+
+    Reads what has already been decided; it does not judge. Deciding whether a
+    correction is a rule needs a model, and Vesta's models are the host's — the
+    `vesta-rules` agent does that and writes the answer down, and this reports
+    what it wrote. A CLI that judged would need a key the user should not need.
     """
     from .enforce import against
     from .held import graph_for
-    from .rules import from_sessions, judge
+    from .rules import from_sessions
 
     where = Path(args.root).expanduser().resolve()
-    found = from_sessions(where, read_everything=not args.quick)
-    if not args.quick:
-        found = judge(found)
+    found = from_sessions(where)
     _say(found.describe())
 
     if not args.check:
@@ -234,7 +242,7 @@ def _patterns(args: argparse.Namespace) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vesta",
-        description="What a change touches, and what theory a build needs.",
+        description="What a change touches, what the work is called, what you have decided.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -250,15 +258,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     touches.add_argument("--hops", type=int, default=3)
     touches.set_defaults(run=_touches)
 
-
-
-
-    # The project's own `.env` wins over whatever the shell happens to carry.
-    # A stale ANTHROPIC_API_KEY exported months ago in another project shadows
-    # the configured one under plain `setdefault`, and the failure surfaces as
-    # "API key is invalid" about a key the user never chose to use.
-    _load_env(override=True)
-
     status = sub.add_parser("status", help="whether vesta can help here yet")
     status.add_argument("root", nargs="?", default=".")
     status.add_argument("--prepare", action="store_true", help="start building if nothing is built")
@@ -267,7 +266,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rules = sub.add_parser("rules", help="what you have decided, and whether the code honours it")
     rules.add_argument("root", nargs="?", default=".")
     rules.add_argument("--check", action="store_true", help="check the code against them")
-    rules.add_argument("--quick", action="store_true", help="patterns only, no model")
     rules.add_argument("--show", type=int, default=6)
     rules.set_defaults(run=_rules)
 
@@ -282,9 +280,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     used.set_defaults(run=_used)
 
     args = parser.parse_args(argv)
-    # Whether the user actually asked for the service, rather than inheriting
-    # the default and getting HTTP they never chose.
-    args.pragmatos_url_given = any(a.startswith("--pragmatos") for a in (argv or sys.argv[1:]))
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(name)s: %(message)s",

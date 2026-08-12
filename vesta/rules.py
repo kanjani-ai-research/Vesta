@@ -350,10 +350,14 @@ def derive(text: str) -> Tuple[str, str]:
 def from_sessions(
     repo: Path | str,
     transcripts: Optional[Sequence[Path]] = None,
-    read_everything: bool = False,
-    model: Optional[str] = None,
 ) -> Found:
-    """Recover what a user has decided, from what they said in this project."""
+    """Recover what a user has decided, from what they said in this project.
+
+    Turns are admitted by pattern. Patterns are brittle and miss real rules,
+    and the alternative — reading every turn — needs a model, which Vesta does
+    not call. The `vesta-rules` agent reads on the host's inference and writes
+    what it decided; this recovers the candidates that need no judgement.
+    """
     root = Path(repo).expanduser().resolve()
     found = Found()
 
@@ -364,24 +368,10 @@ def from_sessions(
 
     by_text: Dict[str, Rule] = {}
 
-    # Which turns are worth judging. Patterns are brittle and miss real rules;
-    # reading every turn costs a cheap call each. `read_everything` chooses.
-    admitted: Optional[Set[str]] = None
-    if read_everything:
-        every: List[str] = []
-        for path in transcripts:
-            every.extend(
-                said for said, _ in _turns(path) if 20 < len(said) < 600
-            )
-        admitted = set(sift(every, model))
-
     for path in transcripts:
         for said, stamp in _turns(path):
             found.considered += 1
-            if admitted is not None:
-                if said not in admitted:
-                    continue
-            elif not constrains(said):
+            if not constrains(said):
                 continue
 
             names = _names_in(said)
