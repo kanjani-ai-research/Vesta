@@ -18,11 +18,17 @@ if [ -n "$python" ]; then
     exec "$python" -m vesta.cli "$@"
 fi
 
-echo "Vesta is installed as a plugin but no interpreter here can run it."
+# Nothing reached, and building one did not work either. The likeliest reason
+# by far is the Python version: macOS ships 3.9, `mcp` publishes for 3.10 and
+# up, so a machine with only the system Python cannot run the sidecar. Say that
+# rather than "not installed", which sends people looking in the wrong place.
+echo "Vesta could not start."
 echo
-echo "  pip install vesta"
-echo "     or"
-echo "  export VESTA_PYTHON=/path/to/a/python/that/has/vesta"
+echo "It builds its own environment on first use and needs Python 3.10 or"
+echo "newer to do it. macOS ships 3.9, which is not enough: the mcp package"
+echo "does not publish for it."
 echo
-echo "Then reopen this session."
+echo "  brew install python@3.13"
+echo
+echo "Then reopen this session. Nothing else is needed; Vesta installs itself."
 exit 0

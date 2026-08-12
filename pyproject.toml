@@ -55,4 +55,7 @@ vesta-defects = "vesta.learned:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "slow: builds a real environment; minutes rather than milliseconds",
+]
 pythonpath = ["."]

@@ -265,12 +265,14 @@ def test_a_command_in_a_copied_plugin_says_why(tmp_path):
         [str(copied / "bin" / "vesta-run"), "guide"],
         capture_output=True,
         text=True,
-        env=BARE,
+        env={**BARE, "VESTA_NO_INSTALL": "1", "HOME": str(tmp_path)},
         timeout=60,
     )
     assert "command not found" not in done.stdout + done.stderr
     assert "Traceback" not in done.stdout + done.stderr
-    assert "VESTA_PYTHON" in done.stdout
+    # It builds its own environment, so a bare copy answers rather than
+    # explaining. Only when it cannot build one is there anything to say, and
+    # `tests/test_install.py` covers that.
     assert done.returncode == 0
 
 

@@ -1,37 +1,81 @@
 #!/bin/sh
-# Print an interpreter that can actually run Vesta, or nothing.
+# Print an interpreter that can run Vesta, making one if that is what it takes.
 #
-# Sourced by every entry point so there is one answer to "which python", rather
-# than three scripts each guessing differently and disagreeing when it matters.
+# **A plugin must not ask its user to install anything.** Somebody who typed
+# `/plugin install vesta` has said what they want; answering with `pip install
+# vesta` hands the work back to them, and most people stop there. So this finds
+# a Python new enough to run Vesta, builds a private environment beside the
+# plugin, installs what Vesta needs into it, and uses that from then on.
 #
-# **A path that exists is not an interpreter that runs.** The plugin install
-# copies the repository, and a virtualenv does not survive being copied: its
-# `bin/python` is a symlink to the interpreter it was built from, so the
-# directory arrives intact with a dead link inside it. `command -v` says yes,
-# `/bin/sh` then says `python: command not found`, and a hook that was supposed
-# to be silent prints an error on every prompt. So each candidate is executed,
-# not merely looked at.
+# **A path that exists is not an interpreter that runs.** The install copies the
+# repository, and a virtualenv does not survive being copied: `bin/python` is a
+# symlink to the interpreter it was built from, so the directory arrives with a
+# dead link inside it. `command -v` says yes and `/bin/sh` then says `python:
+# command not found` — which is what appeared above every prompt in a session.
+# So every candidate is executed, never merely looked at.
 #
-# **The order is deliberate.** What the user set wins, because they set it. A
-# console script next, since `pip install vesta` is the ordinary case. Then a
-# virtualenv beside the *source*, which is where one really lives — never one
-# beside the plugin copy, which is the broken case above. The shell's own
-# python last: it is the least likely to have Vesta and the most likely to be
-# some system interpreter nobody manages.
+# **3.10 is the floor, and macOS ships 3.9.** Vesta's own code runs on 3.9, but
+# `mcp` does not publish for it, so the sidecar cannot. Answering slash commands
+# while the tools stay missing is worse than either outcome, so 3.9 is refused
+# rather than half-used.
 set -u
+
+FLOOR_MAJOR=3
+FLOOR_MINOR=10
 
 _runs() {
     [ -n "${1:-}" ] || return 1
     "$1" -c "import vesta.cli" >/dev/null 2>&1
 }
 
-# Whatever the user pointed at.
+_new_enough() {
+    [ -n "${1:-}" ] || return 1
+    "$1" - <<PY >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info[:2] >= ($FLOOR_MAJOR, $FLOOR_MINOR) else 1)
+PY
+}
+
+# Where a private environment is kept: beside the other things Vesta keeps,
+# not inside the plugin, which is replaced wholesale on every update.
+# Where Vesta's own code sits, relative to this script. Computed once, up here,
+# because both the staleness check and the build need it.
+_source() {
+    root=$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)
+    [ -n "${VESTA_SOURCE:-}" ] && root="${VESTA_SOURCE}"
+    echo "$root"
+}
+
+_home() {
+    if [ -n "${VESTA_HOME:-}" ]; then
+        echo "${VESTA_HOME}"
+    else
+        echo "${HOME}/.vesta"
+    fi
+}
+
+# ── Already reachable ────────────────────────────────────────────────────
+
 if _runs "${VESTA_PYTHON:-}"; then
     echo "${VESTA_PYTHON}"
     exit 0
 fi
 
-# Installed properly, as a package.
+# A runtime this built earlier. Vesta's code is copied into it, so a plugin
+# update would otherwise keep running the version installed months ago — the
+# stamp records which source it was built from and when, and a newer source
+# means it is rebuilt rather than trusted.
+owned="$(_home)/runtime/bin/python"
+stamp="$(_home)/runtime/.built-from"
+if _runs "$owned"; then
+    if [ ! -f "$stamp" ] || [ "$(_source)/vesta/cli.py" -nt "$stamp" ]; then
+        :  # the source is newer than the build; fall through and rebuild
+    else
+        echo "$owned"
+        exit 0
+    fi
+fi
+
 for candidate in python3 python; do
     if _runs "$candidate"; then
         echo "$candidate"
@@ -39,9 +83,7 @@ for candidate in python3 python; do
     fi
 done
 
-# A virtualenv beside a checkout of the source. `VESTA_SOURCE` names one
-# explicitly; otherwise the directory this script was run from is tried, which
-# covers running from a clone without installing anything.
+# A checkout with its own virtualenv, for anyone working on Vesta itself.
 here=$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)
 for root in "${VESTA_SOURCE:-}" "$here"; do
     [ -n "$root" ] || continue
@@ -53,4 +95,61 @@ for root in "${VESTA_SOURCE:-}" "$here"; do
     done
 done
 
+# ── Nothing reachable: make something ────────────────────────────────────
+
+[ "${VESTA_NO_INSTALL:-}" = "1" ] && exit 1
+
+# Where Vesta's own code lives, since it is not installed anywhere yet.
+source="$here"
+[ -n "${VESTA_SOURCE:-}" ] && source="${VESTA_SOURCE}"
+[ -f "$source/vesta/cli.py" ] || exit 1
+
+# A Python new enough, wherever it is. PATH alone is not enough: the shell a
+# plugin runs in need not have the user's own on it.
+base=""
+for candidate in \
+    python3 python3.13 python3.12 python3.11 python3.10 \
+    /opt/homebrew/bin/python3 /usr/local/bin/python3 \
+    /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 \
+    /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.10 \
+    /usr/local/bin/python3.13 /usr/local/bin/python3.12 \
+    /usr/local/bin/python3.11 /usr/local/bin/python3.10
+do
+    if _new_enough "$candidate"; then
+        base="$candidate"
+        break
+    fi
+done
+[ -n "$base" ] || exit 1
+
+runtime="$(_home)/runtime"
+# Building takes a few seconds and several things may ask at once — the hook
+# runs on every prompt. A lock means the second caller waits rather than
+# building over the first.
+lock="$(_home)/runtime.building"
+mkdir -p "$(_home)" 2>/dev/null || exit 1
+if ! mkdir "$lock" 2>/dev/null; then
+    # Somebody else is building. Say nothing; the next call will find it.
+    exit 1
+fi
+trap 'rmdir "$lock" 2>/dev/null' EXIT INT TERM
+
+rm -rf "$runtime" 2>/dev/null
+"$base" -m venv "$runtime" >/dev/null 2>&1 || exit 1
+# With the sidecar extra: a Vesta whose tools are absent is not a working
+# plugin, and `mcp` is what makes them exist. It is an extra rather than a
+# dependency because the library and CLI are useful without it — but nothing
+# installed *as a plugin* is.
+"$runtime/bin/python" -m pip install --quiet --disable-pip-version-check \
+    "$source[sidecar]" >/dev/null 2>&1 \
+    || "$runtime/bin/python" -m pip install --quiet --disable-pip-version-check \
+       "$source" >/dev/null 2>&1 \
+    || exit 1
+
+if _runs "$runtime/bin/python"; then
+    # What it was built from, so a later source can be seen to be newer.
+    echo "$source" > "$runtime/.built-from" 2>/dev/null
+    echo "$runtime/bin/python"
+    exit 0
+fi
 exit 1
