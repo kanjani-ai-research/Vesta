@@ -46,6 +46,30 @@ _source() {
     echo "$root"
 }
 
+# Keep the answer, so the next prompt does not re-derive it. Failure to write
+# is not failure to answer: a read-only home means slower, not broken.
+# Whether an interpreter still speaks for the current source.
+#
+# Only ever false for a runtime this built: Vesta's code is *copied* into it, so
+# a plugin update would otherwise keep running the version installed months ago.
+# An interpreter found elsewhere — a system install, a checkout's own venv —
+# tracks its own source and is nothing to do with this.
+_current() {
+    case "${1:-}" in
+        "$(_home)/runtime/"*) ;;
+        *) return 0 ;;
+    esac
+    stamp="$(_home)/runtime/.built-from"
+    [ -f "$stamp" ] || return 1
+    [ "$(_source)/vesta/cli.py" -nt "$stamp" ] && return 1
+    return 0
+}
+
+_remember() {
+    mkdir -p "$(_home)/runtime" 2>/dev/null && echo "$1" > "$(_home)/runtime/.interpreter" 2>/dev/null
+    return 0
+}
+
 _home() {
     if [ -n "${VESTA_HOME:-}" ]; then
         echo "${VESTA_HOME}"
@@ -61,23 +85,32 @@ if _runs "${VESTA_PYTHON:-}"; then
     exit 0
 fi
 
-# A runtime this built earlier. Vesta's code is copied into it, so a plugin
-# update would otherwise keep running the version installed months ago — the
-# stamp records which source it was built from and when, and a newer source
-# means it is rebuilt rather than trusted.
-owned="$(_home)/runtime/bin/python"
-stamp="$(_home)/runtime/.built-from"
-if _runs "$owned"; then
-    if [ ! -f "$stamp" ] || [ "$(_source)/vesta/cli.py" -nt "$stamp" ]; then
-        :  # the source is newer than the build; fall through and rebuild
-    else
-        echo "$owned"
+# What worked last time. Two hooks ask this on every prompt, and each candidate
+# is verified by *running* it — which is the point, but it costs an interpreter
+# start per candidate. Remembering the answer turns four probes into one.
+#
+# A remembered path is a hint, not a promise: it is still run before it is
+# believed, and if it names the runtime this built, that runtime must also not
+# be older than the source it was built from.
+remembered="$(_home)/runtime/.interpreter"
+if [ -f "$remembered" ]; then
+    was=$(cat "$remembered" 2>/dev/null)
+    if _runs "$was" && _current "$was"; then
+        echo "$was"
         exit 0
     fi
 fi
 
+# A runtime this built earlier.
+owned="$(_home)/runtime/bin/python"
+if _runs "$owned" && _current "$owned"; then
+    echo "$owned"
+    exit 0
+fi
+
 for candidate in python3 python; do
     if _runs "$candidate"; then
+        _remember "$candidate"
         echo "$candidate"
         exit 0
     fi
@@ -89,6 +122,7 @@ for root in "${VESTA_SOURCE:-}" "$here"; do
     [ -n "$root" ] || continue
     for candidate in "$root/.venv/bin/python" "$root/venv/bin/python"; do
         if _runs "$candidate"; then
+            _remember "$candidate"
             echo "$candidate"
             exit 0
         fi
@@ -149,6 +183,7 @@ rm -rf "$runtime" 2>/dev/null
 if _runs "$runtime/bin/python"; then
     # What it was built from, so a later source can be seen to be newer.
     echo "$source" > "$runtime/.built-from" 2>/dev/null
+    _remember "$runtime/bin/python"
     echo "$runtime/bin/python"
     exit 0
 fi

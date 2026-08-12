@@ -204,3 +204,61 @@ def test_a_newer_source_is_rebuilt(installed):
     started = time.monotonic()
     _run([str(plugin / "bin" / "vesta-python")], at)
     assert time.monotonic() - started < 5
+
+
+def test_a_hook_never_builds_a_runtime(tmp_path):
+    """The failure this covers: a first prompt hit the hook timeout because the
+    hook was building the environment. Building is a slash command's job — a
+    session that stalls on its first message has been made worse, whatever the
+    hook might have gone on to say."""
+    import time
+
+    plugin = _plugin(tmp_path)
+    (tmp_path / "home").mkdir(exist_ok=True)
+
+    for hook in ("notice.sh", "inject.sh"):
+        started = time.monotonic()
+        done = subprocess.run(
+            [str(plugin / "hooks" / hook)],
+            input='{"prompt":"x","cwd":"/tmp"}',
+            capture_output=True,
+            text=True,
+            env=_env(tmp_path),   # nothing built, and no VESTA_NO_INSTALL
+            timeout=60,
+        )
+        took = time.monotonic() - started
+        assert took < 8, f"{hook} took {took:.1f}s — it built something"
+        assert done.returncode == 0
+        assert done.stderr.strip() == ""
+        assert not (tmp_path / "home" / ".vesta" / "runtime" / "bin").exists(), (
+            f"{hook} built a runtime"
+        )
+
+
+def test_the_interpreter_is_remembered(installed):
+    """Two hooks ask on every prompt, and each candidate is verified by running
+    it. Remembering turns four interpreter starts into one."""
+    at, plugin, _ = installed
+    remembered = at / "home" / ".vesta" / "runtime" / ".interpreter"
+    assert remembered.is_file(), "the answer was not kept"
+
+    import time
+
+    started = time.monotonic()
+    done = _run([str(plugin / "bin" / "vesta-python")], at)
+    assert done.returncode == 0
+    assert time.monotonic() - started < 3
+
+
+def test_a_remembered_interpreter_that_broke_is_not_trusted(installed):
+    """A venv can be deleted between prompts. A remembered path is a hint."""
+    at, plugin, _ = installed
+    remembered = at / "home" / ".vesta" / "runtime" / ".interpreter"
+    was = remembered.read_text(encoding="utf-8")
+    remembered.write_text("/nonexistent/python\n", encoding="utf-8")
+    try:
+        done = _run([str(plugin / "bin" / "vesta-python")], at)
+        assert done.returncode == 0, done.stderr
+        assert "nonexistent" not in done.stdout
+    finally:
+        remembered.write_text(was, encoding="utf-8")
