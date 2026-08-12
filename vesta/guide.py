@@ -82,7 +82,11 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
 PURPOSE = """Vesta answers structural questions about a repository from a
 resolved graph of what refers to what, an ontology of what the work is called,
 and what earlier sessions already worked out — so an agent can ask instead of
-reading, and you do not pay twice for the same understanding."""
+reading, and you do not pay twice for the same understanding.
+
+Both halves are learned from the repository itself. The vocabulary comes from
+what this code is for, not from a template, and the rules come from the
+corrections its own users have made."""
 
 # Said once, at the end, because it is the thing users most often ask about a
 # tool that reads their code.
@@ -136,8 +140,11 @@ def guide(topic: str = "") -> str:
     if not wanted:
         lines.append("Vesta")
         lines.append("")
-        lines.extend(_wrapped(PURPOSE, ""))
-        lines.append("")
+        # Paragraph by paragraph: wrapping the whole thing at once runs two
+        # separate points together into one block nobody finishes.
+        for paragraph in PURPOSE.split("\n\n"):
+            lines.extend(_wrapped(paragraph, ""))
+            lines.append("")
 
     for title, why, snippets in sections:
         lines.append(title)

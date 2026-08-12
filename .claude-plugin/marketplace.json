@@ -8,8 +8,8 @@
     {
       "name": "vesta",
       "source": "./",
-      "description": "A traversable graph of a repository: what refers to what, what the work is called, what its user has decided, and what is worth fixing."
+      "description": "An adaptive ontology over a resolved code graph: the vocabulary is learned from this repository, the rules from its own users' corrections. Ask what a change touches, where a kind of work is done, what has already been decided, and what is worth fixing."
     }
   ],
-  "description": "Vesta: ontology-driven code graph for agentic work."
+  "description": "Vesta: an adaptive ontology over a resolved code graph."
 }

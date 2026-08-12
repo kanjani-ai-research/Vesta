@@ -926,7 +926,9 @@ def build_server():
         instructions=(
             "Answers questions about a repository from a resolved graph of what "
             "refers to what, an ontology of what the work is called, and what "
-            "earlier sessions already worked out about it.\n\n"
+            "earlier sessions already worked out about it. Both the vocabulary "
+            "and the rules are learned from this repository rather than "
+            "supplied, so the answers come back in its own terms.\n\n"
             "`shape` orients you in an unfamiliar codebase. `uses` finds a "
             "definition and everything that refers to it — resolved by a "
             "language server, so it distinguishes four methods that share a "
