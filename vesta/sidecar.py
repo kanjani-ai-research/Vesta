@@ -630,7 +630,9 @@ def _defects(project: Optional[Path], limit: int) -> str:
         return (
             f"project: {project}\n"
             "Nothing found. This is not a claim the code is clean — it is what "
-            f"{len(found.looked_for)} pattern(s) could see."
+            f"{len(found.looked_for)} pattern(s) could see. The `vesta-defects` "
+            "agent derives more of them from defects this project's own users "
+            "have pointed at."
         )
 
     lines = [
@@ -686,9 +688,9 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
     if not found.standing:
         return (
             f"project: {project}\n"
-            "Nothing has been decided here yet that could be checked. Rules are "
-            "recovered from corrections a user makes, so this fills in as the "
-            "project is worked on."
+            "No rules have been recovered for this repository yet.\n"
+            "Run the `vesta-rules` agent on it to recover what its user has "
+            "already decided, from what they said in earlier sessions."
         )
 
     # A rule founded on one remark in one session is not a decision. The
@@ -698,8 +700,9 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
         return (
             f"project: {project}\n"
             f"Only {found.considered} exchange(s) recorded here — too little to "
-            "tell a standing decision from a passing instruction. Rules fill in "
-            "as the project is worked on."
+            "tell a standing decision from a passing instruction. This fills in "
+            "as the project is worked on; the `vesta-rules` agent recovers them "
+            "once there is enough history."
         )
 
     lines = [f"project: {project}", found.describe(), ""]
@@ -745,9 +748,9 @@ def _means(name: str, project: Optional[Path]) -> str:
     if mapped is None or not mapped.attachments:
         return (
             f"project: {project}\n"
-            "This repository has not been read against its own ontology yet. "
-            "Preparation does that in the background; it takes a few minutes "
-            "the first time."
+            "This repository has not been read against its own ontology yet.\n"
+            "Run the `vesta-domain` agent on it to name the work it performs "
+            "and bind its definitions to those names; then this will answer."
         )
 
     wanted = [
@@ -800,7 +803,8 @@ def _does(phrase: str, project: Optional[Path]) -> str:
     if mapped is None or not mapped.attachments:
         return (
             f"project: {project}\n"
-            "This repository has not been read against its own ontology yet."
+            "This repository has not been read against its own ontology yet.\n"
+            "Run the `vesta-domain` agent on it, then ask again."
         )
 
     hits = where_in(graph, mapped, phrase, limit=10)

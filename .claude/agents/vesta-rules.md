@@ -33,7 +33,7 @@ back to them later as an obligation they never made.
 
 ## What to do
 
-1. Get the candidates: `vesta-rules --repo "<REPO>" --candidates`. These are turns
+1. Get the candidates: `/Users/rf/Developer/causum/v3/vesta/.venv/bin/vesta-rules --repo "<REPO>" --candidates`. These are turns
    where the user said something that might constrain how work is done. Most are
    not rules.
 
@@ -54,7 +54,7 @@ back to them later as an obligation they never made.
 3. Record them:
 
    ```
-   vesta-rules --repo "<REPO>" --write <<'RULES'
+   /Users/rf/Developer/causum/v3/vesta/.venv/bin/vesta-rules --repo "<REPO>" --write <<'RULES'
    artefact | There is one .env for the workspace, not one per repository. | there should be one .env for v3, not one for each service
    check: files_matching /\.env$/ at_most 1
    underived | Quality and correctness take priority over latency. | latency at this scale is a non-starter, quality is paramount

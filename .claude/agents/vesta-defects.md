@@ -16,7 +16,7 @@ be specific to Python repos" became a real finder only alongside the marker list
 that prompted "your project markers are wholly insufficient, this would be
 disastrous". No sentence in that exchange is a defect statement on its own.
 
-Get them with `vesta-defects --repo "<REPO>" --exchanges`. Each is what an agent
+Get them with `/Users/rf/Developer/causum/v3/vesta/.venv/bin/vesta-defects --repo "<REPO>" --exchanges`. Each is what an agent
 did and what the user said back.
 
 ## What makes a finder worth having

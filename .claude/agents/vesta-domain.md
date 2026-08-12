@@ -46,7 +46,7 @@ knowledge bases whatever it is called, and `build` is about whatever it builds.
 3. Write them where Vesta can read them:
 
    ```
-   vesta-domain --repo "<REPO>" --write <<'TERMS'
+   /Users/rf/Developer/causum/v3/vesta/.venv/bin/vesta-domain --repo "<REPO>" --write <<'TERMS'
    domain: static code analysis
    activity: resolve symbol references across a codebase
    role: language server session
@@ -55,7 +55,7 @@ knowledge bases whatever it is called, and `build` is about whatever it builds.
 
 4. Then read the code against the terms. For each of the most-referenced public
    definitions — Vesta will list them for you with
-   `vesta-domain --repo "<REPO>" --definitions` — decide which terms name what it
+   `/Users/rf/Developer/causum/v3/vesta/.venv/bin/vesta-domain --repo "<REPO>" --definitions` — decide which terms name what it
    does. Usually one or two. A definition attached to eight terms has been attached
    to none of them, and a definition that resolves symbols is not "repository
    auditing" merely because it sits in a tool that audits.
@@ -63,7 +63,7 @@ knowledge bases whatever it is called, and `build` is about whatever it builds.
    Record them:
 
    ```
-   vesta-domain --repo "<REPO>" --attach <<'ATTACH'
+   /Users/rf/Developer/causum/v3/vesta/.venv/bin/vesta-domain --repo "<REPO>" --attach <<'ATTACH'
    vesta/graph.py:129 Graph.referenced_by | Maintaining bidirectional change impact analysis
    vesta/propagate.py:161 from_files | Propagating impact analysis across definition graphs
    ATTACH
