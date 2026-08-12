@@ -202,6 +202,37 @@ class Held:
             )
         ]
 
+    def referenced_by_any(self, node_ids: Sequence[str]) -> Dict[str, List[str]]:
+        """What refers to each of these, in one query.
+
+        A propagation hop asks about a whole frontier at once. Asking per node
+        turned one walk into hundreds of round trips and lost to simply parsing
+        the document — the store is only faster if it is asked in the shape it
+        is good at.
+        """
+        if not node_ids:
+            return {}
+        found: Dict[str, List[str]] = {n: [] for n in node_ids}
+        marks = ",".join("?" * len(node_ids))
+        for row in self._open().execute(
+            f"SELECT target, source FROM edges WHERE target IN ({marks})",
+            tuple(node_ids),
+        ):
+            found[row["target"]].append(row["source"])
+        return found
+
+    def by_ids(self, node_ids: Sequence[str]) -> Dict[str, Node]:
+        """Several definitions in one query, for the same reason."""
+        if not node_ids:
+            return {}
+        marks = ",".join("?" * len(node_ids))
+        return {
+            row["id"]: _node(row)
+            for row in self._open().execute(
+                f"SELECT * FROM nodes WHERE id IN ({marks})", tuple(node_ids)
+            )
+        }
+
     def depends_on(self, node_id: str) -> List[str]:
         """What this refers to."""
         return [
@@ -269,6 +300,94 @@ class Held:
         ]
         row = db.execute("SELECT value FROM meta WHERE key='root'").fetchone()
         return Graph(root=row[0] if row else "", nodes=nodes, edges=edges, holes=holes)
+
+
+class AsGraph:
+    """A store presented as a graph, for callers that only walk it.
+
+    Propagation asks three things — what refers to this, what definition is
+    this, and what could not be resolved — and a store answers all three by
+    index. Wrapping rather than converting means `from_definitions` needs no
+    change and works against either, which matters because the document is
+    still what a survey reads.
+    """
+
+    def __init__(self, held: "Held") -> None:
+        self._held = held
+        self._holes: Optional[List[Hole]] = None
+
+    @property
+    def nodes(self) -> "_Nodes":
+        return _Nodes(self._held)
+
+    @property
+    def holes(self) -> List[Hole]:
+        if self._holes is None:
+            self._holes = [
+                Hole(path=r["path"], what=r["what"], why=r["why"])
+                for r in self._held._open().execute("SELECT * FROM holes")
+            ]
+        return self._holes
+
+    def referenced_by(self, node_id: str) -> List[Edge]:
+        return [
+            Edge(source=source, target=node_id)
+            for source in self._held.referenced_by(node_id)
+        ]
+
+    def depends_on(self, node_id: str) -> List[Edge]:
+        return [
+            Edge(source=node_id, target=target)
+            for target in self._held.depends_on(node_id)
+        ]
+
+    def referenced_by_any(self, node_ids: Sequence[str]) -> Dict[str, List[str]]:
+        return self._held.referenced_by_any(node_ids)
+
+    def by_ids(self, node_ids: Sequence[str]) -> Dict[str, Node]:
+        return self._held.by_ids(node_ids)
+
+    def at(self, path: str, line: int) -> Optional[Node]:
+        return self._held.at(path, line)
+
+    def in_file(self, path: str) -> List[Node]:
+        return self._held.in_file(path)
+
+
+class _Nodes:
+    """The node table, addressed the way a caller addresses a dict.
+
+    Only what propagation uses: `get`, `in`, and iteration over values where a
+    caller genuinely wants every definition. Iteration is the expensive one and
+    is left available rather than hidden, because a caller that needs it needs
+    it.
+    """
+
+    def __init__(self, held: "Held") -> None:
+        self._held = held
+
+    def get(self, node_id: str, default: Optional[Node] = None) -> Optional[Node]:
+        return self._held.by_id(node_id) or default
+
+    def __getitem__(self, node_id: str) -> Node:
+        found = self._held.by_id(node_id)
+        if found is None:
+            raise KeyError(node_id)
+        return found
+
+    def __contains__(self, node_id: str) -> bool:
+        return self._held.by_id(node_id) is not None
+
+    def __len__(self) -> int:
+        return self._held.counts()[0]
+
+    def values(self) -> Iterable[Node]:
+        for row in self._held._open().execute("SELECT * FROM nodes"):
+            yield _node(row)
+
+    def __iter__(self) -> Iterable[str]:
+        for row in self._held._open().execute("SELECT id FROM nodes"):
+            yield row["id"]
 
 
 def _node(row: sqlite3.Row) -> Node:

@@ -200,6 +200,19 @@ def _build(project: str) -> int:
         graph = held(root)
         from_sessions(graph, root)
 
+        # Let go of records whose repository is gone, while something is
+        # already running in the background. A thousand files accumulated here
+        # in a few days without anyone noticing, because none of them is large
+        # — a store nobody prunes stops being a description of anything.
+        try:
+            from .tidy import sweep
+
+            swept = sweep()
+            if swept.removed:
+                logger.info("tidied: %s", swept.describe())
+        except Exception as exc:  # noqa: BLE001 - tidying is never the point
+            logger.info("could not tidy: %s", exc)
+
         # Nothing here calls a model. Deriving patterns, naming a domain and
         # reading code against it are judgement, and judgement belongs to the
         # `vesta-domain`, `vesta-rules` and `vesta-defects` agents, which run on

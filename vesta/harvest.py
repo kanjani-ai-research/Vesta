@@ -174,6 +174,23 @@ def _sessions_for(repo: Path) -> List[Path]:
     if remembered and remembered[0] == state:
         return remembered[1]
 
+    # On disk as well as in memory. Deciding which sessions belong to a
+    # repository means reading every transcript and counting mentions — fifty
+    # megabytes and a second and a half here — and a hook is a fresh process
+    # every time, so an in-memory cache is never the one that is read.
+    from .home import kept_at
+
+    kept = kept_at(repo, "sessions")
+    if kept.is_file():
+        try:
+            payload = json.loads(kept.read_text(encoding="utf-8"))
+            if payload.get("state") == state:
+                found = [Path(p) for p in payload["sessions"] if Path(p).is_file()]
+                _MATCHED[str(repo)] = (state, found)
+                return found
+        except (OSError, ValueError, KeyError):
+            pass
+
     wanted = str(repo).encode("utf-8")
     for directory in sorted(TRANSCRIPTS.iterdir()):
         if not directory.is_dir() or directory.name == named:
@@ -186,6 +203,13 @@ def _sessions_for(repo: Path) -> List[Path]:
                 continue
 
     _MATCHED[str(repo)] = (state, found)
+    try:
+        kept.write_text(
+            json.dumps({"state": state, "sessions": [str(p) for p in found]}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
     return found
 
 
@@ -254,6 +278,22 @@ def from_sessions(
     remembered = _HARVESTED.get(str(root))
     if remembered and remembered[0] == state and not since:
         return remembered[1]
+
+    # On disk too. Extracting notes means parsing every transcript — fifty
+    # megabytes and most of a second here — and a hook is a fresh process, so
+    # an in-memory cache is paid for and never read.
+    from .home import kept_at
+
+    kept = kept_at(root, "harvests")
+    if not since and kept.is_file():
+        try:
+            payload = json.loads(kept.read_text(encoding="utf-8"))
+            if payload.get("state") == state:
+                found = Harvest.model_validate(payload["harvest"])
+                _HARVESTED[str(root)] = (state, found)
+                return found
+        except (OSError, ValueError, KeyError):
+            pass
 
     found = Harvest()
     seen: Set[Tuple[str, str]] = set()
@@ -324,6 +364,13 @@ def from_sessions(
     _save_stamps(root, _stamped)
     if not since:
         _HARVESTED[str(root)] = (state, found)
+        try:
+            kept.write_text(
+                json.dumps({"state": state, "harvest": found.model_dump(mode="json")}),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
     return found
 
 
