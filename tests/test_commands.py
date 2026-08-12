@@ -180,12 +180,18 @@ def test_the_manifest_declares_the_mcp_server():
     nothing said about why.
     """
     servers = _manifest().get("mcpServers", {})
-    assert "vesta" in servers, "the plugin does not declare its MCP server"
-    assert "vesta-sidecar" in servers["vesta"]["command"]
+    assert servers, "the plugin does not declare its MCP server"
+    # The name is what a user sees as `plugin:vesta:<name>`, so it is theirs to
+    # choose; what must hold is that exactly one server is declared and it runs
+    # the launcher rather than a bare interpreter.
+    assert len(servers) == 1, f"expected one server, found {sorted(servers)}"
+    (only,) = servers.values()
+    assert "vesta-sidecar" in only["command"]
 
 
 def test_the_declared_server_command_exists_and_runs():
-    command = _manifest()["mcpServers"]["vesta"]["command"]
+    (only,) = _manifest()["mcpServers"].values()
+    command = only["command"]
     path = HERE / command.replace("${CLAUDE_PLUGIN_ROOT}/", "")
     assert path.is_file(), f"{path} is declared but not present"
     assert path.stat().st_mode & 0o111, f"{path} is not executable"

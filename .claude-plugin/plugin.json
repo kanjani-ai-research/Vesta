@@ -7,7 +7,7 @@
     "name": "Causum"
   },
   "mcpServers": {
-    "vesta": {
+    "sidecar": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/vesta-sidecar"
     }
   }
