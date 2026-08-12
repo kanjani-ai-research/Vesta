@@ -57,6 +57,17 @@ Do not interrupt to confirm. Recording is cheap and reversible: `decided`
 reviews everything and any rule can be set aside later. Asking permission for
 each one makes the capture cost more than the rule is worth.
 
+## Before changing files, ask what bears on them
+
+Call **`bears_on`** with the files you are about to change, alongside `touches`.
+It answers with nothing at all unless a rule the user set covers this work *and*
+the code no longer matches it — uncommon, and exactly when they want to know.
+
+When it does answer, put the question to them and wait. Whether their own rule
+still stands is theirs to say, not yours. It may also report rules that govern
+the work and could not be checked: mention those once and carry on, because
+there is nothing useful to do about them mid-edit.
+
 ## When a tool says it has nothing
 
 It will name the agent that fixes it. Run that agent — they are the expensive,

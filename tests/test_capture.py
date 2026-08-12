@@ -134,3 +134,41 @@ def test_a_recorded_rule_needs_no_further_adjudication(tmp_path):
     kept = confirm.apply(Found(), tmp_path)
     assert [r.text for r in kept.rules] == ["deps must be pinned"]
     assert confirm.recall(tmp_path).waiting == []
+
+
+def test_what_was_recorded_recently_can_be_seen(tmp_path):
+    """A rule captured while somebody worked on something else is agreed to in
+    the moment and forgotten by the afternoon. If one was captured wrongly, the
+    only cost is that nobody notices — so today's captures are visible today."""
+    import time
+
+    from vesta import confirm
+
+    confirm.declare(tmp_path, "one .env for the whole of v3")
+    confirm.record(tmp_path, "an older one", confirm.IS_A_RULE, at=time.time() - 200000)
+
+    lately = confirm.recall(tmp_path).lately(time.time() - 86400)
+    assert [v.text for v in lately] == ["one .env for the whole of v3"]
+
+
+def test_recent_captures_say_how_they_arrived(tmp_path):
+    """A declared rule is the one kind nobody explicitly confirmed."""
+    import time
+
+    from vesta import confirm
+
+    confirm.declare(tmp_path, "one .env for the whole of v3")
+    lately = confirm.recall(tmp_path).lately(time.time() - 86400)
+    assert "declared" in lately[0].describe()
+
+
+def test_the_newest_is_first(tmp_path):
+    import time
+
+    from vesta import confirm
+
+    now = time.time()
+    confirm.record(tmp_path, "older", confirm.IS_A_RULE, at=now - 100)
+    confirm.record(tmp_path, "newer", confirm.IS_A_RULE, at=now)
+    lately = confirm.recall(tmp_path).lately(now - 86400)
+    assert [v.text for v in lately] == ["newer", "older"]

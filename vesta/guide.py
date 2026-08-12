@@ -67,6 +67,7 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         [
             ("vesta decided", "every rule this project keeps"),
             ("vesta decided --check", "whether the code still honours them"),
+            ("vesta bears src/api.py", "whether a rule is in doubt for what you are about to change"),
             ("vesta learn", "candidates recovered from older sessions, if any"),
         ],
     ),

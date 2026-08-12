@@ -128,6 +128,20 @@ class Asked(BaseModel):
         """Candidates the user has seen and not yet decided."""
         return [v for v in self.verdicts if not v.settled]
 
+    def lately(self, since: float) -> List[Verdict]:
+        """What was recorded recently.
+
+        A rule captured while somebody was working on something else is agreed
+        to in the moment and forgotten by the afternoon. If one was captured
+        wrongly, the cost is only that nobody notices — so what was recorded
+        today is worth being able to see today, rather than whenever the rules
+        next get audited.
+        """
+        return sorted(
+            (v for v in self.verdicts if v.at >= since),
+            key=lambda v: -v.at,
+        )
+
     def describe(self) -> str:
         decided = [v for v in self.verdicts if v.settled]
         if not decided and not self.waiting:

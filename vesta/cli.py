@@ -204,6 +204,20 @@ def _rules(args: argparse.Namespace) -> int:
     if asked.waiting:
         _say(f"  {len(asked.waiting)} candidate(s) waiting on you — `vesta learn`")
 
+    # What was recorded recently, and how it arrived. A rule an agent captured
+    # on somebody's behalf is the one kind nobody explicitly confirmed, so it
+    # is the one worth being able to see the same day.
+    import time as _time
+
+    lately = asked.lately(_time.time() - 86400)
+    if lately:
+        _say("")
+        _say(f"recorded in the last day ({len(lately)}):")
+        for verdict in lately[:6]:
+            _say(f"  {verdict.describe()[:100]}")
+        _say("")
+        _say("  Wrong about one? `vesta learn <handle> lapsed`")
+
     if not args.check:
         for rule in found.standing[: args.show]:
             _say(f"  {rule.describe()[:110]}")
@@ -263,6 +277,8 @@ def _asked(args: argparse.Namespace) -> int:
         "means": lambda: sidecar._means(args.name, where),
         "shape": lambda: sidecar._shape(where),
         "known": lambda: sidecar._known(args.name, where),
+        "bears": lambda: sidecar._bears_on(args.paths, where)
+        or "No rule you have set is in doubt for these files.",
         "elsewhere": lambda: sidecar._elsewhere(
             " ".join(args.phrase) if isinstance(args.phrase, list) else args.phrase,
             args.project,
@@ -484,6 +500,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--reopen", default="", help="put a settled candidate back into question"
     )
     learn.set_defaults(run=_learn)
+
+    bears = sub.add_parser(
+        "bears", help="whether a rule you set is in doubt for these files"
+    )
+    bears.add_argument("paths", nargs="+")
+    bears.add_argument("--root", default=".")
+    bears.set_defaults(run=_asked)
 
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")
     guide.add_argument("topic", nargs="?", default="")
