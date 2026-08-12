@@ -235,31 +235,55 @@ def about(graph: Graph, mapped: Map, node_id: str) -> List[Attachment]:
     return sorted(mapped.for_node(node_id), key=lambda a: -a.strength)
 
 
-def where(graph: Graph, mapped: Map, phrase: str, limit: int = 12) -> List[Attachment]:
+def _bag(text: str) -> Set[str]:
+    """The words in a phrase that carry any meaning."""
+    return {
+        word
+        for word in re.findall(r"[a-z0-9]+", text.lower())
+        if len(word) > 2 and word not in EVERYWHERE
+    }
+
+
+def where(
+    graph: Graph, mapped: Map, phrase: str, limit: int = 12
+) -> List[Attachment]:
     """Where an idea lives in this codebase. Concept → code.
 
     Matched against the ontology's own labels rather than against the code, so
     a caller can ask in the vocabulary of the domain and be answered in the
     vocabulary of the repository — which is the crossing this exists for.
+
+    **A label is not the only way the work is named.** An ontology says a
+    definition *scores how closely two texts overlap*; the definition is called
+    `closeness` and sits in `search.py`. Someone asking about "fuzzy search"
+    shares no word with the label and two with the code. Both surfaces are
+    matched, the label counting for more, because the label is what something
+    decided the definition does and the name is what somebody typed.
+
+    What this still cannot do is cross a synonym neither surface contains.
+    Nothing here guesses at one: a word-overlap score that starts inventing
+    relations is a score that starts being wrong quietly. Where the vocabulary
+    genuinely differs, the asking agent knows both phrasings and can ask again.
     """
-    wanted = {
-        word
-        for word in re.findall(r"[a-z0-9]+", phrase.lower())
-        if len(word) > 2 and word not in EVERYWHERE
-    }
+    wanted = _bag(phrase)
     if not wanted:
         return []
 
     scored: List[Tuple[float, Attachment]] = []
     for attachment in mapped.attachments:
-        label = {
-            word
-            for word in re.findall(r"[a-z0-9]+", attachment.label.lower())
-            if len(word) > 2 and word not in EVERYWHERE
-        }
-        if not label:
-            continue
-        overlap = len(wanted & label) / len(wanted)
+        label = _bag(attachment.label)
+        overlap = len(wanted & label) / len(wanted) if label else 0.0
+
+        # The definition's own name and file, which name the same work in the
+        # vocabulary of whoever wrote it. Worth less than the label: a file
+        # called `search.py` holds a dozen definitions and says something
+        # weaker about each than a sentence written about one.
+        node = graph.nodes.get(attachment.node)
+        if node is not None:
+            in_code = _bag(node.name) | _bag(node.path.replace("/", " "))
+            spoken = len(wanted & in_code) / len(wanted)
+            overlap = max(overlap, spoken * 0.6)
+
         if overlap:
             scored.append((overlap * attachment.strength, attachment))
 

@@ -32,6 +32,8 @@ from .authority import settle
 from .dynamic import missed_by, scan
 from .enforce import against
 from .harvest import anchor, from_sessions, keep, recall_notes
+from .across import known as known_projects
+from .across import loaded, refer, release, resolve
 from .domain import recall as recall_ontology
 from .held import graph_for
 from .store import AsGraph, Held
@@ -718,6 +720,79 @@ def _does(phrase: str, project: Optional[Path]) -> str:
     return "\n".join(lines)
 
 
+def _elsewhere(phrase: str, said: str, project: Optional[Path]) -> str:
+    """Where a kind of work is done in another project.
+
+    The project under works stays authoritative — its answer comes first and
+    its vocabulary is the one asked in. A referenced project is consulted, not
+    merged: two independently derived ontologies would have to be reconciled to
+    merge them, which is a problem nobody asked to solve, and consulting each
+    and saying which answered is what the question actually wants.
+    """
+    where = resolve(said, roots=[project] if project else None)
+    if not where.found:
+        return f"{where.describe()}"
+
+    refer(where.project)
+    other = Path(where.project.path)
+
+    with quiet_stdout():
+        answers = []
+        # The project under works first, when there is one and it is not the
+        # project being referred to.
+        if project is not None and str(project) != where.project.path:
+            answers.append((Path(project).name + " (under works)", _does(phrase, project)))
+        answers.append((where.project.name, _does(phrase, other)))
+
+    lines = []
+    for name, said_back in answers:
+        body = [l for l in said_back.splitlines()[2:] if l.strip()]
+        lines.append(f"in {name}:")
+        if not body or "has not been read" in said_back or "Nothing here" in said_back:
+            lines.append(
+                "  nothing recorded as doing that"
+                + (" — not read yet" if "has not been read" in said_back else "")
+            )
+        else:
+            lines.extend(f"  {l}" for l in body[:10])
+        lines.append("")
+
+    lines.append(
+        "The project under works answers in its own vocabulary; the other is "
+        "consulted, not merged. It stays loaded while it is being referred to."
+    )
+    return "\n".join(lines)
+
+
+def _projects(project: Optional[Path]) -> str:
+    """What can be referred to, and what currently is."""
+    here = loaded()
+    lines = []
+    if project is not None:
+        lines.append(f"under works: {project}")
+    if here:
+        lines.append("")
+        lines.append("currently referred to:")
+        for entry in here:
+            lines.append(f"  {entry.describe()}")
+    others = [p for p in known_projects([project] if project else None)
+              if project is None or p.path != str(project)]
+    if others:
+        lines.append("")
+        lines.append("can be referred to by name or path:")
+        for entry in others[:20]:
+            lines.append(f"  {entry.describe()}")
+        if len(others) > 20:
+            lines.append(f"  … and {len(others) - 20} more")
+    if not others and not here:
+        lines.append("")
+        lines.append(
+            "No other project is known yet. Vesta learns about a project when "
+            "it is worked in, or when a session is given its directory."
+        )
+    return "\n".join(lines)
+
+
 def _quieten() -> None:
     """Keep everything off stdout.
 
@@ -908,6 +983,50 @@ def build_server():
         started = _t.monotonic()
         answer = await anyio.to_thread.run_sync(_does, phrase, project)
         _record("does", project, _t.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def elsewhere(
+        phrase: str, project: str, context: Context = None
+    ) -> str:
+        """Where a kind of work is done in another project.
+
+        For taking bearings from something built before: "how did the indexer
+        do fuzzy search". Name the other project by name or by path — a name is
+        matched against projects Vesta knows and directories this session has
+        been given, never by searching the disk.
+
+        The project under works answers first and in its own vocabulary; the
+        other is consulted rather than merged, and stays loaded while it is
+        being referred to.
+
+        Args:
+            phrase: The work, described in ordinary words.
+            project: The other project, by name or by path.
+        """
+        here = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_elsewhere, phrase, project, here)
+        _record("elsewhere", here, _t.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def projects(context: Context = None) -> str:
+        """What projects can be referred to, and which currently are.
+
+        Use when a user mentions another project by name and you need to know
+        whether Vesta knows it, or when a reference is ambiguous.
+        """
+        here = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_projects, here)
+        _record("projects", here, _t.monotonic() - started, len(answer))
         return answer
 
     @server.tool()
