@@ -286,10 +286,7 @@ def _known(name: str, project: Optional[Path]) -> str:
         graph = graph_for(project)
         harvest = from_sessions(graph, project)
 
-    wanted = [
-        n for n in graph.nodes.values()
-        if n.name == name or n.qualified == name or n.qualified.endswith(f".{name}")
-    ]
+    wanted = _matching(graph, name)
     if not wanted:
         return f"project: {project}\nNo definition named {name!r} in the graph."
 
@@ -389,14 +386,13 @@ def _uses(name: str, project: Optional[Path]) -> str:
         harvest = from_sessions(graph, project)
         if held.exists:
             with held:
+                # The indexed lookup first, since it does not read the whole
+                # store; the dotted form falls back to matching in full.
                 wanted = held.named(name)
+                if not wanted and "." in name:
+                    wanted = _matching(AsGraph(held), name)
         else:
-            wanted = [
-                n for n in graph.nodes.values()
-                if n.name == name
-                or n.qualified == name
-                or n.qualified.endswith(f".{name}")
-            ]
+            wanted = _matching(graph, name)
 
     if not wanted:
         return f"project: {project}\nNo definition named {name!r} in the graph."
@@ -622,6 +618,38 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
     return "\n".join(lines)
 
 
+def _matching(graph, name: str) -> list:
+    """Definitions a user meant by a name.
+
+    A user writes `authority.check` because that is how the code reads, but the
+    graph records module-level functions with a bare `qualified` — the module
+    lives in the path. Matching only on name and qualified answers "no such
+    definition" about a definition that is plainly there, which reads as Vesta
+    not knowing the repository rather than as a spelling difference.
+
+    So a dotted name is also tried as module-and-definition, and a bare name
+    matches wherever it appears. Ambiguity is left to the caller to report: two
+    definitions genuinely called the same thing are two answers, not an error.
+    """
+    wanted = name.strip()
+    if not wanted:
+        return []
+
+    module, _, last = wanted.rpartition(".")
+    found = []
+    for node in graph.nodes.values():
+        if node.name == wanted or node.qualified == wanted:
+            found.append(node)
+        elif node.qualified.endswith(f".{wanted}"):
+            found.append(node)
+        elif module and node.name == last:
+            # `authority.check` where the graph holds `check` in authority.py.
+            stem = node.path.rsplit("/", 1)[-1].removesuffix(".py")
+            if stem == module or node.path.replace("/", ".").startswith(module):
+                found.append(node)
+    return found
+
+
 def _means(name: str, project: Optional[Path]) -> str:
     """What a definition is about, and what else does the same kind of work.
 
@@ -644,10 +672,7 @@ def _means(name: str, project: Optional[Path]) -> str:
             "and bind its definitions to those names; then this will answer."
         )
 
-    wanted = [
-        n for n in graph.nodes.values()
-        if n.name == name or n.qualified == name or n.qualified.endswith(f".{name}")
-    ]
+    wanted = _matching(graph, name)
     if not wanted:
         return f"project: {project}\nNo definition named {name!r} in the graph."
 

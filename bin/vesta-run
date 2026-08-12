@@ -1,0 +1,31 @@
+#!/bin/sh
+# Run Vesta however it happens to be installed here.
+#
+# A slash command must produce Vesta's answer or a sentence saying why not.
+# What it must never produce is a Python traceback: the user asked what their
+# repository does and got a stack, which reads as a broken tool rather than a
+# missing install. `vesta` is often not on PATH — a plugin is installed by the
+# framework, not by pip — so each way of reaching it is tried in turn.
+set -u
+
+# Installed as a console script, the ordinary case.
+if command -v vesta >/dev/null 2>&1; then
+    exec vesta "$@"
+fi
+
+# Installed as a library into some interpreter, including a virtualenv that
+# belongs to the plugin rather than to the shell.
+for python in "${VESTA_PYTHON:-}" "${CLAUDE_PLUGIN_ROOT:-}/.venv/bin/python" python3 python; do
+    [ -n "$python" ] || continue
+    command -v "$python" >/dev/null 2>&1 || [ -x "$python" ] || continue
+    # Import the CLI, not the package: `import vesta` succeeds from any
+    # directory holding a `vesta/` folder, and then dies on a dependency the
+    # interpreter does not have. What matters is whether it can actually run.
+    if "$python" -c "import vesta.cli" >/dev/null 2>&1; then
+        exec "$python" -m vesta.cli "$@"
+    fi
+done
+
+echo "Vesta is not installed in a way this session can reach."
+echo "  pip install vesta   (or set VESTA_PYTHON to an interpreter that has it)"
+exit 0

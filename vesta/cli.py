@@ -232,10 +232,52 @@ def _patterns(args: argparse.Namespace) -> int:
         _say(f"{name} ({len(items)})")
         _say(f"  {items[0].why}")
         for entry in items[: args.show]:
-            at = f"{entry.where}:{entry.line}" if entry.line else entry.where
-            _say(f"    {at}  {entry.what[:70]}")
+            _say(f"    {entry.describe()[:96]}")
         if len(items) > args.show:
             _say(f"    … and {len(items) - args.show} more")
+    return 0
+
+
+def _asked(args: argparse.Namespace) -> int:
+    """The questions the sidecar answers, asked from a terminal.
+
+    The same functions the MCP tools call, not a second implementation of them.
+    A slash command runs this, so anything answerable in a session must be
+    answerable here or the two surfaces drift — and the one a user typed is the
+    one they will believe.
+    """
+    from . import sidecar
+
+    where = Path(args.root).expanduser().resolve()
+    answering = {
+        "does": lambda: sidecar._does(args.phrase, where),
+        "uses": lambda: sidecar._uses(args.name, where),
+        "means": lambda: sidecar._means(args.name, where),
+        "shape": lambda: sidecar._shape(where),
+        "known": lambda: sidecar._known(args.name, where),
+        "elsewhere": lambda: sidecar._elsewhere(
+            " ".join(args.phrase) if isinstance(args.phrase, list) else args.phrase,
+            args.project,
+            where,
+        ),
+        "projects": lambda: sidecar._projects(where),
+    }
+    with sidecar.quiet_stdout():
+        answer = answering[args.command]()
+    _say(answer)
+    return 0
+
+
+def _guide(args: argparse.Namespace) -> int:
+    """What Vesta is and what a user can do with it.
+
+    Printed from a file rather than produced by a model: a user asking what a
+    tool does should not have to wait for inference, or pay for it, or wonder
+    whether the answer was made up.
+    """
+    from .guide import guide
+
+    _say(guide(args.topic))
     return 0
 
 
@@ -263,16 +305,60 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     status.add_argument("--prepare", action="store_true", help="start building if nothing is built")
     status.set_defaults(run=_status)
 
-    rules = sub.add_parser("rules", help="what you have decided, and whether the code honours it")
+    # Named for what a user asks, and matching the tool a session sees. Two
+    # names for one answer is how a user comes to believe there are two.
+    rules = sub.add_parser("decided", help="what you have decided, and whether the code honours it")
     rules.add_argument("root", nargs="?", default=".")
     rules.add_argument("--check", action="store_true", help="check the code against them")
     rules.add_argument("--show", type=int, default=6)
     rules.set_defaults(run=_rules)
 
-    patterns = sub.add_parser("patterns", help="things worth fixing, found unasked")
+    patterns = sub.add_parser("defects", help="things worth fixing, found unasked")
     patterns.add_argument("root", nargs="?", default=".")
     patterns.add_argument("--show", type=int, default=5)
     patterns.set_defaults(run=_patterns)
+
+    # The questions a session can ask, askable from a terminal. Same functions.
+    does = sub.add_parser("does", help="where a kind of work is done here")
+    does.add_argument("phrase", help="the work, in ordinary words")
+    does.add_argument("--root", default=".")
+    does.set_defaults(run=_asked)
+
+    uses = sub.add_parser("uses", help="where a definition is and what refers to it")
+    uses.add_argument("name")
+    uses.add_argument("--root", default=".")
+    uses.set_defaults(run=_asked)
+
+    means = sub.add_parser("means", help="what a definition is for")
+    means.add_argument("name")
+    means.add_argument("--root", default=".")
+    means.set_defaults(run=_asked)
+
+    known = sub.add_parser("known", help="what has already been worked out about it")
+    known.add_argument("name")
+    known.add_argument("--root", default=".")
+    known.set_defaults(run=_asked)
+
+    shape = sub.add_parser("shape", help="what this repository is made of")
+    shape.add_argument("--root", default=".")
+    shape.set_defaults(run=_asked)
+
+    elsewhere = sub.add_parser("elsewhere", help="where work is done in another project")
+    # The project is a flag rather than a positional: a user types the work in
+    # ordinary words, which contain spaces, and a shell splits them. `elsewhere
+    # fuzzy search indexer` must not be read as a phrase of one word.
+    elsewhere.add_argument("phrase", nargs="+", help="the work, in ordinary words")
+    elsewhere.add_argument("--in", dest="project", required=True, help="by name or by path")
+    elsewhere.add_argument("--root", default=".")
+    elsewhere.set_defaults(run=_asked)
+
+    projects = sub.add_parser("projects", help="what can be referred to")
+    projects.add_argument("--root", default=".")
+    projects.set_defaults(run=_asked)
+
+    guide = sub.add_parser("guide", help="what vesta is, and what you can do")
+    guide.add_argument("topic", nargs="?", default="")
+    guide.set_defaults(run=_guide)
 
     used = sub.add_parser("used", help="what the sidecar was asked, and when")
     used.add_argument("--since", type=float, default=0, help="minutes to look back")

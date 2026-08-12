@@ -1,0 +1,140 @@
+"""What Vesta is, and what a user can do with it.
+
+Written down rather than generated. A user asking what a tool does should not
+wait for inference, pay for it, or wonder whether the answer was invented — and
+a guide a model writes fresh each time is a guide that can quietly describe a
+command that does not exist.
+
+**Organised by what someone wants, not by what the software has.** Nobody opens
+a tool wanting to call `propagate.from_files`; they want to know what breaks if
+they change a file. So each section is a question a person actually has, with
+the one line that answers it.
+
+**Every snippet here is run by the tests.** A guide that drifts from the
+commands is worse than none, because it is believed. The test extracts each
+`vesta …` line and checks the subcommand exists.
+"""
+
+from __future__ import annotations
+
+from typing import Dict, List, Tuple
+
+# Each section: the question someone has, and how Vesta answers it. The snippet
+# is the whole answer — a user who reads only the snippet has lost nothing.
+SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
+    (
+        "Where does this repository do X?",
+        "Ask in the words of the work. Vesta answers in the words of the code, "
+        "which are usually different — that crossing is the point.",
+        [
+            ("vesta does 'retrying a failed request'", "definitions that do that work"),
+            ("vesta means Graph.referenced_by", "what one definition is for"),
+        ],
+    ),
+    (
+        "What breaks if I change this?",
+        "Resolved through the code rather than matched by name, so four methods "
+        "sharing a name stay four methods.",
+        [
+            ("vesta touches src/api.py", "what a change reaches, and which tests cover it"),
+            ("vesta uses admit", "where it is, what refers to it, what it refers to"),
+        ],
+    ),
+    (
+        "What am I even looking at?",
+        "Before opening a file: what the repository is made of, and whether "
+        "Vesta can answer about it yet.",
+        [
+            ("vesta shape", "composition, before reading anything"),
+            ("vesta status", "whether the graph is built, and what it holds"),
+            ("vesta status --prepare", "start building it, in the background"),
+        ],
+    ),
+    (
+        "How did we do this in the other project?",
+        "Name another project by name or by path. The project you are in stays "
+        "authoritative; the other is consulted, not merged.",
+        [
+            ("vesta elsewhere 'fuzzy search' indexer", "how that project does it"),
+            ("vesta projects", "what can be referred to, and what currently is"),
+        ],
+    ),
+    (
+        "What did I already decide?",
+        "Recovered from what you told agents in this project, so a correction "
+        "you made once does not have to be made again.",
+        [
+            ("vesta decided", "the rules recovered from your own corrections"),
+            ("vesta decided --check", "whether the code still honours them"),
+        ],
+    ),
+    (
+        "What is worth fixing?",
+        "Found without being asked, and independent of anything you have said.",
+        [
+            ("vesta defects", "things worth fixing, most consequential first"),
+        ],
+    ),
+]
+
+# What Vesta is, in the fewest words that are still true.
+PURPOSE = """Vesta answers structural questions about a repository from a
+resolved graph of what refers to what, an ontology of what the work is called,
+and what earlier sessions already worked out — so an agent can ask instead of
+reading, and you do not pay twice for the same understanding."""
+
+# Said once, at the end, because it is the thing users most often ask about a
+# tool that reads their code.
+STANDING = """Vesta runs on your agent's own inference. It holds no API key and
+makes no network calls of its own. Everything it derives is kept under
+~/.vesta and can be deleted; nothing leaves your machine."""
+
+
+def _snippet(command: str, what: str) -> str:
+    return f"  {command}\n      {what}"
+
+
+def guide(topic: str = "") -> str:
+    """The guide, or one section of it.
+
+    A topic matches loosely on purpose: somebody typing `vesta guide rules`
+    means the section about what they decided, and being told "no such topic"
+    for a word that plainly names one is the kind of correctness nobody wants.
+    """
+    wanted = topic.strip().lower()
+    sections = SECTIONS
+    if wanted:
+        sections = [
+            entry
+            for entry in SECTIONS
+            if wanted in entry[0].lower()
+            or wanted in entry[1].lower()
+            or any(wanted in c.lower() or wanted in w.lower() for c, w in entry[2])
+        ]
+        if not sections:
+            known = "\n".join(f"  {title}" for title, _, _ in SECTIONS)
+            return f"Nothing in the guide about {topic!r}. It covers:\n{known}"
+
+    lines: List[str] = []
+    if not wanted:
+        lines.append("Vesta")
+        lines.append("")
+        lines.append(PURPOSE)
+        lines.append("")
+
+    for title, why, snippets in sections:
+        lines.append(title)
+        lines.append(f"  {why}")
+        lines.append("")
+        for command, what in snippets:
+            lines.append(_snippet(command, what))
+        lines.append("")
+
+    if not wanted:
+        lines.append(STANDING)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def commands() -> List[str]:
+    """Every command the guide shows, for a test that keeps it honest."""
+    return [command for _, _, snippets in SECTIONS for command, _ in snippets]
