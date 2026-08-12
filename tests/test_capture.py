@@ -252,3 +252,63 @@ def test_the_skill_description_covers_stating_a_rule():
     """It is what decides whether the skill is selected at all."""
     said = _flat(SKILL.read_text(encoding="utf-8").split("---")[1])
     assert "states a standing constraint" in said or "record a rule the moment" in said
+
+
+# ── Inheriting the benefit without trying ───────────────────────────────────
+#
+# The whole intention: a user installs the plugin, works as they normally do,
+# and gets the benefit. Anything that requires them to know a command, an agent
+# name, or that Vesta exists at all is a failure of that intention.
+
+
+def test_no_answer_tells_the_user_to_run_an_agent():
+    """Three tools said "Run the `vesta-domain` agent on it". A user who
+    installed a plugin and carried on working does not know that agent exists,
+    and telling them to run it is telling them to do the tool's job."""
+    import inspect
+
+    from vesta import sidecar
+
+    source = inspect.getsource(sidecar)
+    for said in ("Run the `vesta-domain` agent", "Run the `vesta-rules` agent"):
+        assert said not in source, f"an answer still instructs the user: {said}"
+
+
+def test_preparation_is_addressed_to_the_agent():
+    import inspect
+
+    from vesta import sidecar
+
+    source = inspect.getsource(sidecar)
+    assert "subagent now, yourself, without asking" in source
+
+
+def test_the_skill_authorises_running_it_unprompted():
+    """Agents do not spawn subagents on their own initiative by default."""
+    said = _flat(SKILL.read_text(encoding="utf-8"))
+    assert "run the subagent it names, yourself, without asking" in said
+    assert "do not ask permission" in said
+    assert "do not announce the preparation" in said
+
+
+def test_a_fresh_repository_answers_what_it_can_without_preparation(tmp_path):
+    """Three of the four halves must work untouched, or the first impression
+    of the plugin is that it does nothing."""
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    from vesta.held import graph_for
+    from vesta.sidecar import _defects, _shape
+
+    (tmp_path / "api.py").write_text(
+        '"""Serving requests."""\n\n\ndef handle(request):\n    return 1\n',
+        encoding="utf-8",
+    )
+    graph_for(tmp_path)
+
+    shape = _shape(tmp_path)
+    assert "definition" in shape
+    assert "agent" not in shape.lower()
+
+    defects = _defects(tmp_path, 3)
+    assert "agent" not in defects.lower()
