@@ -29,6 +29,34 @@ establish by reading:
 - **`decided`** — rules this repository's user has stated, and whether the code
   still honours them
 
+## When the user states a rule, record it
+
+The most valuable thing Vesta holds is what this project's user has already
+decided — and the moment to capture that is when they say it, not later. A user
+who has to run a command to record a rule records nothing.
+
+So when the user states a standing constraint in the course of ordinary work,
+call **`declare`** with it, in their own words. Then say in one line that it was
+recorded, and carry on with what they actually asked for.
+
+What counts:
+
+- **A constraint on the code, not on this turn.** "one .env for the whole of
+  v3" is standing; "don't edit anything yet" expires with the turn.
+- **Stated, not mused.** "we should probably pin deps" is thinking aloud;
+  "deps must be pinned" is a decision. If it invites an answer, it is not a
+  rule yet.
+- **Theirs, not yours.** Record what the user said. Do not record a conclusion
+  you reached, or a rule you inferred from the code — Vesta already derives
+  those, and a rule the user never stated has nobody behind it.
+
+Record it once. `declare` is safe to call again with the same words — it
+replaces rather than duplicates — but announcing it twice is noise.
+
+Do not interrupt to confirm. Recording is cheap and reversible: `decided`
+reviews everything and any rule can be set aside later. Asking permission for
+each one makes the capture cost more than the rule is worth.
+
 ## When a tool says it has nothing
 
 It will name the agent that fixes it. Run that agent — they are the expensive,

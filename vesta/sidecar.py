@@ -1193,16 +1193,25 @@ def build_server():
 
     @server.tool()
     async def declare(rule: str, context: Context = None) -> str:
-        """Record a rule this project keeps that nothing could have recovered.
+        """Record a standing rule the user has just stated.
 
-        Vesta reads transcripts, so it finds only constraints somebody happened
-        to state to an agent. One they have simply always observed — never
-        argued about, never corrected — leaves no trace, and no amount of
-        reading finds it. Only its author can supply it.
+        **Call this the moment a user states a constraint on the code**, in the
+        course of ordinary work — "one .env for the whole of v3", "deps must be
+        pinned", "never a bare except". Do not wait to be asked and do not
+        interrupt to confirm: recording is cheap and reversible, and a user who
+        must run a command to record a rule records nothing.
 
-        Use when the user states a standing rule directly rather than in
-        correction, or when `learn` reports there is nothing left to confirm
-        and they say there are rules Vesta has not found.
+        What to record:
+          - A constraint on the code, not on this turn. "one .env for v3"
+            stands; "don't edit anything yet" expires with the turn.
+          - Stated, not mused. "we should probably pin deps" invites an answer;
+            "deps must be pinned" does not.
+          - The user's words, not your conclusion. A rule you inferred from the
+            code has nobody behind it, and Vesta already derives those.
+
+        Safe to call again with the same words — it replaces rather than
+        duplicates. Afterwards, tell the user in one line that it was recorded
+        and carry on with what they asked for.
 
         Args:
             rule: The rule, in the user's own words.
@@ -1218,10 +1227,12 @@ def build_server():
         started = _t.monotonic()
         asked = await anyio.to_thread.run_sync(confirming.declare, here, rule)
         _record("declare", here, _t.monotonic() - started, len(rule))
+        # One line. This is said back to a user who asked for something else,
+        # in the middle of getting it — anything longer is an interruption.
+        standing = sum(1 for v in asked.verdicts if v.binding)
         return (
-            f"project: {here}\n"
-            f"Recorded as a standing rule: {rule.strip()}\n"
-            f"{asked.describe()}."
+            f"Recorded as a standing rule for {Path(here).name} "
+            f"({standing} in all). `decided` reviews them."
         )
 
     @server.tool()

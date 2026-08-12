@@ -61,13 +61,13 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
     ),
     (
         "What did I already decide?",
-        "Recovered from what you told agents in this project, so a correction "
-        "you made once does not have to be made again.",
+        "Say a rule in the course of working — \"one .env for the whole of "
+        "v3\" — and it is recorded as you say it. Nothing to run, nothing to "
+        "remember. These commands are for reviewing what was kept.",
         [
-            ("vesta decided", "the rules recovered from your own corrections"),
+            ("vesta decided", "every rule this project keeps"),
             ("vesta decided --check", "whether the code still honours them"),
-            ("vesta learn", "confirm which of them are actually binding"),
-            ("vesta learn --declare '<a rule>'", "state one Vesta could not have found"),
+            ("vesta learn", "candidates recovered from older sessions, if any"),
         ],
     ),
     (

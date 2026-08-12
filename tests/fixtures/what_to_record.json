@@ -1,0 +1,17 @@
+{
+  "note": "Fixed before the capture path was built. Each is something a user might say mid-task; `record` is whether an agent should call `declare` on it. Written from real transcript turns rather than invented, so the standard is what people actually say.",
+  "cases": [
+    {"said": "no, one .env for the whole of v3, not one per service", "record": true, "why": "a constraint on the code, stated plainly"},
+    {"said": "deps must be pinned, we cannot have floating versions", "record": true, "why": "a standing decision with a reason"},
+    {"said": "never use a bare except in this codebase", "record": true, "why": "scoped to the codebase, not the turn"},
+    {"said": "always carry the prompts over verbatim when porting", "record": true, "why": "a rule about how work is done here"},
+    {"said": "don't edit anything yet, just tell me what you would do", "record": false, "why": "scopes this turn and expires with it"},
+    {"said": "we should probably pin deps at some point, what do you think?", "record": false, "why": "invites an answer; a proposal, not a decision"},
+    {"said": "add a field to the form and wire it to the handler", "record": false, "why": "a request for work, no constraint in it"},
+    {"said": "i don't understand why the test is failing", "record": false, "why": "predicts nothing about any artifact"},
+    {"said": "run the tests again", "record": false, "why": "an instruction for this moment"},
+    {"said": "that's fine, carry on", "record": false, "why": "assent, not a constraint"},
+    {"said": "Show the guide above to the user verbatim. Do not summarise it.", "record": false, "why": "vesta's own command text, not the user speaking"},
+    {"said": "maybe we could use a queue here instead", "record": false, "why": "thinking aloud"}
+  ]
+}
