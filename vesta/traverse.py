@@ -285,3 +285,194 @@ def neighbours(graph: Graph, mapped: Map, node_id: str, limit: int = 10) -> List
 
     ordered = sorted(kin.items(), key=lambda pair: -pair[1])
     return [graph.nodes[n] for n, _ in ordered[:limit] if n in graph.nodes]
+
+
+# ── Attaching by reading, not by matching ────────────────────────────────
+
+
+class Reading(BaseModel):
+    """What a definition is about, as something that read it decided."""
+
+    does: str = Field(
+        default="",
+        description="What this definition does, in one plain sentence.",
+    )
+    terms: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Labels from the offered vocabulary that name what this does. Only "
+            "ones that genuinely apply — most definitions are about one thing "
+            "or two, and a definition attached to eight terms has been attached "
+            "to none of them."
+        ),
+    )
+
+
+READING = """This is a definition from a codebase, with what it says about itself:
+
+    {name}  ({where})
+{body}
+
+The work this codebase performs has been named as follows:
+
+{vocabulary}
+
+Which of those name what this definition does? Choose only labels that genuinely
+apply — usually one or two, sometimes none. A definition that resolves symbols
+is not "repository auditing" merely because it is in a tool that audits.
+
+Names are not evidence. `corpus_id` returning a knowledge base identifier is
+about knowledge bases whatever it is called, and a function called `build` is
+about whatever it builds. Read what it says it does.
+"""
+
+
+def _body_of(node: Node, root: Path, lines: int = 26) -> str:
+    """A definition's own words: its signature and its docstring."""
+    path = root / node.path
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(f"    {line}" for line in text[node.line : node.line + lines])
+
+
+def read_in(
+    graph: Graph,
+    terms: Sequence[Term],
+    root: Path | str,
+    only: Optional[Sequence[str]] = None,
+    model: Optional[str] = None,
+    limit: int = 120,
+) -> Map:
+    """Attach definitions to terms by reading them.
+
+    **Not by string overlap.** Matching names against labels attached
+    `_resolve_with` to "resolve symbol references" because the token appears in
+    both, and would have missed it entirely had it been called `harvest`. It
+    also attached `Coverage` — which is about which files a language server
+    read — to "create extended covering arrays", at full confidence. Three
+    attempts at tuning that produced 89 attachments, then 2, then 19, none of
+    them for a reason anything understood.
+
+    What a definition says about itself is the evidence, and reading it is the
+    only way to use that. Costs a call per definition, so it is bounded and
+    cached.
+    """
+    import asyncio
+
+    from .structure import _ensure_data_dir
+
+    root = Path(root).expanduser().resolve()
+    found = Map(ontology="read")
+    _ensure_data_dir()
+
+    try:
+        from pragmatos import llm
+
+        extract = llm.build_extractor(model=model)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("no model available to read definitions: %s", exc)
+        return found
+
+    vocabulary = "\n".join(f"    {term.label}" for term in terms)
+    by_label = {term.label.lower(): term for term in terms}
+
+    # Public definitions first: a private helper is about whatever its caller
+    # is about, and reading every one of them is most of the cost for least of
+    # the meaning.
+    wanted = [
+        node
+        for node in graph.nodes.values()
+        if (only is None or node.id in only)
+        and not node.name.startswith("_")
+        and "test" not in node.path
+    ]
+    wanted.sort(key=lambda n: -len(graph.referenced_by(n.id)))
+    wanted = wanted[:limit]
+
+    async def read(node: Node):
+        body = _body_of(node, root)
+        if not body.strip():
+            return node, None
+        prompt = (
+            READING.replace("{name}", node.qualified)
+            .replace("{where}", f"{node.path}:{node.line + 1}")
+            .replace("{body}", body)
+            .replace("{vocabulary}", vocabulary)
+        )
+        try:
+            return node, await extract(Reading, prompt)
+        except Exception:  # noqa: BLE001 - one unread definition is not a failure
+            return node, None
+
+    async def run():
+        return await asyncio.gather(*(read(node) for node in wanted))
+
+    try:
+        readings = asyncio.run(run())
+    except Exception as exc:  # noqa: BLE001
+        logger.info("could not read definitions: %s", exc)
+        return found
+
+    attached: Set[str] = set()
+    already: Set[Tuple[str, str]] = set()
+    for node, reading in readings:
+        if reading is None:
+            continue
+        for label in reading.terms[:3]:
+            term = by_label.get(label.strip().lower())
+            if term is None:
+                continue
+            # One definition, one term, once. A model naming the same label
+            # twice in a list is emphasis, not two attachments.
+            if (node.id, term.id) in already:
+                continue
+            already.add((node.id, term.id))
+            found.attachments.append(
+                Attachment(
+                    node=node.id,
+                    term=term.id,
+                    label=term.label,
+                    kind=term.kind,
+                    strength=1.0,
+                    how="read",
+                )
+            )
+            attached.add(term.id)
+
+    found.unattached = [t.label for t in terms if t.id not in attached]
+    return found
+
+
+def keep(mapped: Map, repo: Path | str) -> Path:
+    """Write a map, because reading a repository costs a call per definition."""
+    import hashlib
+
+    from .structure import VESTA_HOME
+
+    root = Path(repo).expanduser().resolve()
+    where_at = VESTA_HOME / "maps"
+    where_at.mkdir(parents=True, exist_ok=True)
+    path = where_at / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
+    path.write_text(mapped.model_dump_json(), encoding="utf-8")
+    return path
+
+
+def recall(repo: Path | str) -> Optional[Map]:
+    """The map already read for this repository, if there is one."""
+    import hashlib
+
+    from .structure import VESTA_HOME
+
+    root = Path(repo).expanduser().resolve()
+    path = (
+        VESTA_HOME / "maps"
+        / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
+    )
+    if not path.is_file():
+        return None
+    try:
+        return Map.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None

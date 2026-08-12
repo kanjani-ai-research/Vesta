@@ -210,6 +210,21 @@ def _build(project: str) -> int:
             keep_patterns(from_history(root, limit=60, graph=graph), root)
         except Exception as exc:  # noqa: BLE001
             logger.info("could not derive patterns for %s: %s", root, exc)
+
+        # The ontology of what this repository's work is, and the reading of
+        # its definitions against it. This is the expensive half — a model
+        # naming the work, then reading each definition — and it is why the
+        # crossing between code and concept costs nothing when asked for.
+        try:
+            from .domain import as_terms, derive
+            from .traverse import keep as keep_map
+            from .traverse import read_in
+
+            ontology = derive(root)
+            if ontology is not None and ontology.terms:
+                keep_map(read_in(graph, as_terms(ontology), root, limit=200), root)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("could not read %s against its ontology: %s", root, exc)
     except Exception as exc:  # noqa: BLE001 - a failed preparation is not fatal
         logger.info("preparation failed for %s: %s", root, exc)
         _record_failure(root, f"{type(exc).__name__}: {exc}"[:200])

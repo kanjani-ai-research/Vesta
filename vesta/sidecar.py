@@ -35,7 +35,11 @@ from .authority import settle
 from .dynamic import missed_by, scan
 from .enforce import against
 from .harvest import anchor, from_sessions, keep, recall_notes
+from .domain import recall as recall_ontology
 from .held import graph_for
+from .traverse import about, neighbours
+from .traverse import recall as recall_map
+from .traverse import where as where_in
 from .learned import everything as learned_patterns
 from .patterns import survey
 from .propagate import from_files, is_test
@@ -717,6 +721,103 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
     return "\n".join(lines)
 
 
+def _means(name: str, project: Optional[Path]) -> str:
+    """What a definition is about, and what else does the same kind of work.
+
+    The crossing a reference graph cannot make: two definitions that never call
+    each other, doing the same activity. `Graph.referenced_by` and
+    `from_files` have no edge between them and are both impact analysis.
+    """
+    if project is None:
+        return "Could not tell which project this is."
+
+    with quiet_stdout():
+        graph = graph_for(project, trust_for=300)
+        mapped = recall_map(project)
+
+    if mapped is None or not mapped.attachments:
+        return (
+            f"project: {project}\n"
+            "This repository has not been read against its own ontology yet. "
+            "Preparation does that in the background; it takes a few minutes "
+            "the first time."
+        )
+
+    wanted = [
+        n for n in graph.nodes.values()
+        if n.name == name or n.qualified == name or n.qualified.endswith(f".{name}")
+    ]
+    if not wanted:
+        return f"project: {project}\nNo definition named {name!r} in the graph."
+
+    lines = [f"project: {project}", "(paths below are relative to that directory)"]
+    for node in wanted[:3]:
+        said = about(graph, mapped, node.id)
+        lines.append("")
+        lines.append(f"{node.qualified}  {node.path}:{node.line + 1}")
+        if not said:
+            lines.append("  nothing recorded about what this is for")
+            continue
+        for attachment in said[:4]:
+            lines.append(f"  · {attachment.label}")
+
+        kin = neighbours(graph, mapped, node.id)
+        if kin:
+            lines.append("")
+            lines.append("  does the same kind of work:")
+            for other in kin[:6]:
+                edges = {e.source for e in graph.referenced_by(node.id)} | {
+                    e.target for e in graph.depends_on(node.id)
+                }
+                mark = "" if other.id in edges else "  (no call between them)"
+                lines.append(
+                    f"    {other.qualified}  {other.path}:{other.line + 1}{mark}"
+                )
+    return "\n".join(lines)
+
+
+def _does(phrase: str, project: Optional[Path]) -> str:
+    """Where in this repository an idea lives.
+
+    Asked in the vocabulary of the work, answered in the vocabulary of the
+    code: "impact analysis" reaches `Graph.referenced_by`, which shares no
+    words with it.
+    """
+    if project is None:
+        return "Could not tell which project this is."
+
+    with quiet_stdout():
+        graph = graph_for(project, trust_for=300)
+        mapped = recall_map(project)
+
+    if mapped is None or not mapped.attachments:
+        return (
+            f"project: {project}\n"
+            "This repository has not been read against its own ontology yet."
+        )
+
+    hits = where_in(graph, mapped, phrase, limit=10)
+    if not hits:
+        ontology = recall_ontology(project)
+        known = ontology.describe() if ontology else "no ontology"
+        return (
+            f"project: {project}\n"
+            f"Nothing here is recorded as doing that. The work named in this "
+            f"repository is: {known}."
+        )
+
+    lines = [f"project: {project}", "(paths below are relative to that directory)", ""]
+    seen: set = set()
+    for attachment in hits:
+        node = graph.nodes.get(attachment.node)
+        if node is None or node.id in seen:
+            continue
+        seen.add(node.id)
+        lines.append(f"{node.qualified}  {node.path}:{node.line + 1}")
+        lines.append(f"  · {attachment.label}")
+    return "\n".join(lines)
+
+
 def _quieten() -> None:
     """Keep everything off stdout.
 
@@ -860,6 +961,52 @@ def build_server():
         started = time.monotonic()
         answer = await anyio.to_thread.run_sync(_shape, project)
         _record("shape", project, time.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def means(name: str, context: Context = None) -> str:
+        """What a definition is for, and what else does the same kind of work.
+
+        Answers in the vocabulary of the work rather than the code, and finds
+        definitions doing the same activity even when nothing calls between
+        them — which a reference graph cannot do.
+
+        Use when you have found a definition and want to know what it is part
+        of, or what you should look at alongside it.
+
+        Args:
+            name: A function, method or class name.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_means, name, project)
+        _record("means", project, _t.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def does(phrase: str, context: Context = None) -> str:
+        """Where in this repository a kind of work is done.
+
+        Ask in the words of the domain — "impact analysis", "acquiring
+        literature", "deciding whether code is stale" — and get the definitions
+        that do it, whatever they are named. Reaches code that shares no
+        vocabulary with the question.
+
+        Use when you know what you want to change but not where it lives.
+
+        Args:
+            phrase: The work, described in ordinary words.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_does, phrase, project)
+        _record("does", project, _t.monotonic() - started, len(answer))
         return answer
 
     @server.tool()
