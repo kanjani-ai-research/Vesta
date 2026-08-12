@@ -175,7 +175,12 @@ def test_asking_in_words_the_label_does_not_use(tmp_path):
 
     graph = Graph(root=str(tmp_path))
     graph.nodes["n1"] = Node(
-        id="n1", name="closeness", qualified="closeness", path="search.py", line=10
+        id="n1",
+        name="closeness",
+        qualified="closeness",
+        kind=12,  # LSP SymbolKind: Function
+        path="search.py",
+        line=10,
     )
     mapped = Map(
         ontology="test",
@@ -184,6 +189,7 @@ def test_asking_in_words_the_label_does_not_use(tmp_path):
                 node="n1",
                 term="t1",
                 label="score how closely two texts overlap",
+                kind="activity",
                 strength=1.0,
                 how="read",
             )
