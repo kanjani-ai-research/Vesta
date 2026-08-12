@@ -129,6 +129,19 @@ def graph_for(
     found = build(root)
     logger.info("built the graph for %s in %.0fs", root, time.time() - started)
 
+    # Also as rows, one store per repository. A question touches a fraction of
+    # a graph and parsing the whole document to answer it costs nine seconds at
+    # forty thousand definitions — where an indexed lookup costs a fifth of a
+    # millisecond. Separate files per project because a shared one would make
+    # one repository's rebuild block another's read, and would make reaching
+    # across projects accidental rather than asked for.
+    try:
+        from .store import write as write_store
+
+        write_store(found, root, shape)
+    except Exception as exc:  # noqa: BLE001 - the document is still authoritative
+        logger.info("could not write the graph store for %s: %s", root, exc)
+
     GRAPH_DIR.mkdir(parents=True, exist_ok=True)
     try:
         cached.write_text(
