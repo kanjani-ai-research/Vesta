@@ -97,3 +97,70 @@ def test_an_unprepared_project_answers_at_once(no_api, tmp_path):
 
     assert time.monotonic() - started < 2.0
     assert "background" in said or "nothing" in said.lower()
+
+
+def test_the_server_actually_starts_as_a_process():
+    """Not that it imports — that it runs.
+
+    `build_server()` succeeded in tests for weeks while `main()` died on the
+    first line, because a module deleted with the theory half was still
+    imported there. Nothing noticed: a server that cannot start does not fail
+    loudly, it is simply absent, and every tool goes missing with no message
+    saying why. Only starting the real process catches that.
+    """
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent.parent
+    handshake = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1"},
+            },
+        }
+    )
+
+    done = subprocess.run(
+        [sys.executable, "-m", "vesta.sidecar"],
+        input=handshake + "\n",
+        capture_output=True,
+        text=True,
+        timeout=90,
+        cwd=str(here),
+    )
+
+    assert "Traceback" not in done.stderr, done.stderr[-800:]
+    assert done.stdout.strip(), "the server answered nothing"
+
+    answer = json.loads(done.stdout.splitlines()[0])
+    assert answer["result"]["serverInfo"]["name"] == "vesta"
+
+
+def test_the_sidecar_runner_finds_an_interpreter():
+    """The command the plugin declares, run the way the framework runs it."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent.parent
+    runner = here / "bin" / "vesta-sidecar"
+    assert runner.is_file() and runner.stat().st_mode & 0o111, "runner is not executable"
+
+    done = subprocess.run(
+        [str(runner)],
+        input="",
+        capture_output=True,
+        text=True,
+        timeout=90,
+        cwd=str(here),
+        env={"PATH": "/usr/bin:/bin", "VESTA_PYTHON": sys.executable},
+    )
+    assert "no interpreter" not in done.stderr
+    assert "Traceback" not in done.stderr, done.stderr[-500:]

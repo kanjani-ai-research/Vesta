@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "vesta-local",
+  "owner": {
+    "name": "Causum"
+  },
+  "plugins": [
+    {
+      "name": "vesta",
+      "source": "./",
+      "description": "A traversable graph of a repository: what refers to what, what the work is called, what its user has decided, and what is worth fixing."
+    }
+  ],
+  "description": "Vesta: ontology-driven code graph for agentic work."
+}

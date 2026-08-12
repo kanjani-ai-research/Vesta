@@ -293,11 +293,159 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
     ]
 
 
+def _named_in(root: Path, module: str) -> set:
+    """Every name a module of this package defines at the top level."""
+    import ast
+
+    for path, _ in _sources(root):
+        if path.stem != module:
+            continue
+        try:
+            tree = ast.parse("\n".join(_lines(path)))
+        except (SyntaxError, ValueError):
+            return set()  # unparseable: claim nothing rather than claim wrongly
+
+        found = set()
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                found.add(node.name)
+            elif isinstance(node, ast.Assign):
+                found.update(
+                    target.id for target in node.targets if isinstance(target, ast.Name)
+                )
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                found.add(node.target.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                # Re-exported: `from .x import y` in a module makes `y` a name
+                # that module supplies, and importing it from there is fair.
+                found.update(
+                    alias.asname or alias.name.split(".")[0] for alias in node.names
+                )
+        return found
+    return set()
+
+
+def calls_to_nothing(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
+    """Code that calls or imports something which no longer exists.
+
+    The inverse of `nothing refers to this`, and the one this repository kept
+    suffering while the survey said it was clean. A deletion leaves the call
+    behind: `_load_env` went with the theory half, `judge` and `sift` with the
+    move to host inference, and each survived at its call site. The CLI and
+    then the whole MCP server died on the first line, and every tool went
+    missing with no message saying why.
+
+    **A reference graph cannot see this.** An unresolvable name resolves to no
+    node, so it creates no edge — it is absent from the graph rather than
+    present-and-unreferenced. Nothing that reasons over edges will ever find
+    it. So this reads the syntax instead, which is where the evidence is.
+
+    Deliberately narrow, for the same reason the unreachable check is. Only
+    module-level `from . import x` and calls to plain names defined nowhere in
+    the file, the module, or the builtins are reported. Attributes, dynamic
+    lookups and star-imports are left alone: a false "this does not exist"
+    about working code would make the whole survey untrustworthy.
+    """
+    import ast
+    import builtins
+
+    known_builtins = set(dir(builtins))
+    by_file: Dict[str, List[Site]] = {}
+
+    # Every module this package holds, so a `from .x import y` naming a deleted
+    # module is caught as surely as a call to a deleted function.
+    modules = {path.stem for path, _ in _sources(root)}
+
+    for path, relative in _sources(root):
+        try:
+            # `_sources` yields the path and its name, not its text; the lines
+            # are cached separately because every pattern reads every file.
+            tree = ast.parse("\n".join(_lines(path)))
+        except (SyntaxError, ValueError):
+            continue
+
+        defined: set = set(known_builtins)
+        imported_from: List[Tuple[str, str, int]] = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined.add(node.name)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                defined.add(node.id)
+            elif isinstance(node, ast.arg):
+                defined.add(node.arg)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    defined.add(alias.asname or alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    defined.add(alias.asname or alias.name)
+                # A relative import: the module must exist, and so must each
+                # name taken from it. `from .rules import judge` kept `judge`
+                # defined in this file long after `rules` stopped defining it,
+                # which is why checking calls alone missed it.
+                if node.level and node.module and "." not in node.module:
+                    for alias in node.names:
+                        imported_from.append((node.module, alias.name, node.lineno))
+            elif isinstance(node, ast.alias):
+                defined.add(node.asname or node.name.split(".")[0])
+
+        sites: List[Site] = []
+
+        for module, what, line in imported_from:
+            if module not in modules:
+                sites.append(
+                    Site(
+                        where=relative,
+                        line=line,
+                        what=f"from .{module} import {what} — no such module",
+                    )
+                )
+            elif what != "*" and what not in _named_in(root, module):
+                sites.append(
+                    Site(
+                        where=relative,
+                        line=line,
+                        what=f"from .{module} import {what} — {module} has no {what}",
+                    )
+                )
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if node.func.id in defined:
+                continue
+            sites.append(
+                Site(
+                    where=relative,
+                    line=node.lineno,
+                    what=f"{node.func.id}() — defined nowhere in this module",
+                )
+            )
+
+        if sites:
+            by_file.setdefault(relative, []).extend(sites)
+
+    return [
+        Found(
+            pattern="calls something that does not exist",
+            why=(
+                "this raises the moment the line runs, and a reference graph "
+                "cannot see it: an unresolvable name makes no edge to follow"
+            ),
+            confidence=LIKELY,
+            sites=sites,
+        )
+        for sites in by_file.values()
+    ]
+
+
 PATTERNS: Tuple[Tuple[str, Callable], ...] = (
     ("hardcoded language list", hardcoded_language_lists),
     ("swallowed failure", swallowed_failures),
     ("reached by name only", unresolvable_reach),
     ("nothing refers to this", unreachable_definitions),
+    ("calls something that does not exist", calls_to_nothing),
 )
 
 

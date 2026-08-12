@@ -1,0 +1,19 @@
+#!/bin/sh
+# Start the MCP server with whatever interpreter actually has Vesta.
+#
+# `python -m vesta.sidecar` assumes the shell's python is the one Vesta was
+# installed into, which it usually is not: a plugin is installed by the
+# framework, and the interpreter it inherits is whatever came first on PATH.
+# The server then fails to start and every tool is simply absent, with no
+# message saying why.
+set -u
+
+for python in "${VESTA_PYTHON:-}" "${CLAUDE_PLUGIN_ROOT:-}/.venv/bin/python" python3 python; do
+    [ -n "$python" ] || continue
+    if "$python" -c "import vesta.sidecar" >/dev/null 2>&1; then
+        exec "$python" -m vesta.sidecar "$@"
+    fi
+done
+
+echo "vesta: no interpreter on this machine has vesta installed" >&2
+exit 1

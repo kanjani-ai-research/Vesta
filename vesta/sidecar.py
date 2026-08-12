@@ -925,12 +925,16 @@ def build_server():
         "vesta",
         instructions=(
             "Answers questions about a repository from a resolved graph of what "
-            "refers to what, and about the literature behind a hard problem.\n\n"
+            "refers to what, an ontology of what the work is called, and what "
+            "earlier sessions already worked out about it.\n\n"
             "`shape` orients you in an unfamiliar codebase. `uses` finds a "
             "definition and everything that refers to it — resolved by a "
             "language server, so it distinguishes four methods that share a "
             "name. `touches` answers what a change affects, and which tests "
-            "cover it, before you edit.\n\n"
+            "cover it, before you edit. `does` asks in the vocabulary of the "
+            "work rather than of the code. `elsewhere` asks the same of another "
+            "project. `decided` recalls what this project's user has already "
+            "settled, so a correction is not made twice.\n\n"
             "Prefer these over reading files to establish structure: they answer "
             "in hundreds of tokens what costs thousands to read, and they say "
             "what they could not resolve rather than implying completeness. Use "
@@ -1225,12 +1229,15 @@ def build_server():
 
 
 def main() -> int:
-    _quieten()
-    # The project's `.env` is authoritative over an ambient shell key; see the
-    # note in `acquire._load_env`.
-    from .acquire import _load_env
+    """Start the server.
 
-    _load_env(override=True)
+    Nothing is loaded from a `.env` here, and nothing should be: the sidecar
+    holds no credentials. It once read one to find an API key, and that key is
+    exactly what conformance removed — the judging moved to the host's own
+    inference. The loader outlived the reason for it and, once its module was
+    deleted, stopped the server from starting at all.
+    """
+    _quieten()
     try:
         server = build_server()
     except ImportError:

@@ -169,3 +169,76 @@ def test_a_clean_repository_says_so(tmp_path: Path):
 
     assert not found.found
     assert "nothing found" in found.describe()
+
+
+# ── Calls to things that no longer exist ────────────────────────────────────
+
+
+def _probe(tmp_path, name, source):
+    (tmp_path / name).write_text(source, encoding="utf-8")
+    from vesta.dynamic import Blindspot
+    from vesta.graph import Graph
+    from vesta.patterns import calls_to_nothing
+
+    return [
+        site
+        for found in calls_to_nothing(Graph(root=str(tmp_path)), tmp_path, Blindspot())
+        for site in found.sites
+    ]
+
+
+def test_a_call_to_a_deleted_function_is_found(tmp_path):
+    """The defect this exists for. A reference graph cannot see it: an
+    unresolvable name makes no node, so there is no edge to be missing."""
+    sites = _probe(tmp_path, "broken.py", "def main():\n    return _load_env(True)\n")
+    assert len(sites) == 1
+    assert "_load_env" in sites[0].what
+
+
+def test_an_import_of_a_deleted_module_is_found(tmp_path):
+    sites = _probe(tmp_path, "broken.py", "from .acquire import _load_env\n")
+    assert any("no such module" in s.what for s in sites)
+
+
+def test_an_import_of_a_name_a_module_no_longer_has_is_found(tmp_path):
+    """`from .rules import judge` kept `judge` defined in the importing file
+    long after rules stopped defining it — so checking calls alone missed it."""
+    (tmp_path / "rules.py").write_text("def constrains(x):\n    return x\n")
+    sites = _probe(
+        tmp_path, "user.py", "from .rules import judge\n\n\ndef go():\n    return judge(1)\n"
+    )
+    assert any("has no judge" in s.what for s in sites)
+
+
+def test_working_code_is_not_reported(tmp_path):
+    source = (
+        "import json\n"
+        "from pathlib import Path\n\n\n"
+        "def helper(x):\n    return x\n\n\n"
+        "def works(value=None):\n"
+        "    data = json.loads('{}')\n"
+        "    return helper(data), len(str(Path('.'))), isinstance(value, int)\n"
+    )
+    assert _probe(tmp_path, "fine.py", source) == []
+
+
+def test_a_re_exported_name_is_not_reported(tmp_path):
+    """`from .a import thing` in b makes `thing` a name b supplies."""
+    (tmp_path / "a.py").write_text("def thing():\n    return 1\n")
+    (tmp_path / "b.py").write_text("from .a import thing\n")
+    assert _probe(tmp_path, "c.py", "from .b import thing\n") == []
+
+
+def test_a_name_bound_later_in_the_module_is_not_reported(tmp_path):
+    source = "def go():\n    return later()\n\n\ndef later():\n    return 1\n"
+    assert _probe(tmp_path, "ordered.py", source) == []
+
+
+def test_an_unparseable_file_claims_nothing(tmp_path):
+    """Better silent than wrong: a file this cannot read is not evidence."""
+    assert _probe(tmp_path, "bad.py", "def broken(\n") == []
+
+
+def test_a_star_import_is_left_alone(tmp_path):
+    (tmp_path / "source.py").write_text("def thing():\n    return 1\n")
+    assert _probe(tmp_path, "user.py", "from .source import *\n") == []

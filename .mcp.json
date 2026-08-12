@@ -1,8 +1,7 @@
 {
   "mcpServers": {
     "vesta": {
-      "command": "python",
-      "args": ["-m", "vesta.sidecar"]
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/vesta-sidecar"
     }
   }
 }
