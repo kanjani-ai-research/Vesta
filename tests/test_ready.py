@@ -19,16 +19,9 @@ import pytest
 from vesta.ready import NOTHING, PREPARING, READY, prepare, readiness
 
 
-@pytest.fixture(autouse=True)
-def elsewhere(tmp_path, monkeypatch):
-    """Keep every test off the real ~/.vesta."""
-    import vesta.held as held
-    import vesta.ready as ready
-
-    monkeypatch.setattr(ready, "STATE", tmp_path / "prepared")
-    monkeypatch.setattr(held, "GRAPH_DIR", tmp_path / "graphs")
-    monkeypatch.setattr(held, "_HELD", {})
-    monkeypatch.setattr(held, "_SHAPES", {})
+# Where things are kept is handled by the conftest, which points every run at a
+# directory it owns. A fixture here patched the graph directory directly and
+# replaced a function with a path, which broke every test that wrote a graph.
 
 
 def a_project(tmp_path: Path) -> Path:

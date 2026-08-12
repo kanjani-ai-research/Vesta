@@ -32,7 +32,14 @@ logger = logging.getLogger("vesta.held")
 
 # Where graphs live. Beside the corpora, because they are the same kind of
 # thing: something derived from a repository at a moment, worth keeping.
-GRAPH_DIR = home() / "graphs"
+def GRAPH_DIR() -> Path:
+    """Where graphs are kept, asked each time.
+
+    Bound at import once, which meant pointing the store elsewhere reached
+    everything except this — and a test run wrote its graphs into the user's
+    home regardless. A location that can move must be read, not remembered.
+    """
+    return home() / "graphs"
 
 # What counts as the repository's shape, for deciding whether a graph is stale.
 # Names and sizes and modification times, not contents: hashing every file costs
@@ -77,7 +84,7 @@ def _shape(root: Path) -> str:
 
 def _where(root: Path) -> Path:
     name = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:12]
-    return GRAPH_DIR / f"{root.name}-{name}.json"
+    return GRAPH_DIR() / f"{root.name}-{name}.json"
 
 
 # Held in memory as well as on disk: a sidecar answers many questions about one
@@ -142,7 +149,7 @@ def graph_for(
     except Exception as exc:  # noqa: BLE001 - the document is still authoritative
         logger.info("could not write the graph store for %s: %s", root, exc)
 
-    GRAPH_DIR.mkdir(parents=True, exist_ok=True)
+    GRAPH_DIR().mkdir(parents=True, exist_ok=True)
     try:
         cached.write_text(
             json.dumps({"shape": shape, "graph": found.model_dump(mode="json")}),

@@ -134,7 +134,7 @@ def scan(
     if trust_for:
         import hashlib as _h
 
-        recent = GRAPH_DIR / f"scan-{_h.sha256(str(root).encode()).hexdigest()[:12]}.json"
+        recent = GRAPH_DIR() / f"scan-{_h.sha256(str(root).encode()).hexdigest()[:12]}.json"
         try:
             import time as _time
 
@@ -159,7 +159,7 @@ def scan(
     import hashlib
     import json as _json
 
-    kept = GRAPH_DIR / f"scan-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
+    kept = GRAPH_DIR() / f"scan-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
     if kept.is_file():
         try:
             payload = _json.loads(kept.read_text(encoding="utf-8"))
@@ -223,7 +223,7 @@ def scan(
 
     _SCANNED[str(root)] = (state, found)
     try:
-        GRAPH_DIR.mkdir(parents=True, exist_ok=True)
+        GRAPH_DIR().mkdir(parents=True, exist_ok=True)
         kept.write_text(
             _json.dumps({"state": state, "scan": found.model_dump(mode="json")}),
             encoding="utf-8",
