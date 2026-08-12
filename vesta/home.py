@@ -32,15 +32,37 @@ VESTA_HOME = Path.home() / ".vesta"
 _ELSEWHERE: Optional[Path] = None
 
 
+# How a detached process learns where things are kept. Preparation runs in a
+# child, and a variable set in the parent means nothing to it — a test run
+# pointed its own store elsewhere and the background build wrote into the
+# user's home regardless.
+WHERE = "VESTA_HOME"
+
+
 def home() -> Path:
     """Where Vesta keeps what it derives."""
-    return _ELSEWHERE or VESTA_HOME
+    if _ELSEWHERE:
+        return _ELSEWHERE
+    import os
+
+    said = os.environ.get(WHERE)
+    return Path(said).expanduser().resolve() if said else VESTA_HOME
 
 
 def keep_in(where: Optional[Path]) -> None:
-    """Put everything somewhere else, or back where it belongs."""
+    """Put everything somewhere else, or back where it belongs.
+
+    Set in the environment as well as in this process, so anything Vesta starts
+    in the background keeps things in the same place.
+    """
+    import os
+
     global _ELSEWHERE
     _ELSEWHERE = Path(where).expanduser().resolve() if where else None
+    if _ELSEWHERE:
+        os.environ[WHERE] = str(_ELSEWHERE)
+    else:
+        os.environ.pop(WHERE, None)
 
 # Who derived a body of knowledge, carried in its name. A knowledge base this
 # machine built and one obtained from a publisher are different evidence about
