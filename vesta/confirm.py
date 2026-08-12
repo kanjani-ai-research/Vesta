@@ -143,6 +143,43 @@ class Asked(BaseModel):
         return said
 
 
+def handle(text: str) -> str:
+    """A short name for a candidate, so nobody has to paste a sentence.
+
+    `vesta learn --text '<the exact wording>'` is not a thing anybody does
+    twice: it means selecting a line out of a terminal, quoting it correctly,
+    and getting it byte-identical. A four-character handle derived from the
+    text is stable across runs without being stored, and short enough to type.
+    """
+    import hashlib
+
+    return hashlib.sha256(_key(text).encode("utf-8")).hexdigest()[:4]
+
+
+def find(repo: Path | str, said: str, found: Optional[Found] = None) -> str:
+    """The full text of whatever the user meant, from a handle or a fragment.
+
+    Three ways to name a candidate, in order of how likely each is to be what
+    somebody typed: its handle, a distinctive fragment of it, or the whole
+    thing. All resolve to the same rule.
+    """
+    said = said.strip()
+    if not said:
+        return ""
+
+    known = [v.text for v in recall(repo).verdicts]
+    if found is not None:
+        known.extend(r.text for r in found.rules)
+
+    for text in known:
+        if handle(text) == said.lower():
+            return text
+    for text in known:
+        if said.lower() in text.lower():
+            return text
+    return said
+
+
 def _key(text: str) -> str:
     """One candidate's identity, stable across whitespace and case.
 

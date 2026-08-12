@@ -279,14 +279,34 @@ def _asked(args: argparse.Namespace) -> int:
 def _learn(args: argparse.Namespace) -> int:
     """Confirm which recovered corrections are standing rules.
 
-    A terminal can only ask one question at a time and cannot render a form, so
-    this lists what is waiting and takes one verdict per invocation. The same
-    verdicts the `learn` tool records over MCP — one store, two doors.
+    **Nobody adjudicates by pasting a sentence.** Asking a user to select a
+    line out of a terminal, quote it correctly, and get it byte-identical is
+    asking them not to bother. So every candidate carries a short handle and
+    `vesta learn 5279 rule` is the whole interaction — positional, in the order
+    somebody says it out loud.
+
+    A terminal can only ask one thing at a time and cannot render a form, so
+    this lists what is waiting and takes one verdict per invocation. In a
+    session the `learn` tool asks directly. Same store, two doors.
     """
     from . import confirm
     from .rules import from_sessions
 
     where = Path(args.root).expanduser().resolve()
+
+    # `vesta learn <handle> <verdict>`, which is how somebody would say it.
+    if args.which:
+        from .rules import from_sessions as _recovered
+
+        text = confirm.find(where, args.which, _recovered(where))
+        if args.verdict == "reopen":
+            confirm.reopen(where, text)
+            _say(f"back in question: {text[:70]}")
+            return 0
+        confirm.record(where, text, args.verdict, args.stated or "")
+        _say(f"{args.verdict}: {text[:70]}")
+        _say(confirm.recall(where).describe())
+        return 0
 
     if args.declare:
         confirm.declare(where, args.declare)
@@ -316,7 +336,7 @@ def _learn(args: argparse.Namespace) -> int:
         _say("")
         _say(f"{len(asked.waiting)} waiting on you:")
         for verdict in asked.waiting[: args.show]:
-            _say(f"  {verdict.text[:100]}")
+            _say(f"  {confirm.handle(verdict.text)}  {verdict.text[:92]}")
         if len(asked.waiting) > args.show:
             _say(f"  … and {len(asked.waiting) - args.show} more")
         _say("")
@@ -343,16 +363,15 @@ def _learn(args: argparse.Namespace) -> int:
     _say(f"{len(waiting)} candidate(s) worth settling:")
     for rule in waiting:
         _say("")
-        _say(f"  {rule.text[:150]}")
-        _say(f"    checkable as: {rule.check}")
+        _say(f"  {confirm.handle(rule.text)}  {rule.text[:140]}")
     _say("")
-    _say("Say which it is:")
-    _say("  vesta learn --text '<the candidate>' --verdict rule|note|lapsed")
-    _say("  … or use /vesta:learn in a session, which asks you directly.")
+    _say("Say which each is, by its handle:")
+    _say(f"  vesta learn {confirm.handle(waiting[0].text)} rule     binding here")
+    _say(f"  vesta learn {confirm.handle(waiting[0].text)} note     said once, about one place")
+    _say(f"  vesta learn {confirm.handle(waiting[0].text)} lapsed   was a rule, is not now")
     _say("")
-    _say("Changed your mind, or Vesta never saw the rule at all:")
-    _say("  vesta learn --reopen '<the candidate>'")
-    _say("  vesta learn --declare '<a rule you have simply always kept>'")
+    _say("In a session, /vesta:learn asks you directly instead.")
+    _say("A rule Vesta never saw: vesta learn --declare '<the rule>'")
     return 0
 
 
@@ -445,12 +464,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     projects.set_defaults(run=_asked)
 
     learn = sub.add_parser("learn", help="confirm which corrections are rules")
-    learn.add_argument("root", nargs="?", default=".")
-    learn.add_argument("--show", type=int, default=5)
-    learn.add_argument("--text", default="", help="the candidate being ruled on")
+    # Positional, in the order somebody would say it: which one, and what it is.
+    learn.add_argument("which", nargs="?", default="", help="a candidate's handle")
     learn.add_argument(
-        "--verdict", default="rule", choices=("rule", "note", "lapsed")
+        "verdict",
+        nargs="?",
+        default="rule",
+        choices=("rule", "note", "lapsed", "abstained", "reopen"),
+        help="what it is",
     )
+    learn.add_argument("--root", default=".")
+    learn.add_argument("--show", type=int, default=5)
+    learn.add_argument("--text", default="", help="the candidate, spelled out")
     learn.add_argument("--stated", default="", help="the rule, said cleanly")
     learn.add_argument(
         "--declare", default="", help="a rule nothing recovered, stated outright"

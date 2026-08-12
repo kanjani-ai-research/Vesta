@@ -244,10 +244,77 @@ def _names_in(text: str) -> List[str]:
     return sorted(n for n in found if n and len(n) > 2)[:6]
 
 
+# What a terminal produced, quoted back into a prompt. A user pasting an error
+# is showing something, not deciding something — and a rule recovered from
+# Vesta's own output is Vesta recording its own words as the user's.
+QUOTED_OUTPUT = re.compile(
+    r"(?:^|\n)\s*(?:"
+    r"Traceback \(most recent|File \"[^\"]+\", line \d|"
+    r"[A-Za-z]*Error: |warning: |ERROR: |"
+    r"\$ |> |❯ |⎿|✘|✔ |pip install |npm install |brew install "
+    r")"
+)
+
+
+# Vesta's own words, coming back around. A slash command puts its output and
+# its instructions into the prompt, the transcript records that, and the next
+# harvest reads it as something the user decided. The result is Vesta recording
+# its own sentences as its user's rules — and those sentences are imperative,
+# so they pass every test for a constraint.
+OUR_OWN = re.compile(
+    r"(Show (?:the guide|this|these) [a-z ]*verbatim|"
+    r"Do not summarise it or add to it|"
+    r"vesta (?:learn|decided|defects|does|shape|status|guide|elsewhere) |"
+    r"Vesta (?:is not installed|could not start|knows this project)|"
+    r"the project under works stays authoritative|"
+    r"pip install vesta)",
+    re.I,
+)
+
+
+def _is_vestas_own(said: str) -> bool:
+    """Whether this is something Vesta said, not something a user said."""
+    return bool(OUR_OWN.search(said))
+
+
+def _is_mostly_output(said: str) -> bool:
+    """Whether something said is a paste rather than a statement.
+
+    Not merely whether it *contains* output: a user quoting one line and then
+    saying what to do about it has stated a rule, and the quote is the context
+    that makes it legible. What disqualifies a candidate is the paste being the
+    substance of it — a traceback, an install message, a block of shell.
+
+    So the test is proportion, not presence. Half a dozen lines of terminal
+    with a sentence attached is a paste; a sentence with a phrase in quotes is
+    a statement.
+    """
+    lines = [line for line in said.splitlines() if line.strip()]
+    if not lines:
+        return False
+    pasted = sum(1 for line in lines if QUOTED_OUTPUT.search("\n" + line))
+    if not pasted:
+        return False
+
+    # Half or more of it is terminal output. A two-line paste — a message and
+    # the command it suggests — is as much a paste as a twenty-line traceback,
+    # so proportion decides rather than a count.
+    if pasted >= len(lines) / 2:
+        return True
+
+    # Or it opens with output and never becomes a sentence about the code: a
+    # user who pastes first and instructs after is stating a rule, and one who
+    # only pastes is not.
+    return pasted >= 2
+
+
 def constrains(text: str) -> bool:
     """Whether something said states a constraint rather than asks for work."""
     said = text.strip()
     if len(said) < 20 or len(said) > 600:
+        return False
+    if _is_mostly_output(said) or _is_vestas_own(said):
+        # Output pasted in to be looked at, not a decision about the code.
         return False
     if PREDICTS_NOTHING.match(said):
         return False

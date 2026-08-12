@@ -149,3 +149,48 @@ def test_a_finding_carries_the_words_it_came_from():
 
     assert finding.holds
     assert "one .env for v3" in finding.said
+
+
+def test_pasted_output_is_not_a_rule():
+    """A user pasting an error is showing something, not deciding something —
+    and a rule recovered from Vesta's own output is Vesta recording its own
+    words as the user's."""
+    from vesta.rules import constrains
+
+    assert not constrains(
+        "Vesta is not installed in a way this session can reach.\n"
+        "  pip install vesta   (or set VESTA_PYTHON to an interpreter)"
+    )
+    assert not constrains(
+        "❯ /vesta:help\n  ⎿ UserPromptSubmit hook error\n"
+        "  ⎿ Failed with non-blocking status: python: command not found\n  ✘ vesta"
+    )
+
+
+def test_a_sentence_quoting_output_is_still_a_rule():
+    """The quote is context that makes the instruction legible. Rejecting on
+    presence rather than proportion would discard the real rule with it."""
+    from vesta.rules import constrains
+
+    assert constrains(
+        'the namespace "❯ plugin:vesta:vesta · ✔ connected" should be '
+        "causum:vesta, not vesta:vesta"
+    )
+
+
+def test_vestas_own_output_is_not_a_users_rule():
+    """A slash command puts its output and its instructions into the prompt,
+    the transcript records that, and the next harvest reads it as something the
+    user decided. Those sentences are imperative, so they pass every other test
+    for a constraint — and enforcing them would hold agents to Vesta's own
+    help text."""
+    from vesta.rules import constrains
+
+    assert not constrains(
+        "Vesta is not installed in a way this session can reach.\n"
+        "  pip install vesta   (or set VESTA_PYTHON to an interpreter that has it)\n\n"
+        "Show the guide above to the user verbatim. Do not summarise it or add to it."
+    )
+    assert not constrains(
+        "Show these definitions verbatim. If nothing was found, say so plainly."
+    )

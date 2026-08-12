@@ -76,3 +76,4 @@ def test_no_case_that_must_stay_undecided_is_ever_decided():
             continue
         sites, why = run_check(check, graph, root)
         assert why, f"decided what it should not: {case['rule'][:60]}"
+

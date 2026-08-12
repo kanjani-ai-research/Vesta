@@ -215,3 +215,36 @@ def test_a_declared_rule_survives_being_reconsidered(tmp_path):
     confirm.record(tmp_path, "a standing rule", confirm.NO_LONGER)
     confirm.record(tmp_path, "a standing rule", confirm.IS_A_RULE)
     assert confirm.recall(tmp_path).verdicts[0].declared
+
+
+# ── Adjudicating without pasting a sentence ─────────────────────────────────
+
+
+def test_a_candidate_has_a_short_handle(tmp_path):
+    """`--text '<the exact wording>'` is not something anybody does twice."""
+    handle = confirm.handle("never use a bare except")
+    assert len(handle) == 4
+    assert handle.isalnum()
+
+
+def test_a_handle_is_stable_across_wording_noise(tmp_path):
+    assert confirm.handle("Never   Use A Bare  Except") == confirm.handle(
+        "never use a bare except"
+    )
+
+
+def test_a_candidate_is_found_by_its_handle(tmp_path):
+    confirm.record(tmp_path, "never use a bare except", confirm.ABSTAINED)
+    handle = confirm.handle("never use a bare except")
+    assert confirm.find(tmp_path, handle) == "never use a bare except"
+
+
+def test_a_candidate_is_found_by_a_fragment(tmp_path):
+    """Somebody who types part of it means that one."""
+    confirm.record(tmp_path, "never use a bare except", confirm.ABSTAINED)
+    assert confirm.find(tmp_path, "bare except") == "never use a bare except"
+
+
+def test_an_unknown_handle_is_taken_at_face_value(tmp_path):
+    """So declaring something new still works through the same door."""
+    assert confirm.find(tmp_path, "something nobody said") == "something nobody said"
