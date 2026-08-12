@@ -36,12 +36,12 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from pydantic import BaseModel, Field
 
 from .graph import Graph
-from .home import VESTA_HOME
+from .home import home
 
 logger = logging.getLogger("vesta.domain")
 
 # Where a repository's ontology is kept.
-ONTOLOGIES = VESTA_HOME / "ontologies"
+ONTOLOGIES = home() / "ontologies"
 
 # How many module docstrings to ground the analysis in. Enough to describe the
 # project, few enough that the purpose stays about the project rather than

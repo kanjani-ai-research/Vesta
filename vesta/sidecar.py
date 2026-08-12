@@ -41,7 +41,7 @@ from .traverse import where as where_in
 from .learned import everything as learned_patterns
 from .patterns import survey
 from .propagate import from_files, is_test
-from .home import VESTA_HOME, repository_name
+from .home import home, repository_name
 
 logger = logging.getLogger("vesta.sidecar")
 
@@ -58,7 +58,7 @@ ENOUGH_HISTORY = 40
 # report what they saw. A measurement of "did the agent use the graph" cannot
 # rest on that: the tool knows when it was called, and a run nobody can audit
 # afterwards is not evidence of anything.
-USED = VESTA_HOME / "used.jsonl"
+USED = home() / "used.jsonl"
 
 
 def _record(tool: str, project: Optional[Path], took: float, size: int, **rest) -> None:

@@ -20,12 +20,10 @@ from vesta.tidy import forget, sweep
 @pytest.fixture
 def store(tmp_path: Path, monkeypatch) -> Path:
     """A Vesta home holding records for one live and one vanished repository."""
-    home = tmp_path / "home"
-    import vesta.home as vh
-    import vesta.tidy as tidy
+    from vesta.home import keep_in
 
-    monkeypatch.setattr(vh, "VESTA_HOME", home)
-    monkeypatch.setattr(tidy, "VESTA_HOME", home)
+    home = tmp_path / "home"
+    keep_in(home)
 
     live = tmp_path / "live"
     live.mkdir()

@@ -65,12 +65,12 @@ from pydantic import BaseModel, Field
 
 from .graph import Graph
 from .patterns import CLEAR, LIKELY, WORTH_A_LOOK, Found, Site, _lines, _sources
-from .home import VESTA_HOME
+from .home import home
 
 logger = logging.getLogger("vesta.learned")
 
 # Where derived patterns are kept, per repository.
-LEARNED = VESTA_HOME / "patterns"
+LEARNED = home() / "patterns"
 
 # A finder matching more than this share of a repository's files is describing
 # the language, not a defect. `except` appears everywhere; `except: pass` does

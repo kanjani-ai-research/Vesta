@@ -35,12 +35,12 @@ from typing import Dict, Optional
 
 from pydantic import BaseModel
 
-from .home import VESTA_HOME
+from .home import home
 
 logger = logging.getLogger("vesta.ready")
 
 # Where a preparation records that it is running or has finished.
-STATE = VESTA_HOME / "prepared"
+STATE = home() / "prepared"
 
 # How long a claimed preparation is believed. A process that died mid-build
 # leaves its mark behind, and without this every later session would decline to

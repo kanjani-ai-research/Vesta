@@ -222,11 +222,11 @@ def _note(prompt: str, project: str, size: int) -> None:
     """Record what was injected, so an experiment can account for it."""
     import time
 
-    from .home import VESTA_HOME
+    from .home import home
 
     try:
-        VESTA_HOME.mkdir(parents=True, exist_ok=True)
-        with (VESTA_HOME / "injected.jsonl").open("a", encoding="utf-8") as out:
+        home().mkdir(parents=True, exist_ok=True)
+        with (home() / "injected.jsonl").open("a", encoding="utf-8") as out:
             out.write(json.dumps({
                 "at": time.time(),
                 "project": str(project),

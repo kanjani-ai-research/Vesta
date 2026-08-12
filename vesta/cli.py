@@ -81,9 +81,9 @@ def _used(args: argparse.Namespace) -> int:
     import json
     import time
 
-    from .home import VESTA_HOME
+    from .home import home
 
-    log = VESTA_HOME / "used.jsonl"
+    log = home() / "used.jsonl"
     if not log.is_file():
         _say("The sidecar has not been called yet.")
         return 0

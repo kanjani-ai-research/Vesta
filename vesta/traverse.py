@@ -341,7 +341,7 @@ def keep(mapped: Map, repo: Path | str) -> Path:
     """Write a map, because reading a repository costs a call per definition."""
     import hashlib
 
-    from .home import VESTA_HOME
+    from .home import home
 
     from .home import kept_at
 
@@ -354,7 +354,7 @@ def recall(repo: Path | str) -> Optional[Map]:
     """The map already read for this repository, if there is one."""
     import hashlib
 
-    from .home import VESTA_HOME
+    from .home import home
 
     from .home import kept_at
 

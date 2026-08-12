@@ -26,13 +26,13 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from .graph import Graph, build
-from .home import VESTA_HOME
+from .home import home
 
 logger = logging.getLogger("vesta.held")
 
 # Where graphs live. Beside the corpora, because they are the same kind of
 # thing: something derived from a repository at a moment, worth keeping.
-GRAPH_DIR = VESTA_HOME / "graphs"
+GRAPH_DIR = home() / "graphs"
 
 # What counts as the repository's shape, for deciding whether a graph is stale.
 # Names and sizes and modification times, not contents: hashing every file costs

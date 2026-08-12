@@ -33,7 +33,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, Field
 
-from .home import VESTA_HOME
+from .home import home
 
 logger = logging.getLogger("vesta.tidy")
 
@@ -83,7 +83,7 @@ def _repositories() -> Dict[str, Path]:
     """
     found: Dict[str, Path] = {}
 
-    for path in (VESTA_HOME / "graphs").glob("*.db"):
+    for path in (home() / "graphs").glob("*.db"):
         try:
             import sqlite3
 
@@ -97,7 +97,7 @@ def _repositories() -> Dict[str, Path]:
         except Exception:  # noqa: BLE001 - an unreadable store is one to sweep
             continue
 
-    for path in (VESTA_HOME / "graphs").glob("*.json"):
+    for path in (home() / "graphs").glob("*.json"):
         if path.stem in found:
             continue
         try:
@@ -140,7 +140,7 @@ def sweep(dry: bool = False) -> Swept:
     alive = {key for key, root in known.items() if root.is_dir()}
 
     for kind in KINDS:
-        directory = VESTA_HOME / kind
+        directory = home() / kind
         if not directory.is_dir():
             continue
         for path in sorted(directory.iterdir()):
@@ -188,7 +188,7 @@ def forget(repo: Path | str, dry: bool = False) -> Swept:
     key = kept_at(root, "graphs").stem
 
     for kind in KINDS:
-        directory = VESTA_HOME / kind
+        directory = home() / kind
         if not directory.is_dir():
             continue
         for path in sorted(directory.iterdir()):

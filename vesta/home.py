@@ -24,6 +24,24 @@ from typing import Dict, Optional, Tuple
 # a project without belonging to it, and nobody wants them in a diff.
 VESTA_HOME = Path.home() / ".vesta"
 
+# Where things are actually written, which is `VESTA_HOME` unless somebody has
+# said otherwise. Read through a function rather than bound at import: twelve
+# modules imported the constant directly, so pointing the store somewhere else
+# — a test, a sandbox, a user who keeps their home read-only — reached none of
+# them, and a test run wrote a record for every temporary repository it made.
+_ELSEWHERE: Optional[Path] = None
+
+
+def home() -> Path:
+    """Where Vesta keeps what it derives."""
+    return _ELSEWHERE or VESTA_HOME
+
+
+def keep_in(where: Optional[Path]) -> None:
+    """Put everything somewhere else, or back where it belongs."""
+    global _ELSEWHERE
+    _ELSEWHERE = Path(where).expanduser().resolve() if where else None
+
 # Who derived a body of knowledge, carried in its name. A knowledge base this
 # machine built and one obtained from a publisher are different evidence about
 # the same subject, and a reader must be able to tell which answered.
@@ -93,7 +111,7 @@ def kept_at(repo: Path | str, kind: str) -> Path:
     a reader finding one can find the rest.
     """
     root = Path(repo).expanduser().resolve()
-    directory = VESTA_HOME / kind
+    directory = home() / kind
     directory.mkdir(parents=True, exist_ok=True)
     name = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:12]
     return directory / f"{root.name}-{name}.json"

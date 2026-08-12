@@ -38,12 +38,12 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from pydantic import BaseModel, Field
 
-from .home import VESTA_HOME
+from .home import home
 
 logger = logging.getLogger("vesta.rules")
 
 # Where derived rules are kept, per repository.
-RULES = VESTA_HOME / "rules"
+RULES = home() / "rules"
 
 # How a user states a constraint rather than asks for something. Deliberately
 # generous: a missed correction is a rule nobody gets, and a false one is

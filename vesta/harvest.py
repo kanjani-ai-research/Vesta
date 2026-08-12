@@ -37,12 +37,12 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from pydantic import BaseModel, Field
 
 from .graph import Graph
-from .home import VESTA_HOME
+from .home import home
 
 logger = logging.getLogger("vesta.harvest")
 
 # Where harvested understanding is kept, beside the graphs it attaches to.
-NOTES = VESTA_HOME / "notes"
+NOTES = home() / "notes"
 
 # Where the host keeps its sessions. Read-only, and treated as a format that
 # may change: anything unparseable is skipped rather than fatal.
