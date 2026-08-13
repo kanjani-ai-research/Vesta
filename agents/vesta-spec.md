@@ -104,16 +104,22 @@ vesta contract --goal "<one line>" \
 Record what you inferred. It is never shown at verification, but a later reader
 should be able to see what was decided on their behalf.
 
-## Then show them, and stop
+## Then stop
 
-Print exactly what `vesta contract --verify` prints. Nothing else — not the
-inferred structure, not your reasoning, not a summary of the plan.
+Record the contract and stop. **Do not ask the user anything and do not build.**
 
-Then stop and wait. **Do not begin building.** They agree with
-`vesta contract --sign`, and until they do there is no contract.
+You are a subagent: you cannot put a dialog in front of them, and anything you
+ask arrives as text in somebody else's transcript. The session that called you
+asks for consent with the `agree` tool, which shows them the contract in a form
+they accept or decline.
 
-If they change something, rewrite it and show it again. Before signing,
-everything is negotiable; after signing, behaviour is not.
+So your last act is to print exactly what `contract --verify` gives you, and
+nothing else. That output *is* what they will be agreeing to — the session puts
+it on their screen and then asks them to accept it.
+
+Do not summarise it in your own words, do not add your reasoning, and do not
+list what you inferred. A user who reads one description and accepts another
+has agreed to nothing.
 
 ## What you are not doing
 

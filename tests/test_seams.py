@@ -90,7 +90,7 @@ def test_asking_for_something_to_be_built_reaches_the_agent(fresh):
         },
     )
     said = _said(answered)
-    assert "vesta-spec" in said
+    assert "$V contract" in said
     assert "do not start building" in said.lower()
 
 
@@ -277,7 +277,7 @@ def test_a_feature_request_is_not_read_as_a_bug_report(fresh):
             },
         )
     )
-    assert "vesta-spec" in said
+    assert "$V contract" in said
 
 
 def test_an_actual_bug_report_still_asks_for_no_contract(fresh):
@@ -474,8 +474,14 @@ def test_a_build_request_demands_no_contract_as_a_companion(fresh):
             {"prompt": "build me a script that renames files in bulk", "cwd": str(fresh)},
         )
     )
-    assert "vesta-spec" not in said, f"companion mode demanded a contract: {said[:120]}"
-    assert "/vesta:agree" not in said
+    # Being *offered* a choice is not being handed a specification. What must
+    # never happen is a plain session told to run the spec agent outright.
+    # A one-line script is not a project: automation agrees a list of
+    # behaviours and runs until each is tested, which is absurd for one file.
+    # What must never happen is a plain session handed a specification.
+    assert "$V contract" not in said, (
+        f"companion mode demanded a contract: {said[:120]}"
+    )
 
 
 def test_a_change_is_not_adjudicated_as_a_companion(fresh):
@@ -520,10 +526,18 @@ def test_the_contract_flow_is_reached_once_driving_is_on(fresh):
     said = _said(
         _hook(
             "inject.sh",
-            {"prompt": "build me a script that renames files in bulk", "cwd": str(fresh)},
+            {
+                # A whole thing, not one script: automation is offered where
+                # somebody described several things it must do.
+                "prompt": (
+                    "build me an expense tracker where I can record an "
+                    "expense, see what I spent this month, and export to CSV"
+                ),
+                "cwd": str(fresh),
+            },
         )
     )
-    assert "vesta-spec" in said
+    assert "$V contract" in said
 
 
 def test_decision_management_never_fires_as_a_companion(fresh):
@@ -599,7 +613,8 @@ def test_a_fresh_project_asks_how_rather_than_assuming(fresh):
             },
         )
     )
-    assert "`how` tool" in said
+    assert "AskUserQuestion" in said
+    assert "Automated" in said and "Interactive" in said
     assert "do not decide for them" in said.lower()
 
 
@@ -621,18 +636,168 @@ def test_once_driving_the_question_is_not_asked_again(fresh):
             },
         )
     )
-    assert "vesta-spec" in said
-    assert "`how` tool" not in said
+    assert "$V contract" in said
+    assert "AskUserQuestion" not in said
 
 
-def test_the_how_tool_exists_and_takes_nothing(fresh):
-    """It asks; it is not told."""
+def test_the_choice_is_asked_through_the_hosts_own_dialog():
+    """Not through MCP elicitation.
+
+    Elicitation is a form to fill in, so the client always draws Accept and
+    Decline beneath it whatever the schema says. That is the chrome of a
+    consent prompt, and this is not one — the three answers *are* the actions.
+    """
     import asyncio
+    import inspect
     import warnings
 
     warnings.filterwarnings("ignore")
-    from vesta.sidecar import build_server
+    from vesta import inject, sidecar
 
-    tools = {t.name: t for t in asyncio.run(build_server().list_tools())}
-    assert "how" in tools
-    assert not (tools["how"].inputSchema or {}).get("properties")
+    tools = {t.name for t in asyncio.run(sidecar.build_server().list_tools())}
+    assert "how" not in tools, "the elicitation path is back"
+
+    source = inspect.getsource(inject)
+    assert "AskUserQuestion" in source
+    for option in ("Automated", "Interactive"):
+        assert option in source, f"{option} is not offered"
+    # Two, not three: the dialog already offers its own ways out, and an
+    # option that duplicates them is clutter.
+    assert "exactly these two options" in source
+
+
+def test_consent_uses_the_form_and_choosing_does_not():
+    """Two moments, two mechanisms.
+
+    Choosing *how* to build is a question whose answers are actions, so it
+    belongs in the host's question dialog with no consent chrome. Agreeing to
+    a specification *is* consent — being shown what will be built and saying
+    yes — which is exactly what an elicitation form is for.
+    """
+    import asyncio
+    import inspect
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    from vesta import inject, sidecar
+
+    tools = {t.name for t in asyncio.run(sidecar.build_server().list_tools())}
+    assert "agree" in tools
+
+    # The choice is asked without a form: no elicitation *call* on that path.
+    assert "AskUserQuestion" in inspect.getsource(inject)
+    assert "elicit_form(" not in inspect.getsource(inject)
+
+    # Consent is asked with one.
+    source = inspect.getsource(sidecar)
+    assert "elicit_form" in source
+
+
+def test_the_spec_agent_asks_nobody_anything():
+    """A subagent cannot put a dialog in front of the user, so anything it
+    asks arrives as text in somebody else's transcript — and a live run showed
+    exactly that: the spec agent fell back to a question dialog because the
+    consent tool was unreachable from its sandbox."""
+    said = " ".join((HERE / "agents" / "vesta-spec.md").read_text().split()).lower()
+    assert "do not ask the user anything and do not build" in said
+    assert "you are a subagent" in said
+
+
+def test_the_session_asks_for_consent_not_the_subagent(fresh):
+    """Tested on what the hook actually says, not on its source. A phrase
+    split across string literals is still one phrase to the reader, and a test
+    that greps source asserts about formatting rather than behaviour."""
+    from vesta import driving
+
+    driving.start(fresh)
+    said = _said(
+        _hook(
+            "inject.sh",
+            {
+                "prompt": (
+                    "Build an expense tracker I can use from the terminal. I "
+                    "want to record an expense with an amount, a category and "
+                    "a note, and see what I have spent this month broken down "
+                    "by category."
+                ),
+                "cwd": str(fresh),
+            },
+        )
+    )
+    assert "call `agree`" in said
+    assert "yourself, in this session" in said
+
+
+def test_nothing_asks_the_user_to_turn_driving_on_by_hand():
+    """A live run showed `/vesta:drive on` printing status instead of starting,
+    and a permission prompt for it. Accepting the contract starts the loop, so
+    there is no separate step to get wrong."""
+    import inspect
+
+    from vesta import inject, sidecar
+
+    assert "/vesta:drive on`, " not in inspect.getsource(inject)
+    source = inspect.getsource(sidecar)
+    at_sign = source.index("agreed_with.sign")
+    assert "driving.start" in source[at_sign : at_sign + 400]
+
+
+def test_the_instructions_name_a_command_the_agent_can_actually_run(fresh):
+    """Two live failures in a row came from this.
+
+    First the instructions said `vesta contract …` — and `vesta` is not on
+    PATH, because a plugin is installed by the framework rather than by pip.
+    Then they said `${CLAUDE_PLUGIN_ROOT}/bin/vesta-run` — and that variable is
+    set when the framework runs a hook or a command, but *not* in the shell an
+    agent gets for its own Bash calls, so it went looking for the plugin by
+    hand.
+
+    The hook knows where it is running from. It says the path outright.
+    """
+    from vesta import driving
+
+    driving.start(fresh)
+    said = _said(
+        _hook(
+            "inject.sh",
+            {
+                "prompt": (
+                    "Build an expense tracker. I want to record an expense "
+                    "with an amount and a category, see what I spent this "
+                    "month, and export to CSV."
+                ),
+                "cwd": str(fresh),
+            },
+        )
+    )
+
+    assert "$V contract" in said
+    assert "${CLAUDE_PLUGIN_ROOT}" not in said, "names a variable the agent lacks"
+
+    line = next(l for l in said.splitlines() if l.strip().startswith("V="))
+    launcher = Path(line.split("=", 1)[1].strip())
+    assert launcher.is_file(), f"{launcher} does not exist"
+    assert launcher.stat().st_mode & 0o111, f"{launcher} is not executable"
+
+
+def test_nothing_tells_the_agent_to_spawn_a_subagent_for_the_spec(fresh):
+    """A subagent shows the user nothing until it returns — a live run waited
+    3m26s in silence and then met the whole spec at once."""
+    from vesta import driving
+
+    driving.start(fresh)
+    said = _said(
+        _hook(
+            "inject.sh",
+            {
+                "prompt": (
+                    "Build an expense tracker. I want to record an expense "
+                    "with an amount and a category, see what I spent this "
+                    "month, and export to CSV."
+                ),
+                "cwd": str(fresh),
+            },
+        )
+    )
+    assert "subagent" not in said.lower().replace("do not spawn a subagent", "")
+    assert "yourself, in this session" in said

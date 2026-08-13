@@ -51,28 +51,22 @@ def _answer(payload: dict) -> int:
     where = payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "."
     root = Path(where).expanduser().resolve()
 
-    here = driving.state(root)
+    # Asked as this session, so consent that belonged to another one does not
+    # carry over.
+    here = driving.state(root, payload.get("session_id", ""))
     if not here.on:
         # It stopped on its own, and this is the first stop since. Say why
         # once: a loop that gives up silently looks exactly like one that
         # finished, and those are opposite outcomes.
-        if here.stopped and here.stopped != "said":
+        if here.stopped and not here.told:
             print(json.dumps({"systemMessage": f"Vesta: {here.stopped}"}))
-            here.stopped = "said"
+            here.told = True
             driving._keep(here, root)
         return 0
 
     # Another session's loop. The state is per project and this hook fires in
     # every session open on it, so a loop somebody else started must not trap
     # this one. Learned from the reference implementation, which had to fix it.
-    started_in = getattr(here, "session", "")
-    asking = payload.get("session_id", "")
-    # Only decline when the host actually named a different session. A payload
-    # with no session at all is not somebody else's — refusing then would make
-    # the loop dead in any client that does not send one.
-    if started_in and asking and started_in != asking:
-        return 0
-
     verdict = driving.iterate(root)
     if not verdict.keep_going:
         # Done, stuck, or spent. Say which, and let the session end.

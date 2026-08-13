@@ -479,7 +479,10 @@ def _contract(args: argparse.Namespace) -> int:
         agreed_with.keep(agreed, where)
         _say(agreed.to_verify())
         _say("")
-        _say("Nothing is agreed until `vesta contract --sign`.")
+        # The tool, not a command: it shows them the behaviours and asks. A
+        # command that signs without asking is how somebody agrees to
+        # something they never saw.
+        _say("Nothing is agreed yet. Call the `agree` tool to put this to them.")
         return 0
 
     agreed = agreed_with.recall(where)
@@ -504,6 +507,12 @@ def _drive(args: argparse.Namespace) -> int:
 
     if args.off:
         _say(driving.stop(where).describe())
+        return 0
+
+    if args.declined:
+        driving.declined(where)
+        _say("Noted — building with you rather than automatically.")
+        _say("You will not be asked again here. `vesta drive --on` any time.")
         return 0
 
     if args.on:
@@ -685,6 +694,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     drive.add_argument("--root", default=".")
     drive.add_argument("--on", action="store_true", help="turn driving on here")
     drive.add_argument("--off", action="store_true", help="turn it off")
+    drive.add_argument(
+        "--declined", action="store_true", help="they would rather work interactively"
+    )
     drive.add_argument("--step", action="store_true", help="record one iteration")
     drive.add_argument("--show", type=int, default=6)
     drive.set_defaults(run=_drive)

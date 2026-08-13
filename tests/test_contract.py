@@ -10,6 +10,7 @@ these tests are about that holding.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -242,12 +243,15 @@ def test_it_gives_examples_of_what_is_not_a_behaviour():
 
 def test_it_forbids_building_before_agreement():
     said = _flat(SPEC.read_text(encoding="utf-8"))
-    assert "do not begin building" in said
+    assert "do not ask the user anything and do not build" in said
 
 
 def test_it_shows_only_what_verification_shows():
+    """What it prints is what they agree to, verbatim. A user who reads one
+    description and accepts another has agreed to nothing."""
     said = _flat(SPEC.read_text(encoding="utf-8"))
-    assert "not the inferred structure" in said
+    assert "do not summarise it in your own words" in said
+    assert "do not list what you inferred" in said
 
 
 def test_the_standard_covers_more_than_one_kind_of_project():
@@ -364,8 +368,8 @@ def test_a_brief_with_nothing_agreed_reaches_the_agent():
         "between runs.",
         str(empty),
     )
-    assert "vesta-spec" in said
-    assert "do not start building until they have agreed" in said.lower()
+    assert "$V contract" in said
+    assert "do not start building until they have accepted" in said.lower()
 
 
 def test_ordinary_work_does_not_demand_a_contract(tmp_path):
@@ -387,3 +391,70 @@ def test_nothing_is_said_once_something_is_agreed(tmp_path):
 
     keep(Contract(goal="x", behaviours=[Behaviour(does="a user can y")]), tmp_path)
     assert _something_to_build("build me a todo app", str(tmp_path)) == ""
+
+
+def test_several_behaviours_may_share_one_implementation(agreed):
+    """Common and correct: recording an expense is also where the over-budget
+    warning happens. Both behaviours point at the same function."""
+    sign(agreed)
+    met(agreed, "a user can file a task", nodes=["e.py:cmd_add"], tests=["t.py:a"])
+    met(agreed, "a user can tag a task", nodes=["e.py:cmd_add"], tests=["t.py:b"])
+
+    kept = recall(agreed)
+    assert [b.nodes for b in kept.behaviours] == [["e.py:cmd_add"], ["e.py:cmd_add"]]
+    assert kept.complete
+
+
+def test_recording_replaces_rather_than_accumulates(agreed):
+    met(agreed, "a user can file a task", nodes=["one"], tests=["t"])
+    met(agreed, "a user can file a task", nodes=["two"], tests=["t"])
+    assert recall(agreed).behaviours[0].nodes == ["two"]
+
+
+def test_a_batched_call_is_sorted_out_rather_than_refused():
+    """`--node` accumulates, so an agent recording several behaviours in one
+    invocation hands the last of them every node the others had. Found in a
+    live run, where the final behaviour claimed all five.
+
+    The information is not wrong, only misfiled — each name still says what
+    implements something, and which something is already recorded. Refusing
+    would throw away work an agent did and ask it to guess a different shape.
+    """
+    import tempfile
+
+    where = Path(tempfile.mkdtemp())
+    keep(
+        Contract(goal="x", behaviours=[Behaviour(does=n) for n in "abcde"]), where
+    )
+    sign(where)
+    for name in "abcd":
+        met(where, name, nodes=[f"f.py:{name}"], tests=[f"t.py:{name}"])
+
+    met(
+        where,
+        "e",
+        nodes=["f.py:a", "f.py:b", "f.py:c", "f.py:d", "f.py:e"],
+        tests=["t.py:e"],
+    )
+
+    kept = recall(where)
+    assert [b.nodes for b in kept.behaviours] == [
+        ["f.py:a"], ["f.py:b"], ["f.py:c"], ["f.py:d"], ["f.py:e"]
+    ]
+    assert kept.complete
+
+
+def test_one_behaviour_may_span_several_definitions():
+    """Sorting out a batch must not break the ordinary case."""
+    import tempfile
+
+    where = Path(tempfile.mkdtemp())
+    keep(
+        Contract(goal="x", behaviours=[Behaviour(does="a"), Behaviour(does="b")]),
+        where,
+    )
+    sign(where)
+    met(where, "a", nodes=["f.py:parse", "f.py:store", "f.py:report"], tests=["t.py:a"])
+    assert recall(where).behaviours[0].nodes == [
+        "f.py:parse", "f.py:store", "f.py:report"
+    ]

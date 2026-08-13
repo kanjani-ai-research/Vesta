@@ -244,6 +244,31 @@ def sign(repo: Path | str, at: Optional[float] = None) -> Optional[Contract]:
     return agreed
 
 
+def _sorted_out(
+    given: Optional[List[str]], agreed: "Contract", behaviour: "Behaviour"
+) -> List[str]:
+    """The names in this call that belong to this behaviour.
+
+    Everything given, unless the call swept up names another behaviour already
+    recorded — in which case the ones it did not sweep up are what it meant.
+    A single name is always taken at face value: two behaviours sharing one
+    implementation is ordinary, and only a batch can be misfiled.
+    """
+    if not given or len(given) < 2:
+        return list(given or [])
+
+    elsewhere = {
+        name
+        for other in agreed.behaviours
+        if other is not behaviour
+        for name in (other.nodes + other.tests)
+    }
+    mine = [name for name in given if name not in elsewhere]
+    # Only sorted out when something remains. A behaviour whose every name is
+    # shared is sharing them, not batching.
+    return mine or list(given)
+
+
 def met(repo: Path | str, does: str, nodes: Optional[List[str]] = None,
         tests: Optional[List[str]] = None, at: Optional[float] = None) -> Optional[Contract]:
     """Record that a behaviour is now implemented and reached by a test."""
@@ -255,8 +280,22 @@ def met(repo: Path | str, does: str, nodes: Optional[List[str]] = None,
     for behaviour in agreed.behaviours:
         if " ".join(behaviour.does.lower().split()) != wanted:
             continue
-        behaviour.nodes = nodes or behaviour.nodes
-        behaviour.tests = tests or behaviour.tests
+
+        # What was given, minus what plainly belongs to another behaviour.
+        #
+        # `--node` accumulates, so an agent recording several behaviours in
+        # one invocation hands the last of them every node the others had. The
+        # information is not wrong, only misfiled: each name still says what
+        # implements something, and which something is already recorded. So it
+        # is sorted rather than refused — refusing would throw away work an
+        # agent did, and asking it to try again in a different shape is asking
+        # it to guess.
+        #
+        # A name genuinely shared between behaviours stays shared: only names
+        # *another* behaviour claimed and this call swept up are dropped, and
+        # only when there is something left afterwards.
+        behaviour.nodes = _sorted_out(nodes, agreed, behaviour) or behaviour.nodes
+        behaviour.tests = _sorted_out(tests, agreed, behaviour) or behaviour.tests
         # Implemented *and* reached by a test. Either alone is a way for a loop
         # to finish over nothing: a passing test with no implementation, or an
         # implementation nothing checks.

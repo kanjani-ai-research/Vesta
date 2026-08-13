@@ -287,7 +287,12 @@ def test_another_sessions_loop_does_not_trap_this_one(unfinished):
     """The state is per project and this hook fires in every session open on
     it. The reference implementation had to fix exactly this."""
     driving.start(unfinished, session="the-one-that-asked")
-    assert _hook({"cwd": str(unfinished), "session_id": "somebody-else"}) == {}
+
+    # Another session is not held: it may say why it is not driving, but it
+    # must never be blocked from ending.
+    somebody_else = _hook({"cwd": str(unfinished), "session_id": "somebody-else"})
+    assert "decision" not in somebody_else
+
     assert _hook({"cwd": str(unfinished), "session_id": "the-one-that-asked"}).get(
         "decision"
     ) == "block"
@@ -338,3 +343,210 @@ def test_the_hook_script_never_leaks_an_error(tmp_path):
     )
     assert done.returncode == 0
     assert done.stderr.strip() == ""
+
+
+def test_the_reason_it_stopped_is_not_overwritten_by_saying_it(tmp_path):
+    """Whether a reason has been announced is its own fact.
+
+    It was once a sentinel written into the reason itself, so after the hook
+    said it once the state read "not being driven — said" — a marker leaking
+    into what the user is shown, and the real reason lost.
+    """
+    driving.start(tmp_path)
+    driving.stop(tmp_path, "done")
+
+    here = driving.state(tmp_path)
+    assert here.stopped == "done"
+    assert not here.told
+
+    here.told = True
+    driving._keep(here, tmp_path)
+
+    after = driving.state(tmp_path)
+    assert after.stopped == "done", "the reason was overwritten"
+    assert "said" not in after.describe()
+    assert "done" in after.describe()
+
+
+def test_restarting_lets_the_next_reason_be_said(tmp_path):
+    driving.start(tmp_path)
+    driving.stop(tmp_path, "done")
+    here = driving.state(tmp_path)
+    here.told = True
+    driving._keep(here, tmp_path)
+
+    driving.start(tmp_path)
+    assert not driving.state(tmp_path).told
+    assert driving.state(tmp_path).stopped == ""
+
+
+# ── Automation lasts exactly as long as the consent that granted it ─────────
+#
+# A user must not be stuck in automated mode. It is entered by a decision made
+# once, for one piece of work, and it ends when that work ends — not when
+# somebody remembers to turn it off.
+
+
+def test_a_project_opened_again_is_not_being_driven(tmp_path):
+    """Loading a prior project must never resume automation. Nobody agreed to
+    that: they agreed to build one thing, once."""
+    driving.start(tmp_path, session="the-one-that-agreed")
+    assert driving.state(tmp_path, "the-one-that-agreed").on
+
+    later = driving.state(tmp_path, "a-session-a-week-later")
+    assert not later.on
+    assert "session that agreed" in later.describe()
+
+
+def test_finishing_ends_automation(project):
+    driving.start(project, session="s1")
+    verdict = driving.iterate(project)
+    assert verdict.done
+    assert not driving.state(project, "s1").on
+    assert driving.state(project, "s1").stopped == "done"
+
+
+def test_stopping_by_hand_ends_automation(tmp_path):
+    driving.start(tmp_path, session="s1")
+    driving.stop(tmp_path, "asked to stop")
+    assert not driving.state(tmp_path, "s1").on
+
+
+def test_being_stuck_ends_automation(tmp_path):
+    """Escaping is not only something a user does. A loop that cannot move
+    releases the session rather than holding it."""
+    (tmp_path / "app.py").write_text(
+        '"""D."""\n\n\ndef w():\n    """I."""\n    return 1\n', encoding="utf-8"
+    )
+    keep(Contract(goal="x", behaviours=[Behaviour(does="a user can do it")]), tmp_path)
+    sign(tmp_path)
+    driving.start(tmp_path, session="s1")
+
+    for _ in range(driving.STUCK_AFTER + 1):
+        driving.iterate(tmp_path)
+
+    assert not driving.state(tmp_path, "s1").on
+
+
+def test_entering_again_takes_a_fresh_decision(tmp_path):
+    """Having finished once does not leave the door open."""
+    driving.start(tmp_path, session="s1")
+    driving.stop(tmp_path, "done")
+    assert not driving.state(tmp_path, "s1").on
+
+    driving.start(tmp_path, session="s1")
+    assert driving.state(tmp_path, "s1").on
+
+
+def test_what_happened_survives_even_though_the_permission_does_not(tmp_path):
+    """The record is worth having afterwards; the permission is not."""
+    driving.start(tmp_path, session="s1")
+    driving.iterate(tmp_path)
+    driving.stop(tmp_path, "done")
+
+    later = driving.state(tmp_path, "s2")
+    assert not later.on
+    assert later.iterations >= 1
+
+
+# ── Automation lasts exactly as long as the consent that granted it ─────────
+
+
+def test_a_project_opened_again_is_not_being_driven(tmp_path):
+    """Loading a prior project must never resume automation. Nobody agreed to
+    that: they agreed to build one thing, once."""
+    driving.start(tmp_path, session="the-one-that-agreed")
+    assert driving.state(tmp_path, "the-one-that-agreed").on
+
+    later = driving.state(tmp_path, "a-session-a-week-later")
+    assert not later.on
+    assert "session that agreed" in later.describe()
+
+
+def test_finishing_ends_automation(project):
+    driving.start(project, session="s1")
+    assert driving.iterate(project).done
+    assert not driving.state(project, "s1").on
+
+
+def test_stopping_by_hand_ends_automation(tmp_path):
+    driving.start(tmp_path, session="s1")
+    driving.stop(tmp_path, "asked to stop")
+    assert not driving.state(tmp_path, "s1").on
+
+
+def test_being_stuck_ends_automation(tmp_path):
+    """Escaping is not only something a user does. A loop that cannot move
+    releases the session rather than holding it."""
+    (tmp_path / "app.py").write_text(
+        '"""D."""\n\n\ndef w():\n    """I."""\n    return 1\n', encoding="utf-8"
+    )
+    keep(Contract(goal="x", behaviours=[Behaviour(does="a user can do it")]), tmp_path)
+    sign(tmp_path)
+    driving.start(tmp_path, session="s1")
+    for _ in range(driving.STUCK_AFTER + 1):
+        driving.iterate(tmp_path)
+    assert not driving.state(tmp_path, "s1").on
+
+
+def test_entering_again_takes_a_fresh_decision(tmp_path):
+    driving.start(tmp_path, session="s1")
+    driving.stop(tmp_path, "done")
+    assert not driving.state(tmp_path, "s1").on
+    driving.start(tmp_path, session="s1")
+    assert driving.state(tmp_path, "s1").on
+
+
+def test_what_happened_survives_though_the_permission_does_not(tmp_path):
+    driving.start(tmp_path, session="s1")
+    driving.iterate(tmp_path)
+    driving.stop(tmp_path, "done")
+    later = driving.state(tmp_path, "s2")
+    assert not later.on
+    assert later.iterations >= 1
+
+
+# ── Asked once ─────────────────────────────────────────────────────────────
+
+
+def test_choosing_interactive_is_not_asked_again(tmp_path):
+    """A question repeated after an answer is not a question, it is nagging.
+    The answer does not change because they asked for a second module."""
+    from vesta.inject import _something_to_build
+
+    brief = (
+        "Build an expense tracker. I want to record an expense with an amount "
+        "and a category, see what I spent this month, and export to CSV."
+    )
+    assert _something_to_build(brief, str(tmp_path))
+
+    driving.declined(tmp_path)
+    assert not _something_to_build(brief, str(tmp_path))
+
+
+def test_declining_does_not_stop_them_asking_later(tmp_path):
+    driving.declined(tmp_path)
+    driving.start(tmp_path, session="s1")
+    assert driving.state(tmp_path, "s1").on
+
+
+def test_the_question_only_comes_for_a_whole_implementation(tmp_path):
+    """Automation agrees a list of behaviours and runs until each is built and
+    tested. That is worth doing for something with several parts and absurd
+    for one function."""
+    from vesta.inject import _something_to_build
+
+    for one_piece in (
+        "write a function that parses a date string",
+        "add a helper to format currency",
+        "implement the retry logic",
+        "build me a script to rename files",
+    ):
+        assert not _something_to_build(one_piece, str(tmp_path)), one_piece
+
+    for a_project in (
+        "make a todo app where I can add tasks, list them, and mark them done",
+        "create a REST API for orders. it should authenticate requests, "
+        "persist to a database, and expose a migration path",
+    ):
+        assert _something_to_build(a_project, str(tmp_path)), a_project

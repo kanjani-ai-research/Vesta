@@ -1301,105 +1301,95 @@ def build_server():
         return answer or "No rule you have set is in doubt for these files."
 
     @server.tool()
-    async def how(context: Context = None) -> str:
-        """Ask the user how they want a project built, and record it.
+    async def agree(context: Context = None) -> str:
+        """Show the user what will be built and ask them to agree to it.
 
-        Two ways to work — interactive or automated — and which one somebody
-        wants is not inferable from what they said. "Build me an expense
-        tracker" is the most ordinary request there is: most of the time it
-        means build it with me, and sometimes it means run to completion.
-        Guessing either way is wrong often enough to be useless, so this
-        asks — once, when it matters, in a dialog they answer with one
-        keystroke.
+        The one moment consent chrome is the right chrome. Choosing *how* to
+        build is a question whose answers are actions, and belongs in the
+        host's own question dialog. Agreeing to a specification is consent:
+        here is what will be built, accept it or do not.
 
-        Call this when the user asks for a whole project to be built and
-        nothing has been agreed for it yet. Do not call it for ordinary work
-        in a project that already exists.
+        Call this once the `vesta-spec` subagent has recorded a contract, and
+        before writing any code. Nothing is fixed until they accept.
         """
+        import time as _t
+
+        from . import contract as agreed_with
+
         here = await project_of(context)
         if here is None:
             return "Could not tell which project this is."
 
-        # The schema the host renders: one question, two options, no typing.
-        # Sent as a raw JSON schema through `elicit_form` rather than through
-        # `Context.elicit`, which the SDK deprecated — a live session came back
-        # "could not ask" because the deprecated request is refused, and a
-        # silent fallback made that indistinguishable from a user's choice.
-        # The dialog shows the message *and* the field, so the field must not
-        # repeat the question — a live run showed "How should vesta be built?"
-        # twice with "not set" beside it, which says nothing about there being
-        # a choice at all. The field names the axis; the options carry the
-        # meaning.
-        wanted = {
-            "type": "object",
-            "properties": {
-                "mode": {
-                    "type": "string",
-                    "title": "Mode",
-                    "description": (
-                        "Interactive: I build it and you steer as we go. "
-                        "Automated: we agree the behaviours first, then I run "
-                        "until every one is built, tested and passing without "
-                        "stopping to ask."
-                    ),
-                    "enum": ["interactive", "automated"],
-                    "enumNames": [
-                        "Interactive — build it with me, step by step",
-                        "Automated — agree the behaviours, then run to completion",
-                    ],
-                    "default": "interactive",
-                }
-            },
-            "required": ["mode"],
-        }
-
-        chosen = ""
-        asking = (
-            f"Build {Path(here).name} interactively, or run automated to "
-            "completion?"
-        )
-        why = ""
-
-        try:
-            answer = await context.session.elicit_form(
-                message=asking, requestedSchema=wanted
-            )
-            if getattr(answer, "action", "") == "accept":
-                chosen = (answer.content or {}).get("mode", "")
-        except Exception as exc:  # noqa: BLE001 - a client need not support this
-            why = f"{type(exc).__name__}: {exc}"
-            logger.info("could not ask with elicit_form: %s", exc)
-
-        if not chosen and not why:
-            # Asked, and they closed it. Not an error and not a choice.
-            return (
-                "They did not choose. Building interactively; "
-                "`/vesta:drive on` switches to automated at any point."
-            )
-
-        if not chosen:
-            _record("how", here, 0.0, 0, asked=False, why=why[:200])
-            return (
-                f"Could not show a dialog here ({why[:110]}).\n\n"
-                "Ask them in one line instead: interactive, or automated? "
-                "Interactive is the ordinary way. Automated agrees the "
-                "behaviours first and then runs to completion without "
-                "stopping to ask. Carry on with whichever they choose; "
-                "`/vesta:drive on` is automated."
-            )
-
         import anyio
 
-        if chosen.startswith("auto"):
-            from . import driving
-
-            await anyio.to_thread.run_sync(driving.start, here)
+        started = _t.monotonic()
+        agreed = await anyio.to_thread.run_sync(agreed_with.recall, here)
+        if agreed is None:
             return (
-                "Automated. Run the `vesta-spec` subagent now to turn what "
-                "they asked for into a short list of behaviours, show them, "
-                "and wait for `/vesta:agree` before writing any code."
+                "Nothing has been recorded to agree to. Run the `vesta-spec` "
+                "subagent first — it turns what they asked for into the list "
+                "of behaviours this would put in front of them."
             )
-        return "Interactive. Carry on and build it with them."
+        if agreed.signed:
+            return f"Already agreed. {agreed.describe()}."
+
+        # Their own words, and nothing else. What was inferred is not shown:
+        # the point of inferring is not to spend their attention on it.
+        # Nothing to fill in. Accept and Decline are the whole answer, and a
+        # field on top of them is a second decision about the same thing —
+        # somebody can accept the form while leaving a box unticked, which
+        # means nothing.
+        wanted = {"type": "object", "properties": {}}
+
+        try:
+            # The behaviours are already on their screen: the session printed
+            # them when the contract was recorded. Repeating the whole list
+            # inside the form makes a wall of text nobody reads twice, so this
+            # points at what is above rather than restating it.
+            answer = await context.session.elicit_form(
+                message=(
+                    f"Build {Path(here).name} as described above?\n\n"
+                    "By accepting you agree those behaviours are what you "
+                    "want built. They are fixed from here: a later change to "
+                    "what the system does is a different project, not a "
+                    "revision. Everything else — structure, libraries, how it "
+                    "is put together — stays open."
+                ),
+                requestedSchema=wanted,
+            )
+            # Accepting the form is the agreement. There is nothing to read
+            # out of it.
+            said_yes = getattr(answer, "action", "") == "accept"
+        except Exception as exc:  # noqa: BLE001 - a client need not support this
+            logger.info("could not ask for agreement: %s", exc)
+            _record("agree", here, _t.monotonic() - started, 0, asked=False)
+            return (
+                f"Could not show the form ({type(exc).__name__}).\n\n"
+                "Show them what `contract --verify` prints and ask whether to "
+                "build it. If they say yes, run "
+                "`vesta contract --sign` and then `vesta drive --on`."
+            )
+
+        _record("agree", here, _t.monotonic() - started, 0, agreed=bool(said_yes))
+
+        if not said_yes:
+            return (
+                "They have not agreed. Do not build. Ask what should be "
+                "different, have the `vesta-spec` subagent rewrite it, and "
+                "put it to them again — nothing is fixed until they accept."
+            )
+
+        await anyio.to_thread.run_sync(agreed_with.sign, here)
+        from . import driving
+
+        await anyio.to_thread.run_sync(driving.start, here)
+        return (
+            "Agreed, and building. Behaviour is fixed from here: a request "
+            "that would change what the system does is a different project.\n\n"
+            "The session will not end while anything is outstanding — a "
+            "behaviour unbuilt or untested, a failing test, a defect. Those "
+            "are counted, not judged. Work through them."
+        )
 
     @server.tool()
     async def declare(rule: str, context: Context = None) -> str:

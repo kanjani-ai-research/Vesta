@@ -327,13 +327,54 @@ def _driving(project: str) -> bool:
     what its user decides; it does not stop somebody who asked for a script and
     make them agree to a specification first.
     """
+    import os
+
     try:
         from . import driving
 
-        return driving.state(project).on
+        # As this session. Consent given in another one, or in this project
+        # last week, is not consent now.
+        return driving.state(
+            project, os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+        ).on
     except Exception as exc:  # noqa: BLE001 - never break a prompt
         logger.info("could not read the driving state: %s", exc)
         return False
+
+
+# What separates one piece of work from a project: a list of things it must do.
+# Counted crudely on purpose — the alternative is judging scope, which is a
+# model's work, and the cost of being wrong here is one question either way.
+_AND_THEN = re.compile(
+    r"(?:^|[.;\n])\s*(?:i (?:want|need)|it should|and|also|then|plus)\b|"
+    r"\b(?:and|then|also|plus)\s+(?:i (?:want|need)|be able to|see|set|"
+    r"export|record|list|show|track|send|store|search|filter|delete|update)\b|"
+    r"[,;]\s*(?:and\s+)?(?:i want|see|set|export|record|list|show|track)\b",
+    re.I,
+)
+
+
+def _how_many_things(prompt: str) -> int:
+    """Roughly how many things the user said it must do."""
+    return 1 + len(_AND_THEN.findall(prompt))
+
+
+def _launcher() -> str:
+    """The full path to the launcher, resolved rather than referenced.
+
+    `${CLAUDE_PLUGIN_ROOT}` is set when the framework runs a hook or a command,
+    and *not* in the shell an agent gets for its own Bash calls. So an
+    instruction naming that variable names something the agent cannot resolve,
+    and it goes looking for the plugin by hand. The hook knows where it is —
+    it is running from there — so it says the path outright.
+    """
+    import os
+
+    root = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if root:
+        return str(Path(root) / "bin" / "vesta-run")
+    # Running from a checkout, or from the installed copy directly.
+    return str(Path(__file__).resolve().parent.parent / "bin" / "vesta-run")
 
 
 def _something_to_build(prompt: str, project: str) -> str:
@@ -382,6 +423,15 @@ def _something_to_build(prompt: str, project: str) -> str:
     if existing and len(prompt.split()) < 25:
         return ""
 
+    # Only where a *whole* implementation is implied. Automation agrees a list
+    # of behaviours and runs until each is built and tested, which is worth
+    # doing for something with several parts and absurd for one function. The
+    # signal is that they described more than one thing it must do: "record an
+    # expense, see what I spent, set budgets, export to CSV" is a project;
+    # "write a function that parses a date" is an afternoon.
+    if _how_many_things(prompt) < 2:
+        return ""
+
     # Which way somebody wants a project built is not inferable from what they
     # said, and guessing is wrong often enough to be useless: "build me an
     # expense tracker" is the most ordinary request there is, and it means
@@ -389,23 +439,100 @@ def _something_to_build(prompt: str, project: str) -> str:
     # automation on every such prompt is noise on the commonest thing anybody
     # says; assuming it is worse. So the user is asked, once, in a dialog they
     # answer with one keystroke.
+    # Asked once. Somebody who chose to work interactively is not asked again
+    # every time they start something — the answer to "would you like
+    # automation" does not change because they asked for a second module, and
+    # a question repeated after an answer is nagging.
+    try:
+        from . import driving
+
+        if driving.was_declined(project):
+            return ""
+    except Exception as exc:  # noqa: BLE001 - never break a prompt
+        logger.info("could not read the driving state: %s", exc)
+
     if not _driving(project):
+        # Asked with AskUserQuestion, the host's own question dialog.
+        #
+        # Not with MCP elicitation: elicitation is a form to fill in, so the
+        # client always draws Accept and Decline beneath it whatever the schema
+        # says. That is the chrome of a consent prompt, and this is not one —
+        # the three answers *are* the actions, and the user should see them as
+        # three options rather than as a value hidden inside a field with
+        # Accept beneath it.
         return (
             "This asks for a whole project to be built and nothing has been "
-            "agreed for it. Call the `how` tool — it asks them whether to "
-            "build it the ordinary way or drive it to completion, and records "
-            "the answer. Then carry on with whichever they chose.\n\n"
-            "Do not ask them in prose and do not decide for them."
+            "agreed for it. Ask them how to build it with **AskUserQuestion**, "
+            "with exactly these two options and no others:\n\n"
+            "  Automated — agree the behaviours up front, then run to "
+            "completion without further check-ins until done\n"
+            "  Interactive — build it step by step together, checking in as "
+            "we go\n\n"
+            "Two, not three: the dialog already offers its own ways out, and "
+            "an option that duplicates them is clutter.\n\n"
+            "Then act on what they chose.\n\n"
+            "Automated: work out the contract **yourself, in this session**. "
+            "Do not spawn a subagent and do not go looking for a skill — a "
+            "subagent shows the user nothing until it returns, so they sit "
+            "through a silent wait and then meet the whole spec at once. "
+            "Written here, they watch it take shape.\n\n"
+            "A contract is behaviours, constraints, and everything else "
+            "inferred silently:\n"
+            "  · behaviours are what the system does, for whom — `a user can "
+            "file a task`. Each must be checkable without an opinion. Six to "
+            "twelve is usual.\n"
+            "  · constraints are how it must be built, and only ever what "
+            "they said themselves — `use SQLite`, `no external services`.\n"
+            "  · everything else — storage, layout, libraries, glue — you "
+            "infer and do not ask about. Record it with `--inferred` so a "
+            "later reader can see what was chosen for them; it is never "
+            "shown to them now.\n"
+            "  · anything that names no behaviour at all goes in `--noted`. "
+            "Say \"sure\" and nothing else about it.\n\n"
+            "Write it down. `vesta` is not on PATH — a plugin is installed "
+            "by the framework, not by pip — so use this, which is the "
+            "launcher that finds the interpreter Vesta lives in:\n\n"
+            f"  V={_launcher()}\n"
+            "  $V contract --goal \"<one line>\" --does \"<a behaviour>\" "
+            "--does \"<another>\" --constraint \"<if they stated one>\" "
+            "--inferred \"<what you chose for them>\"\n\n"
+            "Then print exactly what `$V contract --verify` gives you — "
+            "not your own summary of it, since that is what they will be "
+            "agreeing to. Then call `agree`, which asks them to accept or "
+            "decline what they have just read. Write no code until they "
+            "have accepted.\n\n"
+            "Interactive: "
+            "build it as you normally "
+            f"would, and run `{_launcher()} drive "
+            "--declined` so they are not asked "
+            "again. Anything else — they typed something, or want to talk — "
+            "means neither yet: answer them and wait, and do not record "
+            "anything.\n\n"
+            "Ask once, before writing anything. Do not decide for them."
         )
 
+    # Already automated, and nothing agreed yet. Same instruction as the
+    # branch above, minus the question: they have chosen how to build, so the
+    # only thing left is to work out what.
     return (
         "This asks for something to be built and nothing has been agreed for "
         "this project yet.\n\n"
-        "Run the `vesta-spec` subagent now, before writing any code. It turns "
-        "what they asked for into a short list of behaviours, which you show "
-        "them and they agree to with `/vesta:agree`. **Do not start building "
-        "until they have agreed** — the point is that they see what will be "
-        "built while changing it is still free."
+        "Work out the contract yourself, in this session, before writing any "
+        "code. Do not spawn a subagent: they would wait in silence and then "
+        "meet the whole spec at once.\n\n"
+        "Behaviours are what the system does, for whom — `a user can file a "
+        "task` — each checkable without an opinion, six to twelve of them. "
+        "Constraints are how it must be built and only ever what they said "
+        "themselves. Everything else you infer and record with `--inferred` "
+        "rather than asking about.\n\n"
+        f"  V={_launcher()}\n"
+        "  $V contract --goal \"<one line>\" --does \"<a behaviour>\" "
+        "--constraint \"<if they stated one>\" --inferred \"<what you chose>\"\n\n"
+        "Then print exactly what `$V contract --verify` gives you, and "
+        "call `agree` — it asks them to accept or decline what they have "
+        "just read.\n\n"
+        "**Do not start building until they have accepted** — the point is "
+        "that they see what will be built while changing it is still free."
     )
 
 

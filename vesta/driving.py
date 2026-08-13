@@ -23,11 +23,19 @@ based on the model's own opinion can see that. Two readings that do not differ
 are a fact, and after enough of them the honest answer is to stop and say what
 remains rather than to keep spending.
 
-**Off unless somebody turned it on.** Driving is not a mode a tool should assume:
-it writes code without being asked each time, which is exactly what a user wants
-when they asked for it and exactly what they do not want when they did not. So
-it is per project, explicit, and survives restarts — a mode that resets is not a
-mode.
+**Off unless somebody turned it on, and only for as long as they meant.**
+Driving writes code without being asked each time, which is what a user wants
+when they asked for it and the last thing they want when they did not.
+
+So consent is bounded by the session that gave it. Reopening a project a week
+later does not resume automation, because nobody agreed to that — they agreed
+to build one thing, once. Automation ends when the work is done, when they stop
+it, or when the session that consented ends, whichever comes first. Entering it
+again is a fresh decision, made the same way as the first.
+
+The state is still kept per project rather than in memory: a loop must survive
+a crash within its own session, and the record of what happened is worth having
+afterwards. What does not survive is the *permission*.
 
 **Nothing here writes code.** It says whether to keep going and what is
 outstanding; the work is the agent's, on the host's inference. This is the part
@@ -78,6 +86,18 @@ class State(BaseModel):
     # Why it stopped, if it has. Recorded so the next session can say what
     # happened rather than starting again as though nothing had.
     stopped: str = ""
+    # When they last said no to automation. Asked once and then not again:
+    # a question repeated after an answer is not a question, it is nagging,
+    # and the answer to "would you like automation" does not change because
+    # somebody asked for a second module.
+    declined_at: float = 0.0
+    # Set on a copy handed to a session that did not consent. Never stored:
+    # it says "not for you", not "this ended".
+    lapsed_view: bool = False
+    # Whether that reason has been said to the user yet. Its own field: it was
+    # once a sentinel written into `stopped` itself, which meant the marker
+    # leaked into what the user was shown — "not being driven — said".
+    told: bool = False
 
     @property
     def stuck(self) -> bool:
@@ -131,8 +151,14 @@ def _where(repo: Path | str) -> Path:
     return kept_at(repo, "driving").with_suffix(".json")
 
 
-def state(repo: Path | str) -> State:
-    """Whether this project is being driven."""
+def _recorded(repo: Path | str) -> State:
+    """What is written down, whoever is asking.
+
+    The record, not the permission. Everything that *changes* the state reads
+    this — a loop must be able to record its own progress without having to
+    prove who it is, and asking that question here once cost five iterations
+    that silently recorded nothing.
+    """
     path = _where(repo)
     if not path.is_file():
         return State()
@@ -142,7 +168,43 @@ def state(repo: Path | str) -> State:
         return State()
 
 
+def state(repo: Path | str, session: str = "") -> State:
+    """Whether this project is being driven, for whoever is asking.
+
+    Consent belongs to the session that gave it. A project opened again later
+    is not being driven, however it was left — nobody agreed to that, and a
+    tool that resumes writing code because it did so yesterday is a tool
+    nobody can put down.
+    """
+    import os
+
+    here = _recorded(repo)
+    if not here.on:
+        return here
+
+    asking = session or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if here.session and asking and here.session != asking:
+        # Somebody else's consent, or the same person's from before. The
+        # record stands; the permission does not.
+        #
+        # Returned as a copy and never written back: this is a view for the
+        # caller asking, not a change to what happened. Persisting it would
+        # end the loop for the session that *is* driving — which it did, after
+        # exactly one iteration, because the hook asked as one session and
+        # `iterate` wrote back what it saw.
+        lapsed = here.model_copy()
+        lapsed.on = False
+        lapsed.stopped = "the session that agreed to this has ended"
+        lapsed.lapsed_view = True
+        return lapsed
+    return here
+
+
 def _keep(here: State, repo: Path | str) -> None:
+    if here.lapsed_view:
+        # A view for somebody who did not consent. Writing it would end the
+        # loop for whoever did.
+        return
     path = _where(repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -160,18 +222,44 @@ def start(
     asked. Per project, because a user wants this on a greenfield app and not
     on the repository their company runs on.
     """
-    here = state(repo)
+    here = _recorded(repo)
     here.on = True
     here.since = at if at is not None else time.time()
     here.session = session or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     here.stopped = ""
+    here.told = False
     _keep(here, repo)
     return here
 
 
+def declined(repo: Path | str, at: Optional[float] = None) -> State:
+    """Record that they chose to work interactively.
+
+    Kept so the choice is not put to them again. They can still ask for
+    automation whenever they like — this only stops Vesta raising it.
+    """
+    here = _recorded(repo)
+    here.declined_at = at if at is not None else time.time()
+    _keep(here, repo)
+    return here
+
+
+def was_declined(repo: Path | str) -> bool:
+    """Whether they have already said they would rather work interactively."""
+    path = _where(repo)
+    if not path.is_file():
+        return False
+    try:
+        return bool(State.model_validate_json(
+            path.read_text(encoding="utf-8")
+        ).declined_at)
+    except (OSError, ValueError):
+        return False
+
+
 def stop(repo: Path | str, why: str = "asked to stop") -> State:
     """Turn driving off, and say why."""
-    here = state(repo)
+    here = _recorded(repo)
     here.on = False
     here.stopped = why
     _keep(here, repo)
@@ -279,7 +367,7 @@ def iterate(repo: Path | str, at: Optional[float] = None) -> Verdict:
     iterates without moving will do so indefinitely, and only a record of what
     did not change can show it.
     """
-    here = state(repo)
+    here = _recorded(repo)
     verdict = look(repo, at=at)
 
     if verdict.reading is not None:
