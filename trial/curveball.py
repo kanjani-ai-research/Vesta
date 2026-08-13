@@ -80,8 +80,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not argv:
         print("usage: curveball.py <directory> [directory...]")
         return 1
+    # Keyed by the whole path: two arms run the same brief, so the directory
+    # name alone collides and one arm silently overwrites the other.
     print(json.dumps(
-        {Path(a).name: check(Path(a).expanduser().resolve()) for a in argv}, indent=2
+        {
+            str(Path(a).expanduser().resolve()): check(Path(a).expanduser().resolve())
+            for a in argv
+        },
+        indent=2,
     ))
     return 0
 

@@ -31,8 +31,17 @@ real elapsed time, an outliner that must not see headings inside code fences, a
 ledger with an inferred blank posting and per-currency balancing. Each is
 checkable, and each is a place a plausible implementation is wrong.
 
-**Time is wall clock, from the transcript.** Not a stopwatch anybody had to
-watch, and not the model's estimate of its own effort.
+**Time is what the tool spent, not what the clock did.** The span between a
+transcript's first and last record includes every pause where somebody was
+reading, switching windows, or had walked away — on the first ledger run that
+was 209 seconds out of 360, and reporting the span made one arm look 2.75×
+faster when the real figure was 1.45×. So gaps longer than a person's attention
+are excluded, and both numbers are reported: a reader can see how much of the
+elapsed time was anybody working.
+
+Every transcript for a project is read, not the most recent one. Picking one by
+modification time reports whichever file happened to be touched last, which is
+not the same as the run being measured.
 """
 
 from __future__ import annotations
@@ -50,6 +59,12 @@ RATES = {
     "claude-haiku-4-5": {"in": 1.00, "out": 5.00, "cache_read": 0.10, "cache_write": 1.25},
     "claude-opus-5": {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_write": 18.75},
 }
+
+
+# A pause longer than this is somebody reading rather than a tool working.
+# Twenty seconds is well past any single model response and well short of the
+# time it takes to read a page of output and decide what to do.
+IDLE_AFTER = 20.0
 
 
 def _rate(model: str) -> Dict[str, float]:
@@ -73,16 +88,22 @@ def spent(where: Path) -> Dict:
     if not holding.is_dir():
         return {"error": f"no session recorded for {where}"}
 
-    transcripts = sorted(holding.glob("*.jsonl"), key=lambda p: -p.stat().st_mtime)
+    transcripts = sorted(holding.glob("*.jsonl"))
     if not transcripts:
         return {"error": f"no transcript for {where}"}
 
     by_model: Dict[str, Dict[str, int]] = {}
     turns = 0
     tools = 0
-    first = last = None
+    stamps: List[datetime] = []
 
-    for line in transcripts[0].read_text(encoding="utf-8", errors="replace").splitlines():
+    lines = []
+    for transcript in transcripts:
+        lines.extend(
+            transcript.read_text(encoding="utf-8", errors="replace").splitlines()
+        )
+
+    for line in lines:
         try:
             record = json.loads(line)
         except ValueError:
@@ -90,8 +111,7 @@ def spent(where: Path) -> Dict:
 
         stamp = _when(record.get("timestamp", ""))
         if stamp:
-            first = first or stamp
-            last = stamp
+            stamps.append(stamp)
 
         message = record.get("message") or {}
         if record.get("type") == "user" and not record.get("toolUseResult"):
@@ -122,8 +142,22 @@ def spent(where: Path) -> Dict:
         for kind in ("in", "out", "cache_read", "cache_write"):
             dollars += held[kind] / 1_000_000 * rate[kind]
 
+    # How long anybody was working, and how long the clock ran. A gap longer
+    # than somebody's attention is a person reading, not a tool thinking.
+    stamps.sort()
+    span = (stamps[-1] - stamps[0]).total_seconds() if len(stamps) > 1 else 0.0
+    idle = sum(
+        gap
+        for gap in (
+            (stamps[n + 1] - stamps[n]).total_seconds() for n in range(len(stamps) - 1)
+        )
+        if gap > IDLE_AFTER
+    )
+
     return {
-        "seconds": round((last - first).total_seconds(), 1) if first and last else 0,
+        "seconds": round(span - idle, 1),
+        "elapsed": round(span, 1),
+        "idle": round(idle, 1),
         "turns": turns,
         "tool_calls": tools,
         "dollars": round(dollars, 4),
