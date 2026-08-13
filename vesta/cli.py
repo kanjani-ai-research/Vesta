@@ -292,6 +292,84 @@ def _asked(args: argparse.Namespace) -> int:
     return 0
 
 
+def _words(args: argparse.Namespace) -> int:
+    """The vocabulary, shown, edited, or added to.
+
+    Shown by default, because somebody typing `vesta words` wants to see them,
+    and a command whose bare form does nothing is a command nobody runs twice.
+    """
+    from . import vocabulary
+
+    where = Path(args.root).expanduser().resolve()
+
+    if args.templates:
+        shipped = vocabulary.templates()
+        if not shipped:
+            _say("No templates are shipped.")
+            return 0
+        width = max(len(name) for name in shipped)
+        _say(
+            "\n".join(f"  {name:<{width}}  {why}" for name, why in shipped.items())
+            + "\n\nAdd one with `vesta words --template <name>`, or any file of "
+            "your own with `--from <path>`.\nA template supplies words only — "
+            "which definitions do the work is read from your code."
+        )
+        return 0
+
+    if args.replacing:
+        text, wrong = vocabulary.read_supplied(args.replacing)
+        if wrong:
+            _say(wrong)
+            return 1
+        if not vocabulary._labels(text):
+            # An empty file would otherwise delete the vocabulary and every
+            # attachment with it, which is not something to do because a
+            # redirect went wrong.
+            _say(
+                f"{args.replacing} names no words. Nothing changed — a file "
+                "with nothing in it is more likely a mistake than a request "
+                "to forget everything."
+            )
+            return 1
+        _say(vocabulary.apply(where, text).describe())
+        return 0
+
+    if args.template or args.supplied:
+        if args.template:
+            text, wrong = vocabulary.read_template(args.template)
+        else:
+            text, wrong = vocabulary.read_supplied(args.supplied)
+        if wrong:
+            _say(wrong)
+            return 1
+        edited = vocabulary.merge(where, text)
+        _say(
+            edited.describe()
+            + (
+                "\n\nNothing is attached yet — run the domain agent to bind the "
+                "new words to definitions in this repository."
+                if edited.added
+                else ""
+            )
+        )
+        return 0
+
+    if args.edit:
+        edited = vocabulary.edit(where)
+        _say(edited.describe())
+        return 0
+
+    said = vocabulary.as_text(where, preamble=False).strip()
+    if not said:
+        _say(
+            "No words yet. Run the domain agent to read them from the code, or "
+            "start from a template — `vesta words --templates`."
+        )
+        return 0
+    _say(said + "\n\nEdit them with `vesta words --edit`.")
+    return 0
+
+
 def _learn(args: argparse.Namespace) -> int:
     """Confirm which recovered corrections are standing rules.
 
@@ -700,6 +778,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     drive.add_argument("--step", action="store_true", help="record one iteration")
     drive.add_argument("--show", type=int, default=6)
     drive.set_defaults(run=_drive)
+
+    words = sub.add_parser("words", help="the words this project uses, and editing them")
+    # Four things somebody does to a vocabulary, and nothing does two of them.
+    words.add_argument("--edit", action="store_true", help="open them in $EDITOR")
+    words.add_argument("--template", default="", help="add a shipped vocabulary")
+    words.add_argument("--from", dest="supplied", default="", help="add one from a file")
+    # `--from` adds; `--set` replaces. Two verbs because they are two acts: a
+    # template supplements what reading the code found, and an edit is the
+    # whole vocabulary including what somebody deleted from it. Merging an
+    # edited export would silently ignore every removal.
+    words.add_argument("--set", dest="replacing", default="", help="replace them from a file")
+    words.add_argument("--templates", action="store_true", help="what is shipped")
+    words.add_argument("--root", default=".")
+    words.set_defaults(run=_words)
 
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")
     guide.add_argument("topic", nargs="?", default="")
