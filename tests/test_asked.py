@@ -21,6 +21,9 @@ from vesta.contract import Behaviour, Contract, keep, recall, sign
 
 @pytest.fixture
 def agreed(tmp_path):
+    from vesta import driving
+
+    driving.start(tmp_path)
     keep(
         Contract(
             goal="a todo app with tags",

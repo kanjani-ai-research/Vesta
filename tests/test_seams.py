@@ -71,7 +71,13 @@ def fresh(tmp_path):
 def test_asking_for_something_to_be_built_reaches_the_agent(fresh):
     """Shipped broken. Everything installed correctly and the agent built the
     whole project with no contract, because the instruction lived in a skill
-    whose description was about answering questions on existing code."""
+    whose description was about answering questions on existing code.
+
+    Only in full automation: as a companion this must stay silent, which
+    `test_a_build_request_demands_no_contract_as_a_companion` holds it to."""
+    from vesta import driving
+
+    driving.start(fresh)
     answered = _hook(
         "inject.sh",
         {
@@ -108,6 +114,7 @@ def test_stating_a_rule_reaches_the_agent(fresh):
 def test_a_change_to_agreed_behaviour_reaches_the_agent(fresh):
     """Shipped broken twice: the function was never called from the hook, and
     then the deciding half was called without the recording half."""
+    from vesta import driving
     from vesta.contract import Behaviour, Contract, keep, recall, sign
 
     keep(
@@ -115,6 +122,7 @@ def test_a_change_to_agreed_behaviour_reaches_the_agent(fresh):
         fresh,
     )
     sign(fresh)
+    driving.start(fresh)
 
     said = _said(
         _hook("inject.sh", {"prompt": "actually make it multi-user", "cwd": str(fresh)})
@@ -252,6 +260,9 @@ def test_a_feature_request_is_not_read_as_a_bug_report(fresh):
     Matching it on `broken` suppressed the whole contract flow on a brief that
     plainly asked for something new — found by driving a real project rather
     than by any unit test."""
+    from vesta import driving
+
+    driving.start(fresh)
     said = _said(
         _hook(
             "inject.sh",
@@ -394,3 +405,117 @@ def test_nothing_is_written_into_vestas_own_directory(tmp_path):
     )
     after = {p: p.stat().st_mtime for p in HERE.glob("*.json")}
     assert before == after
+
+
+def test_agreeing_starts_the_loop(tmp_path):
+    """Agreeing to a contract is the consent to build it.
+
+    A live run agreed and then built with nothing enforcing the agreement,
+    because driving was a second action nobody ran: the loop never started,
+    the Stop hook never blocked, and the session ended having written no tests
+    — exactly like the control it was meant to differ from."""
+    from vesta import driving
+
+    subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'{HERE}/bin/vesta-run contract --root {tmp_path} '
+            f'--goal "a thing" --does "a user can do it"',
+        ],
+        capture_output=True, text=True, timeout=300, env=_env(),
+    )
+    assert not driving.state(tmp_path).on
+
+    done = subprocess.run(
+        ["sh", "-c", f"{HERE}/bin/vesta-run contract --root {tmp_path} --sign"],
+        capture_output=True, text=True, timeout=300, env=_env(),
+    )
+    assert done.returncode == 0, done.stderr
+    assert driving.state(tmp_path).on, "agreeing did not start the loop"
+
+
+def test_the_stop_hook_blocks_after_agreeing(tmp_path):
+    """End to end: agree, and the session cannot end with nothing built."""
+    subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'{HERE}/bin/vesta-run contract --root {tmp_path} '
+            f'--goal "a thing" --does "a user can do it" && '
+            f"{HERE}/bin/vesta-run contract --root {tmp_path} --sign",
+        ],
+        capture_output=True, text=True, timeout=300, env=_env(),
+    )
+    answered = _hook("keep-going.sh", {"cwd": str(tmp_path)})
+    assert answered.get("decision") == "block", answered
+    assert "not built" in answered.get("reason", "")
+
+
+# ── The two modes stay apart ────────────────────────────────────────────────
+#
+# As a companion Vesta answers questions and records what its user decides. It
+# does not stop somebody who asked for a script and make them agree to a
+# specification first. Everything that follows from a contract belongs to the
+# mode they turned on, and to nobody else.
+
+
+def test_a_build_request_demands_no_contract_as_a_companion(fresh):
+    """The regression this covers: full-auto machinery reached a plain session,
+    and "build me a script" was met with a specification to approve."""
+    assert not __import__("vesta.driving", fromlist=["x"]).state(fresh).on
+    said = _said(
+        _hook(
+            "inject.sh",
+            {"prompt": "build me a script that renames files in bulk", "cwd": str(fresh)},
+        )
+    )
+    assert said == "", f"companion mode asked for a contract: {said[:120]}"
+
+
+def test_a_change_is_not_adjudicated_as_a_companion(fresh):
+    """Refusing a change because it alters an agreed behaviour only makes
+    sense where something was agreed to be driven toward."""
+    from vesta.contract import Behaviour, Contract, keep, sign
+
+    keep(Contract(goal="x", behaviours=[Behaviour(does="a user can file a task")]), fresh)
+    sign(fresh)
+    from vesta import driving
+
+    driving.stop(fresh, "companion")
+
+    said = _said(
+        _hook("inject.sh", {"prompt": "actually make it multi-user", "cwd": str(fresh)})
+    )
+    assert "do not build it" not in said.lower()
+
+
+def test_capturing_a_rule_works_as_a_companion(fresh):
+    """The companion half must not have degraded. This is the feature that
+    makes Vesta worth having without automation at all."""
+    said = _said(
+        _hook(
+            "inject.sh",
+            {
+                "prompt": (
+                    "in this project every module must open with a docstring "
+                    "saying what it is for. does app.py follow that?"
+                ),
+                "cwd": str(fresh),
+            },
+        )
+    )
+    assert "declare" in said
+
+
+def test_the_contract_flow_is_reached_once_driving_is_on(fresh):
+    from vesta import driving
+
+    driving.start(fresh)
+    said = _said(
+        _hook(
+            "inject.sh",
+            {"prompt": "build me a script that renames files in bulk", "cwd": str(fresh)},
+        )
+    )
+    assert "vesta-spec" in said

@@ -318,8 +318,32 @@ ABOUT_WHAT_EXISTS = re.compile(
 )
 
 
+def _driving(project: str) -> bool:
+    """Whether this project has been put into full automation.
+
+    Everything that follows from a contract — eliciting one, waiting to be
+    allowed to build, refusing a change to what was agreed — belongs to that
+    mode and to nobody else. As a companion Vesta answers questions and records
+    what its user decides; it does not stop somebody who asked for a script and
+    make them agree to a specification first.
+    """
+    try:
+        from . import driving
+
+        return driving.state(project).on
+    except Exception as exc:  # noqa: BLE001 - never break a prompt
+        logger.info("could not read the driving state: %s", exc)
+        return False
+
+
 def _something_to_build(prompt: str, project: str) -> str:
     """Whether they are asking for something to be built with nothing agreed.
+
+    **Only where the user turned automation on.** This asks somebody to agree
+    to a contract before anything is built, which is right when they asked for
+    a project to be driven to completion and wrong every other time. A live run
+    showed the cost of getting that backwards: a plain "build me a script"
+    was met with a specification to approve.
 
     **This is a hook rather than a skill for a reason that was learned the hard
     way.** The instruction lived in the skill, whose description is about
@@ -328,6 +352,9 @@ def _something_to_build(prompt: str, project: str) -> str:
     agent built the whole thing with no contract, no verification and no
     consent. Everything was installed correctly and none of it was used.
     """
+    if not _driving(project):
+        return ""
+
     try:
         from .contract import recall as recall_contract
 
@@ -378,6 +405,9 @@ def _a_change_to_what_was_agreed(prompt: str, project: str) -> str:
     change arrives as ordinary conversation and an agent that notices after
     building it has already spent the work.
     """
+    if not _driving(project):
+        return ""
+
     try:
         from .asked import REFUSED, SURE, act
         from .contract import recall as recall_contract

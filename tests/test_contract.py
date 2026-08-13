@@ -351,11 +351,13 @@ def test_a_brief_with_nothing_agreed_reaches_the_agent():
     whole project with no contract, no verification and no consent, because
     the instruction lived in a skill whose description is about answering
     questions on an existing repository."""
-    from vesta.inject import _something_to_build
-
     import tempfile
 
+    from vesta import driving
+    from vesta.inject import _something_to_build
+
     empty = Path(tempfile.mkdtemp())
+    driving.start(empty)
     said = _something_to_build(
         "Build a command-line todo list.\n\nI want to be able to add a task, "
         "see my tasks, mark one done, and delete one. Tasks should survive "
@@ -371,6 +373,9 @@ def test_ordinary_work_does_not_demand_a_contract(tmp_path):
     insufferable."""
     from vesta.inject import _something_to_build
 
+    from vesta import driving
+
+    driving.start(tmp_path)
     (tmp_path / "app.py").write_text("def x():\n    return 1\n", encoding="utf-8")
     assert _something_to_build("add a field to the form", str(tmp_path)) == ""
     assert _something_to_build("why is this test failing?", str(tmp_path)) == ""

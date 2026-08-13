@@ -423,9 +423,23 @@ def _contract(args: argparse.Namespace) -> int:
             _say("the spec agent could not reach Vesta. Run it again and check")
             _say("it reports what it recorded rather than only printing it.")
             return 1
+        # Agreeing to a contract is the consent to build it. Making driving a
+        # second, separate action meant a live run agreed and then built with
+        # nothing enforcing the agreement — the loop never started, the Stop
+        # hook never blocked, and the session ended having written no tests.
+        # Two actions where one was meant is a step somebody will forget, and
+        # the one they forget is the one that does the work.
+        from . import driving
+
+        driving.start(where)
+
         _say("Agreed. Behaviour is fixed from here; a change to it after this")
         _say("is a different project.")
         _say(f"  {agreed.describe()}")
+        _say("")
+        _say("Building until every behaviour is built and reached by a test,")
+        _say("the tests pass, and nothing is outstanding. `vesta drive --off`")
+        _say("stops it.")
         return 0
 
     if args.note:
