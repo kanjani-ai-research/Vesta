@@ -1304,11 +1304,13 @@ def build_server():
     async def how(context: Context = None) -> str:
         """Ask the user how they want a project built, and record it.
 
-        Two ways to work, and which one somebody wants is not inferable from
-        what they said. "Build me an expense tracker" is the most ordinary
-        request there is: most of the time it means build it, and sometimes it
-        means drive it to completion. Guessing either way is wrong often
-        enough to be useless, so this asks — once, when it matters.
+        Two ways to work — interactive or automated — and which one somebody
+        wants is not inferable from what they said. "Build me an expense
+        tracker" is the most ordinary request there is: most of the time it
+        means build it with me, and sometimes it means run to completion.
+        Guessing either way is wrong often enough to be useless, so this
+        asks — once, when it matters, in a dialog they answer with one
+        keystroke.
 
         Call this when the user asks for a whole project to be built and
         nothing has been agreed for it yet. Do not call it for ordinary work
@@ -1323,25 +1325,39 @@ def build_server():
         # `Context.elicit`, which the SDK deprecated — a live session came back
         # "could not ask" because the deprecated request is refused, and a
         # silent fallback made that indistinguishable from a user's choice.
+        # The dialog shows the message *and* the field, so the field must not
+        # repeat the question — a live run showed "How should vesta be built?"
+        # twice with "not set" beside it, which says nothing about there being
+        # a choice at all. The field names the axis; the options carry the
+        # meaning.
         wanted = {
             "type": "object",
             "properties": {
-                "how": {
+                "mode": {
                     "type": "string",
-                    "title": "How should this be built?",
-                    "enum": ["build it", "drive it to completion"],
+                    "title": "Mode",
+                    "description": (
+                        "Interactive: I build it and you steer as we go. "
+                        "Automated: we agree the behaviours first, then I run "
+                        "until every one is built, tested and passing without "
+                        "stopping to ask."
+                    ),
+                    "enum": ["interactive", "automated"],
                     "enumNames": [
-                        "Build it — I work as usual, you review as we go",
-                        "Drive it — agree the behaviours first, then build "
-                        "until every one is met and tested",
+                        "Interactive — build it with me, step by step",
+                        "Automated — agree the behaviours, then run to completion",
                     ],
+                    "default": "interactive",
                 }
             },
-            "required": ["how"],
+            "required": ["mode"],
         }
 
         chosen = ""
-        asking = f"How should {Path(here).name} be built?"
+        asking = (
+            f"Build {Path(here).name} interactively, or run automated to "
+            "completion?"
+        )
         why = ""
 
         try:
@@ -1349,7 +1365,7 @@ def build_server():
                 message=asking, requestedSchema=wanted
             )
             if getattr(answer, "action", "") == "accept":
-                chosen = (answer.content or {}).get("how", "")
+                chosen = (answer.content or {}).get("mode", "")
         except Exception as exc:  # noqa: BLE001 - a client need not support this
             why = f"{type(exc).__name__}: {exc}"
             logger.info("could not ask with elicit_form: %s", exc)
@@ -1357,32 +1373,33 @@ def build_server():
         if not chosen and not why:
             # Asked, and they closed it. Not an error and not a choice.
             return (
-                "They did not choose. Building it the ordinary way; "
-                "`/vesta:drive on` switches to driving at any point."
+                "They did not choose. Building interactively; "
+                "`/vesta:drive on` switches to automated at any point."
             )
 
         if not chosen:
             _record("how", here, 0.0, 0, asked=False, why=why[:200])
             return (
                 f"Could not show a dialog here ({why[:110]}).\n\n"
-                "Ask them in one line instead: build it the ordinary way, or "
-                "drive it to completion — behaviours agreed first, then built "
-                "until every one is met and tested. Then carry on with "
-                "whichever they choose; `/vesta:drive on` is the second."
+                "Ask them in one line instead: interactive, or automated? "
+                "Interactive is the ordinary way. Automated agrees the "
+                "behaviours first and then runs to completion without "
+                "stopping to ask. Carry on with whichever they choose; "
+                "`/vesta:drive on` is automated."
             )
 
         import anyio
 
-        if chosen.startswith("drive"):
+        if chosen.startswith("auto"):
             from . import driving
 
             await anyio.to_thread.run_sync(driving.start, here)
             return (
-                "Driving. Run the `vesta-spec` subagent now to turn what they "
-                "asked for into a short list of behaviours, show them, and "
-                "wait for `/vesta:agree` before writing any code."
+                "Automated. Run the `vesta-spec` subagent now to turn what "
+                "they asked for into a short list of behaviours, show them, "
+                "and wait for `/vesta:agree` before writing any code."
             )
-        return "Building it the ordinary way. Carry on."
+        return "Interactive. Carry on and build it with them."
 
     @server.tool()
     async def declare(rule: str, context: Context = None) -> str:
