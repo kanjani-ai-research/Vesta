@@ -288,8 +288,8 @@ than the code.
 `~/Research/taguchi` — 859 turns, a real working history, chosen because
 testing this on the repository being edited all day would prove nothing.
 
-    gated  →   89 candidates
-    ranked →  677 turns offered
+    gated  →   87 candidates
+    ranked →  666 turns offered
 
 A haiku agent read all 677 under the existing `vesta-rules` brief and returned
 **58 standing rules**. The number that matters: **35 of them came from turns
@@ -309,11 +309,40 @@ verification turned out to be **transcription slips in the check itself** —
 `that's` retyped as `that is` — which is the check working at exactly the
 granularity intended.
 
-**What is still open.** Extraction is no longer starved, and on this evidence
-it recovers roughly six times what it did. Whether the 58 are all *right* is a
-question only the user can settle, which is what adjudication is for. And
-thirteen rules carry a named check strategy that has never executed, which
-remains a separate gap from having no strategy at all.
+**The run also exposed two defects, both since fixed.**
+
+*A transcript belonged to a repository because it named it often enough.*
+`_sessions_for` counted raw occurrences of the path anywhere in a file, at a
+threshold of 20. The session that ran this very measurement mentioned
+`~/Research/taguchi` 59 times — in tool results and assistant output, while
+the user named it **zero** times — and the whole transcript was admitted as
+taguchi's own history. Rules stated about one project would have been
+recovered as decisions about another.
+
+The count that decides is now *how many times the user themselves named it*,
+which distinguishes working in a repository from running commands against one.
+Matching a session recorded under a different launch directory still works —
+that is what the feature is for, and this session is a live case of it — but it
+now requires the user to have said so.
+
+*A bare question was recorded as a rule.* Verifying the 58 by hand turned up
+*"is the TPOC barred from carrying out these tasks? yes or no"* recorded as a
+constraint that the TPOC may not carry them out — a rule invented from an open
+question, asked precisely because the user did not know the answer.
+
+The brief now draws the line the machinery cannot: a turn that asks and never
+answers itself is not a rule, however constraint-shaped the question. The
+counter-case is kept explicitly, because it is the common one — *"are the
+papers called peer reviewed? … these are published, not peer reviewed, and the
+title should be used"* opens with a question and then states the rule.
+
+**What is still open.** Extraction is no longer starved, and on clean data it
+offers roughly seven times what it did. Whether the rules it finds are all
+*right* is a question only the user can settle, which is what adjudication is
+for — and the hand-check above suggests a false positive rate worth measuring
+properly rather than estimating from a sample of seven. Thirteen rules carry a
+named check strategy that has never executed, which remains a separate gap from
+having no strategy at all.
 
 **Storage — nothing reported or reclaimed anything.** `vesta held`
 lists every holding by repository, biggest first, and `--reclaim` removes what

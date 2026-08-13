@@ -918,3 +918,36 @@ def test_nothing_hardcodes_a_model_in_code():
                 assert named not in node.value, (
                     f"{path.name}:{node.lineno} hardcodes {named}"
                 )
+
+
+def test_the_rules_agent_is_told_a_bare_question_is_not_a_rule():
+    """A live run recorded "is the TPOC barred from carrying out these tasks?
+    yes or no" as a rule that the TPOC may not carry them out — inventing a
+    constraint from an open question, asked because the user did not know.
+
+    The brief has to draw the distinction, because it is the one thing the
+    surrounding machinery cannot: whether a turn answers its own question is a
+    judgement about meaning."""
+    said = " ".join((HERE / "agents" / "vesta-rules.md").read_text().split()).lower()
+
+    assert "asks and never answers itself is not a rule" in said
+    # And the other half, or the guard would throw away real rules stated
+    # after a question.
+    assert "take the statement, never the question" in said
+
+
+def test_the_rules_agent_is_told_it_sees_everything():
+    """The candidates are no longer pre-filtered, so the brief must say to
+    read past the promising ones — the ordering is a hint and often wrong."""
+    said = " ".join((HERE / "agents" / "vesta-rules.md").read_text().split()).lower()
+
+    assert "not a pre-filtered shortlist" in said
+    assert "read past the promising ones" in said
+
+
+def test_the_rules_agent_is_told_to_quote_rather_than_paraphrase():
+    """The quotation is verified against the transcript, so an agent that
+    rewords loses the rule with no explanation unless it was told."""
+    said = " ".join((HERE / "agents" / "vesta-rules.md").read_text().split()).lower()
+
+    assert "must be quoted from the turn, not paraphrased" in said

@@ -130,10 +130,69 @@ class Harvest(BaseModel):
 # repository names it constantly.
 MENTIONS_ENOUGH = 20
 
+# How many times **the user** must name it. Counted separately and required
+# alongside the total, because the total cannot tell working from discussing.
+#
+# Found by looking. A session spent building something else, which happened to
+# run commands against `~/Research/taguchi` to test a tool, mentioned that path
+# 59 times — past the threshold — in tool results and assistant output. The
+# user never named it once. The whole transcript was then admitted as taguchi's
+# own history, so rules stated about a different project would have been
+# recovered as decisions about that one.
+#
+# Two mentions is enough to clear the bar of somebody pasting a path in
+# passing, and low enough not to lose a genuine session where the user names
+# their repository rarely because they are working *inside* it.
+SAID_BY_USER = 2
+
 # Sessions already matched to a repository, keyed by the state of the
 # transcript directory. Scanning every transcript for path mentions is not
 # free, and it does not change between two questions asked a second apart.
 _MATCHED: Dict[str, Tuple[str, List[Path]]] = {}
+
+
+def _user_named(path: Path, repo: str) -> int:
+    """How many times the user themselves named a repository in a transcript.
+
+    Only turns the user actually spoke — not tool results, not assistant
+    output, not harness-injected context. Those are where a session that merely
+    *ran commands against* a repository accumulates hundreds of mentions of it
+    while nobody was working on it at all.
+    """
+    from .rules import _not_the_user
+
+    said = 0
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return 0
+
+    for line in lines:
+        if repo not in line:
+            continue
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        if payload.get("type") != "user" or payload.get("toolUseResult"):
+            continue
+
+        message = payload.get("message") or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            spoken = content
+        elif isinstance(content, list):
+            spoken = " ".join(
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        else:
+            continue
+
+        if repo in spoken and not _not_the_user(spoken.strip()):
+            said += 1
+    return said
 
 
 def _sessions_for(repo: Path) -> List[Path]:
@@ -197,10 +256,17 @@ def _sessions_for(repo: Path) -> List[Path]:
             continue
         for path in sorted(directory.glob("*.jsonl")):
             try:
-                if path.read_bytes().count(wanted) >= MENTIONS_ENOUGH:
-                    found.append(path)
+                if path.read_bytes().count(wanted) < MENTIONS_ENOUGH:
+                    continue
             except OSError:
                 continue
+            # Cheap count passed. Now the one that means something: a
+            # transcript belongs to a repository because somebody *worked* in
+            # it, and the evidence of that is the user naming it — not a tool
+            # result quoting a path back, which a session testing something
+            # else produces by the dozen.
+            if _user_named(path, str(repo)) >= SAID_BY_USER:
+                found.append(path)
 
     _MATCHED[str(repo)] = (state, found)
     try:

@@ -47,7 +47,16 @@ softly it was put.
 
 These are **not** rules, however imperative they sound:
 
-- a question seeking an answer
+- a question seeking an answer. **A turn that asks and never answers itself is
+  not a rule, however constraint-shaped the question is.** "is the TPOC barred
+  from carrying out these tasks? yes or no" was recorded as a rule that the
+  TPOC may not carry them out — inventing a constraint out of somebody's open
+  question, and one they were asking *because they did not know*.
+
+  The test is whether the same turn goes on to state the answer. "are the
+  papers called peer reviewed? … these are published, not peer reviewed, and
+  the title should be used, not 'landmark'" opens with a question and then
+  states the rule, so the rule is real. Take the statement, never the question.
 - a proposal put up for agreement and awaiting it
 - an instruction scoped to the task at hand — "do not edit anything", "just tell
   me", "do not use any vesta tools" — which expires with the turn. Recording one

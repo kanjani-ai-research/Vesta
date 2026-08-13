@@ -176,3 +176,113 @@ def test_a_stamp_is_written_once_and_not_re_anchored(code: Graph, tmp_path: Path
 
     # The second read must reuse the first stamp, not compute a new one.
     assert first.notes[0].region_hash == second.notes[0].region_hash
+
+
+# ── Whose transcript this is ────────────────────────────────────────────────
+
+
+def _transcript(directory: Path, name: str, records: list) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def _spoke(text: str) -> dict:
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def _tool_said(text: str) -> dict:
+    return {
+        "type": "user",
+        "toolUseResult": {"stdout": text},
+        "message": {"role": "user", "content": text},
+    }
+
+
+def test_a_session_that_only_ran_commands_against_a_repo_is_not_its_history(
+    tmp_path, monkeypatch
+):
+    """The defect, found by looking at what a run had actually read.
+
+    A session spent building something else, which happened to run commands
+    against `~/Research/taguchi` to test a tool, mentioned that path 59 times
+    — past the threshold — entirely in tool results and assistant output. The
+    user never named it once, and the whole transcript was admitted as that
+    repository's own history.
+    """
+    from vesta import harvest
+
+    monkeypatch.setattr(harvest, "TRANSCRIPTS", tmp_path / "projects")
+    monkeypatch.setattr(harvest, "_MATCHED", {})
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+
+    elsewhere = tmp_path / "projects" / "-Users-someone-other-work"
+    _transcript(
+        elsewhere,
+        "session",
+        [_spoke("let's test the tool")]
+        + [_tool_said(f"ran against /repo/target run {n}") for n in range(40)],
+    )
+
+    assert harvest._sessions_for(Path("/repo/target")) == []
+
+
+def test_a_session_where_the_user_worked_on_it_is_its_history(
+    tmp_path, monkeypatch
+):
+    """The case the matching exists for: the host keys a project by where the
+    agent was launched, so work on a repository is often recorded elsewhere."""
+    from vesta import harvest
+
+    monkeypatch.setattr(harvest, "TRANSCRIPTS", tmp_path / "projects")
+    monkeypatch.setattr(harvest, "_MATCHED", {})
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+
+    launched_above = tmp_path / "projects" / "-Users-someone"
+    _transcript(
+        launched_above,
+        "session",
+        [_spoke(f"work on /repo/target, the thing in /repo/target please {n}")
+         for n in range(30)],
+    )
+
+    assert len(harvest._sessions_for(Path("/repo/target"))) == 1
+
+
+def test_only_the_user_naming_it_counts(tmp_path):
+    from vesta import harvest
+
+    path = _transcript(
+        tmp_path,
+        "s",
+        [
+            _spoke("please look at /repo/target"),
+            _tool_said("/repo/target /repo/target /repo/target"),
+            {"type": "assistant", "message": {"role": "assistant",
+                                              "content": "/repo/target"}},
+        ],
+    )
+
+    assert harvest._user_named(path, "/repo/target") == 1
+
+
+def test_a_summary_replaying_a_path_is_not_the_user_naming_it(tmp_path):
+    """A compaction summary quotes whole conversations back, so it names
+    every path that was ever discussed."""
+    from vesta import harvest
+
+    path = _transcript(
+        tmp_path,
+        "s",
+        [
+            _spoke(
+                "This session is being continued from a previous conversation "
+                "that ran out of context. We worked on /repo/target at length."
+            )
+        ],
+    )
+
+    assert harvest._user_named(path, "/repo/target") == 0
