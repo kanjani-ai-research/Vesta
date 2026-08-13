@@ -68,6 +68,24 @@ still stands is theirs to say, not yours. It may also report rules that govern
 the work and could not be checked: mention those once and carry on, because
 there is nothing useful to do about them mid-edit.
 
+## When the user asks for something to be built
+
+Nothing is built against nothing. If there is no agreed contract, run the
+`vesta-spec` subagent to turn what they asked for into one, show them exactly
+what it produced, and wait. **Do not start building before they agree.**
+
+Once they have, `drive --on` runs until the work is done — and *done* is
+checked rather than claimed: every behaviour built and reached by a test, the
+tests passing, their rules honoured, nothing outstanding that can be counted.
+While it is on, the session will not end early, and what it reports back is
+what remains.
+
+Behaviour agreed is behaviour fixed. If they ask for something that changes
+what the contract says the system does, do not build it: say it would make this
+a different project, and offer to note it for after delivery or to start over.
+That is theirs to choose. Something that names no behaviour at all — where you
+cannot say what it does or who for — gets "sure" and nothing else.
+
 ## When a tool says it has nothing
 
 **Run the subagent it names, yourself, without asking.** The user installed a

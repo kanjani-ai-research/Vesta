@@ -469,6 +469,42 @@ def _contract(args: argparse.Namespace) -> int:
     return 0
 
 
+def _drive(args: argparse.Namespace) -> int:
+    """Turn driving on or off, or say what is outstanding.
+
+    Nothing here writes code. It says whether the work is done — against the
+    contract and the measurements, never against anybody's opinion of it.
+    """
+    from . import driving
+
+    where = Path(args.root).expanduser().resolve()
+
+    if args.off:
+        _say(driving.stop(where).describe())
+        return 0
+
+    if args.on:
+        driving.start(where)
+        _say(f"Driving {where.name}. It will run until:")
+        _say("  every agreed behaviour is built and reached by a test")
+        _say("  the tests pass")
+        _say("  the rules you set are honoured")
+        _say("  nothing is outstanding that can be counted")
+        _say("")
+        _say("`vesta drive --off` stops it.")
+        return 0
+
+    verdict = driving.iterate(where) if args.step else driving.look(where)
+    _say(driving.state(where).describe())
+    _say("")
+    _say(verdict.describe())
+    for outstanding in verdict.outstanding[: args.show]:
+        _say(f"  · {outstanding}")
+    if len(verdict.outstanding) > args.show:
+        _say(f"  … and {len(verdict.outstanding) - args.show} more")
+    return 0
+
+
 def _guide(args: argparse.Namespace) -> int:
     """What Vesta is and what a user can do with it.
 
@@ -610,6 +646,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="something said at elicitation that has no effect",
     )
     contract.set_defaults(run=_contract)
+
+    drive = sub.add_parser(
+        "drive", help="run until the agreed work is done, and know when that is"
+    )
+    drive.add_argument("--root", default=".")
+    drive.add_argument("--on", action="store_true", help="turn driving on here")
+    drive.add_argument("--off", action="store_true", help="turn it off")
+    drive.add_argument("--step", action="store_true", help="record one iteration")
+    drive.add_argument("--show", type=int, default=6)
+    drive.set_defaults(run=_drive)
 
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")
     guide.add_argument("topic", nargs="?", default="")
