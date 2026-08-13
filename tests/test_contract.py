@@ -262,3 +262,84 @@ def test_the_standard_covers_more_than_one_kind_of_project():
         assert case["said"]
         assert case["why"]
         assert case["must_not_ask_about"], "every case must name structure to infer"
+
+
+# ── Something that has no effect ────────────────────────────────────────────
+
+
+def test_something_inert_is_noted_rather_than_argued_with(agreed):
+    """"Make it do a somersault" contradicts nothing and reaches nothing. The
+    correct response is to note it and carry on — not to measure its blast
+    radius and report solemnly that it is zero."""
+    from vesta.contract import note
+
+    note(agreed, "make it do a somersault")
+    assert recall(agreed).noted == ["make it do a somersault"]
+
+
+def test_what_was_noted_is_shown_so_its_author_sees_it_was_heard(agreed):
+    from vesta.contract import note
+
+    note(agreed, "make it do a somersault")
+    said = recall(agreed).to_verify()
+    assert "somersault" in said
+
+
+def test_nothing_is_told_to_the_user_about_it_having_no_effect(agreed):
+    """Telling somebody their request was pointless is worse than saying
+    nothing. They can see it is not in the list above."""
+    from vesta.contract import note
+
+    note(agreed, "make it do a somersault")
+    said = recall(agreed).to_verify().lower()
+    for smug in ("no effect", "cannot", "will not", "ignored", "pointless"):
+        assert smug not in said
+
+
+def test_absurdity_is_not_the_test(agreed):
+    """"Add a CNN to my todo list" may be sensible, and Vesta is in no
+    position to say. What decides is whether it names a behaviour."""
+    said = _flat(SPEC.read_text(encoding="utf-8"))
+    assert "the test is not whether it is absurd" in said
+    assert "convolutional neural network" in said
+
+
+def test_a_note_gates_nothing(agreed):
+    """It is never built and never blocks completion."""
+    from vesta.contract import note
+
+    sign(agreed)
+    note(agreed, "make it do a somersault")
+    for does in ("a user can file a task", "a user can tag a task"):
+        met(agreed, does, nodes=["x"], tests=["y"])
+    assert recall(agreed).complete
+
+
+def test_a_note_is_not_a_deferred_change(agreed):
+    """`deferred` is for real work worth having after delivery. A somersault
+    in that list is noise nobody wants to read six months later."""
+    from vesta.contract import note
+
+    note(agreed, "make it do a somersault")
+    assert recall(agreed).deferred == []
+
+
+def test_the_same_note_is_not_kept_twice(agreed):
+    from vesta.contract import note
+
+    note(agreed, "make it fly")
+    note(agreed, "make it fly")
+    assert len(recall(agreed).noted) == 1
+
+
+def test_noting_nothing_records_nothing(agreed):
+    from vesta.contract import note
+
+    note(agreed, "  ")
+    assert recall(agreed).noted == []
+
+
+def test_the_spec_agent_is_told_not_to_argue_with_it():
+    said = _flat(SPEC.read_text(encoding="utf-8"))
+    assert "do not argue with it" in said
+    assert 'say "sure" and nothing else' in said

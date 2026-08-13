@@ -419,6 +419,14 @@ def _contract(args: argparse.Namespace) -> int:
         _say(f"  {agreed.describe()}")
         return 0
 
+    if args.note:
+        agreed = agreed_with.note(where, args.note)
+        if agreed is None:
+            _say("There is no contract to note against.")
+            return 1
+        _say("Sure.")
+        return 0
+
     if args.defer:
         agreed = agreed_with.defer(where, args.defer)
         if agreed is None:
@@ -443,6 +451,7 @@ def _contract(args: argparse.Namespace) -> int:
             behaviours=[agreed_with.Behaviour(does=d) for d in args.does],
             constraints=list(args.constraint),
             inferred=list(args.inferred),
+            noted=list(args.note_said),
         )
         agreed_with.keep(agreed, where)
         _say(agreed.to_verify())
@@ -595,6 +604,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     contract.add_argument("--node", action="append", default=[], help="what implements it")
     contract.add_argument("--test", action="append", default=[], help="what checks it")
     contract.add_argument("--defer", default="", help="a change to have after delivery")
+    contract.add_argument("--note", default="", help="something said that has no effect")
+    contract.add_argument(
+        "--noted", dest="note_said", action="append", default=[],
+        help="something said at elicitation that has no effect",
+    )
     contract.set_defaults(run=_contract)
 
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")

@@ -40,6 +40,20 @@ Each must be **falsifiable**: you can tell whether it holds without an opinion.
 - Bad: "uses a repository pattern" — that is design; drop it unless the user
   asked for it, in which case it is a constraint
 
+Something that names no behaviour — where you cannot say what it does or who
+for — is neither a behaviour nor a constraint nor structure. Record it with
+`--noted` and move on.
+
+**The test is not whether it is absurd.** "Add a convolutional neural network to
+my todo list" may be perfectly sensible and you are in no position to say. The
+test is only whether it can be written as `<someone> can <do something>`. If it
+can, it is a behaviour; if it cannot, it is noted.
+
+Say "sure" and nothing else. Do not argue with it, do not explain why nothing
+will happen, and do not tell them it has no effect — they can see for
+themselves that it is not in the list. Telling somebody their request was
+pointless is worse than saying nothing.
+
 Six to twelve behaviours is usual. If you have thirty, you are describing
 structure. If you have two, you have not decomposed enough.
 

@@ -89,6 +89,19 @@ class Contract(BaseModel):
     # point of inferring is not to spend the user's attention on it.
     inferred: List[str] = Field(default_factory=list)
 
+    # What they said that names no behaviour. Kept, not acted on.
+    #
+    # The test is not whether a request is absurd — "add a CNN to my todo list"
+    # may have a real use, and Vesta is in no position to say. It is whether
+    # they can say what it does for whom. If they cannot, it is not a behaviour
+    # and there is nothing to build against, however sensible it sounds.
+    #
+    # Kept so its author sees their words in the contract rather than wondering
+    # whether they were heard. Never announced as having no effect: telling
+    # somebody their request was pointless is worse than saying nothing, and
+    # "sure" costs nothing and closes the subject.
+    noted: List[str] = Field(default_factory=list)
+
     signed_at: float = 0.0
     # A change the user asked for after signing that would have altered
     # behaviour. Recorded rather than applied, so the contract shows what was
@@ -138,6 +151,12 @@ class Contract(BaseModel):
         if self.constraints:
             lines.append("")
             lines.append("You asked for: " + ", ".join(self.constraints))
+        if self.noted:
+            # Shown, because the point of noting something is that its author
+            # sees it was noted. Not editorialised: they can see for themselves
+            # that it is not in the list above.
+            lines.append("")
+            lines.append("Also noted: " + "; ".join(self.noted))
         return "\n".join(lines)
 
 
@@ -188,6 +207,15 @@ def _readable(agreed: Contract) -> str:
         for constraint in agreed.constraints:
             lines.append(f"- {constraint}")
 
+    if agreed.noted:
+        lines.extend(["", "## Also noted", ""])
+        lines.append("Said, and not written as behaviour — nothing here names")
+        lines.append("what it does or who for, so there is nothing to build")
+        lines.append("against. Say it as a behaviour and it becomes one.")
+        lines.append("")
+        for said in agreed.noted:
+            lines.append(f"- {said}")
+
     if agreed.deferred:
         lines.extend(["", "## Asked for after signing, not built", ""])
         lines.append("Changing agreed behaviour would make this a different")
@@ -236,6 +264,28 @@ def met(repo: Path | str, does: str, nodes: Optional[List[str]] = None,
             behaviour.met_at = at if at is not None else time.time()
         keep(agreed, repo)
         return agreed
+    return agreed
+
+
+def note(repo: Path | str, said: str) -> Optional[Contract]:
+    """Record something that names no behaviour, so its author sees it was heard.
+
+    Distinct from `defer`, which is for a real change worth having after
+    delivery. This is for what cannot be built against: a request that does not
+    say what it does or who for. Whether it is absurd is not the test and not
+    Vesta's business — "add a CNN to my todo list" may be perfectly sensible,
+    and if they can say what it does for whom it is a behaviour like any other.
+
+    Acknowledged and then left alone. The right answer is "sure", not a
+    paragraph explaining why nothing will happen.
+    """
+    agreed = recall(repo)
+    if agreed is None:
+        return None
+    wanted = said.strip()
+    if wanted and wanted not in agreed.noted:
+        agreed.noted.append(wanted)
+        keep(agreed, repo)
     return agreed
 
 
