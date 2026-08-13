@@ -305,9 +305,15 @@ TO_BUILD = re.compile(
 
 # What marks a prompt as being about code that is already there, which is the
 # ordinary case and needs no contract.
+# Anchored to what somebody says about code that already exists, not to bare
+# words that happen to appear in a feature request. "broken down by category"
+# is a thing to build; matching it on `broken` suppressed the whole contract
+# flow on a brief that plainly asked for something new.
 ABOUT_WHAT_EXISTS = re.compile(
-    r"\b(fix|debug|why|explain|what does|where is|refactor|rename|review|"
-    r"test this|the bug|failing|broken|this file|this function)\b",
+    r"\b(fix|debug|refactor|rename|review)\b|"
+    r"\b(why (?:is|does|did)|explain|what does|where is)\b|"
+    r"\b(the bug|is failing|are failing|is broken|it broke|this file|"
+    r"this function|this test|these tests)\b",
     re.I,
 )
 

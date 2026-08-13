@@ -245,3 +245,38 @@ def test_every_agent_is_reachable(path):
         text=True,
     ).stdout
     assert named_by.strip(), f"nothing tells an agent to run {name}"
+
+
+def test_a_feature_request_is_not_read_as_a_bug_report(fresh):
+    """"see what I have spent, broken down by category" is a thing to build.
+    Matching it on `broken` suppressed the whole contract flow on a brief that
+    plainly asked for something new — found by driving a real project rather
+    than by any unit test."""
+    said = _said(
+        _hook(
+            "inject.sh",
+            {
+                "prompt": (
+                    "Build an expense tracker I can use from the terminal.\n\n"
+                    "I want to record an expense with an amount, a category, "
+                    "and a note. I want to see what I have spent this month, "
+                    "broken down by category. I want to export a month to CSV."
+                ),
+                "cwd": str(fresh),
+            },
+        )
+    )
+    assert "vesta-spec" in said
+
+
+def test_an_actual_bug_report_still_asks_for_no_contract(fresh):
+    (fresh / "storage.py").write_text("def x():\n    return 1\n", encoding="utf-8")
+    for said in (
+        "why is this test failing?",
+        "fix the bug in storage.py",
+        "the tests are failing after my change",
+        "refactor the storage module",
+    ):
+        assert _said(_hook("inject.sh", {"prompt": said, "cwd": str(fresh)})) == "" or (
+            "vesta-spec" not in _said(_hook("inject.sh", {"prompt": said, "cwd": str(fresh)}))
+        )
