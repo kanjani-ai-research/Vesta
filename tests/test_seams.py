@@ -519,3 +519,54 @@ def test_the_contract_flow_is_reached_once_driving_is_on(fresh):
         )
     )
     assert "vesta-spec" in said
+
+
+def test_decision_management_never_fires_as_a_companion(fresh):
+    """"Sure", refuse, defer — none of it belongs outside automation. Tested
+    with a signed contract present and driving off, which is what a project
+    looks like after somebody tried full auto and turned it back off."""
+    from vesta import driving
+    from vesta.contract import Behaviour, Contract, keep, sign
+
+    keep(Contract(goal="x", behaviours=[Behaviour(does="a user can file a task")]), fresh)
+    sign(fresh)
+    driving.stop(fresh, "companion")
+
+    for said in (
+        "make it do a somersault",
+        "actually make it multi-user",
+        "add a convolutional neural network",
+    ):
+        answered = _said(_hook("inject.sh", {"prompt": said, "cwd": str(fresh)}))
+        assert answered == "", f"companion mode adjudicated {said!r}: {answered[:100]}"
+
+
+def test_the_stuck_signal_belongs_to_automation_only():
+    """Detecting that a loop is going nowhere is a property of running a loop.
+    A companion session has no loop, so nothing in its path may reach it."""
+    import ast
+    import inspect
+
+    from vesta import inject, notice, sidecar
+
+    for module in (inject, notice, sidecar):
+        tree = ast.parse(inspect.getsource(module))
+        imported = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        assert "distance" not in imported, f"{module.__name__} reaches the loop metric"
+
+    # And it is real where it belongs.
+    from vesta.driving import STUCK_AFTER, State
+
+    assert STUCK_AFTER >= 2
+    assert hasattr(State, "stuck")
+
+
+def test_a_companion_session_can_always_end(fresh):
+    """The Stop hook is the only thing that can trap somebody. With driving
+    off it must never say anything at all."""
+    (fresh / "app.py").write_text('"""A."""\n\n\ndef w():\n    return 1\n')
+    assert _hook("keep-going.sh", {"cwd": str(fresh)}) == {}
