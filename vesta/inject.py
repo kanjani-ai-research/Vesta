@@ -286,6 +286,49 @@ def _a_rule_in_doubt(prompt: str, project: str) -> str:
         return ""
 
 
+def _a_change_to_what_was_agreed(prompt: str, project: str) -> str:
+    """Whether what they just asked for departs from the signed contract.
+
+    Only where one exists and has been signed — before that nothing has been
+    agreed and nothing can be departed from. Said on the way in, because a
+    change arrives as ordinary conversation and an agent that notices after
+    building it has already spent the work.
+    """
+    try:
+        from .asked import REFUSED, SURE, where_it_lands
+        from .contract import recall as recall_contract
+
+        agreed = recall_contract(project)
+        if agreed is None or not agreed.signed:
+            return ""
+
+        landing = where_it_lands(prompt, project)
+    except Exception as exc:  # noqa: BLE001 - never break a prompt
+        logger.info("could not place what was asked: %s", exc)
+        return ""
+
+    if landing.verdict == REFUSED:
+        return (
+            "This may change what was agreed for this project. Behaviour is "
+            "fixed once signed, so do not build it.\n\n"
+            f"{landing.what_to_say()}\n\n"
+            "Judge for yourself whether it really alters what the system does "
+            "— this is a pattern, not a reading of their meaning. If it does "
+            "not, carry on."
+        )
+    if landing.verdict == SURE:
+        # Only where it plainly names nothing. Ordinary work — "add a test for
+        # filing" — reaches code and is not this, and answering it with "sure"
+        # would be a tool declining to do its job politely.
+        return (
+            "If this asks for nothing the project could have — where you "
+            'cannot say what it does or who for — say "sure" and nothing '
+            "else, then carry on. Do not argue with it. If it is ordinary "
+            "work, just do it."
+        )
+    return ""
+
+
 def _note(prompt: str, project: str, size: int) -> None:
     """Record what was injected, so an experiment can account for it."""
     import time
