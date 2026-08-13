@@ -412,7 +412,16 @@ def _contract(args: argparse.Namespace) -> int:
     if args.sign:
         agreed = agreed_with.sign(where)
         if agreed is None:
-            _say("There is nothing to agree to.")
+            # Say what went wrong rather than only that something did. The
+            # usual cause is a spec agent that produced a contract in chat and
+            # never recorded it — the user then agrees to something that does
+            # not exist, and nothing explains why.
+            _say("Nothing has been agreed for this project yet.")
+            _say("")
+            _say(f"No contract has been recorded in {where}.")
+            _say("If a list of behaviours was shown but never written down,")
+            _say("the spec agent could not reach Vesta. Run it again and check")
+            _say("it reports what it recorded rather than only printing it.")
             return 1
         _say("Agreed. Behaviour is fixed from here; a change to it after this")
         _say("is a different project.")

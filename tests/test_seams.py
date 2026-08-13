@@ -280,3 +280,117 @@ def test_an_actual_bug_report_still_asks_for_no_contract(fresh):
         assert _said(_hook("inject.sh", {"prompt": said, "cwd": str(fresh)})) == "" or (
             "vesta-spec" not in _said(_hook("inject.sh", {"prompt": said, "cwd": str(fresh)}))
         )
+
+
+@pytest.mark.parametrize(
+    "path", sorted((HERE / "agents").glob("*.md")), ids=lambda p: p.stem
+)
+def test_an_agent_is_told_how_to_reach_vesta(path):
+    """The live failure: the spec agent ran, could not reach the CLI, and
+    printed the contract into the chat instead of recording it. The user then
+    agreed to something that did not exist.
+
+    `vesta` is not on PATH — a plugin is installed by the framework, not by
+    pip — so any instruction that says to run a bare `vesta …` is an
+    instruction to fail silently."""
+    text = path.read_text(encoding="utf-8")
+    assert "CLAUDE_PLUGIN_ROOT" in text, f"{path.name} never says how to reach vesta"
+    assert "not on PATH" in text
+
+
+@pytest.mark.parametrize(
+    "path", sorted((HERE / "agents").glob("*.md")), ids=lambda p: p.stem
+)
+def test_an_agent_does_not_claim_to_have_recorded_what_it_could_not(path):
+    text = path.read_text(encoding="utf-8").lower()
+    assert "do not carry on" in text
+
+
+def test_agreeing_to_nothing_says_what_went_wrong(tmp_path):
+    """"There is nothing to agree to" is true and useless. The user needs to
+    know the spec agent failed to record, not merely that signing failed."""
+    done = subprocess.run(
+        ["sh", "-c", f"{HERE}/bin/vesta-run contract --root {tmp_path} --sign"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=_env(),
+    )
+    said = done.stdout + done.stderr
+    assert "spec agent" in said
+    assert "could not reach" in said
+
+
+# ── Where things land when Vesta is a plugin, not a checkout ────────────────
+
+
+def test_a_contract_lands_in_the_project_not_in_vesta(tmp_path):
+    """It belongs to the project: it survives a cleared cache, diffs with the
+    code, and a reader finds it where the work is."""
+    project = tmp_path / "somebodys-project"
+    project.mkdir()
+    subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'{HERE}/bin/vesta-run contract --root {project} '
+            f'--goal "a thing" --does "a user can do it"',
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=_env(),
+    )
+    assert (project / "VESTA.md").is_file()
+    assert (project / ".vesta-contract.json").is_file()
+
+
+def test_derived_things_land_in_the_home_not_in_the_project(tmp_path):
+    """A repository is not a place to leave a cache. Everything derived is
+    keyed by project under one home, so a project can be deleted without
+    orphaning anything and cleared without losing the project."""
+    from vesta.home import home, kept_at
+
+    project = tmp_path / "somebodys-project"
+    for kind in ("graphs", "maps", "rules", "confirmed", "driving"):
+        where = kept_at(project, kind)
+        assert str(where).startswith(str(home())), f"{kind} escapes the home"
+        assert "somebodys-project" in where.name, f"{kind} is not keyed by project"
+
+
+def test_two_projects_of_the_same_name_do_not_collide(tmp_path):
+    """The name is a readable prefix; the hash is the identity."""
+    from vesta.home import kept_at
+
+    one = kept_at(tmp_path / "a" / "vesta", "graphs")
+    two = kept_at(tmp_path / "b" / "vesta", "graphs")
+    assert one.name != two.name
+    assert one.name.startswith("vesta-") and two.name.startswith("vesta-")
+
+
+def test_the_same_project_by_two_paths_is_one_project(tmp_path):
+    """`/tmp/x` and `/private/tmp/x` are the same directory on this platform,
+    and treating them as two would give one repository two knowledge bases."""
+    from vesta.home import kept_at
+
+    project = tmp_path / "p"
+    project.mkdir()
+    assert kept_at(project, "graphs") == kept_at(str(project) + "/", "graphs")
+
+
+def test_nothing_is_written_into_vestas_own_directory(tmp_path):
+    """Running against somebody else's project must leave this one untouched."""
+    project = tmp_path / "elsewhere"
+    project.mkdir()
+    (project / "app.py").write_text('"""A."""\n\n\ndef w():\n    return 1\n')
+
+    before = {p: p.stat().st_mtime for p in HERE.glob("*.json")}
+    subprocess.run(
+        ["sh", "-c", f"{HERE}/bin/vesta-run shape --root {project}"],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=_env(),
+    )
+    after = {p: p.stat().st_mtime for p in HERE.glob("*.json")}
+    assert before == after

@@ -5,6 +5,24 @@ model: sonnet
 tools: Read, Grep, Bash
 ---
 
+## Reaching Vesta
+
+Every command below is run through the plugin's own launcher, which finds the
+interpreter Vesta is installed into. **`vesta` is not on PATH** — a plugin is
+installed by the framework, not by pip, so a bare `vesta …` fails with "command
+not found" and whatever you were told to record is silently not recorded.
+
+Set this once and use `$V` everywhere:
+
+```
+V="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/cache/vesta-local/vesta/0.1.0}/bin/vesta-run"
+```
+
+So `vesta contract --verify` below means `$V contract --verify`.
+
+If `$V` reports that Vesta cannot be reached, stop and say so. Do not carry on
+and report what you would have recorded as though you had recorded it.
+
 You are turning moments somebody noticed a defect into finders that will notice it
 again. The repository is the absolute path given as `REPO`.
 
