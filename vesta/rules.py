@@ -55,6 +55,28 @@ CONSTRAINS = re.compile(
     re.I,
 )
 
+# A rule stated as a definition rather than an instruction. People say what
+# something *is* at least as often as what to do about it: "non-full auto is a
+# companion, no consent" is a constraint on the code as binding as "never ask
+# for consent in companion mode", and matching only imperatives threw away
+# every rule its author stated this way.
+#
+# Found the hard way: four rules about which mode may do what were all stated
+# declaratively, none was captured, and the constraint they described was then
+# violated with nothing to notice.
+DEFINES = re.compile(
+    r"\b("
+    r"(?:is|are) (?:a |an |the )?[a-z-]+, (?:no|not|never|without)\b|"
+    r"(?:only|just) (?:for|in|applies to|belongs to)\b|"
+    r"(?:does|do) not (?:apply|belong|extend) to\b|"
+    r"(?:none|nothing) of .{0,60}(?:applies|belongs|apply|belong)\b|"
+    r"(?:is|are|was|were|weren'?t|wasn'?t) not (?:supposed|meant|intended) to\b|"
+    r"not supposed to\b|"
+    r"belongs? (?:only )?(?:to|in)\b"
+    r")",
+    re.I,
+)
+
 # What a correction is about, if it is about anything: a file, an identifier, a
 # path, an extension. A constraint naming none of these is usually a mood.
 ABOUT = re.compile(
@@ -348,6 +370,9 @@ def constrains(text: str) -> bool:
         # A proposal or a question. Recording it would return a user's own open
         # question to them as an obligation, which is worse than missing it.
         return False
+    if DEFINES.search(said):
+        # Stated as a definition rather than an instruction. Still a rule.
+        return True
     return bool(CONSTRAINS.search(said))
 
 

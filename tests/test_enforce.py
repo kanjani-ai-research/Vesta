@@ -194,3 +194,71 @@ def test_vestas_own_output_is_not_a_users_rule():
     assert not constrains(
         "Show these definitions verbatim. If nothing was found, say so plainly."
     )
+
+
+def test_a_rule_stated_as_a_definition_is_still_a_rule():
+    """People say what something *is* at least as often as what to do about it.
+
+    Four rules about which mode may do what were all stated declaratively —
+    "non-full auto is a companion, no consent" — none was captured, and the
+    constraint they described was violated within the hour with nothing to
+    notice. Matching only imperatives threw away every rule stated this way.
+    """
+    from vesta.rules import constrains
+
+    assert constrains("non-full auto is a companion, no consent")
+    assert constrains("the consent is only for full auto mode")
+    assert constrains("the stuck signal does not apply to companion mode")
+    assert constrains(
+        "none of the decision management from the autonomous loop applies to "
+        "the companion mode"
+    )
+    assert constrains("the graph is a tree, no cycles")
+
+
+def test_a_definition_about_nothing_is_still_not_a_rule():
+    from vesta.rules import constrains
+
+    assert not constrains("this is a nice day, no rain at all today thankfully")
+    assert not constrains("run the tests again")
+    assert not constrains("what does the companion mode do")
+
+
+def test_the_enumerated_checks_cannot_express_a_conditional_reach():
+    """An honest limit, recorded rather than papered over.
+
+    "Companion paths must not reach the contract machinery *without a driving
+    gate*" is a real, checkable rule — and none of the six check kinds can
+    express it. `calls_into` sees that `inject.py` reaches `recall_contract`
+    and cannot see whether a gate guards it, so it reports the rule as holding
+    whether or not it does.
+
+    A false pass is worse than no check: it reads as verification. Until the
+    enumeration grows a conditional form, a rule of this shape belongs in a
+    test, and the honest thing is to say so rather than let a check that
+    cannot fail stand in for one that can.
+    """
+    from pathlib import Path
+
+    from vesta.enforce import CALLS_INTO, against
+    from vesta.held import graph_for
+    from vesta.rules import Found, Rule
+
+    here = Path(__file__).resolve().parent.parent
+    rule = Rule(
+        text="companion paths must not reach the contract",
+        stated="inject must not reach contract without a driving gate",
+        names=["inject.py"],
+        check="traversal",
+        how="x",
+        look_for=CALLS_INTO,
+        pattern="recall_contract",
+        within="inject.py",
+        how_many=0,
+    )
+    verdict = against(Found(rules=[rule]), graph_for(here, trust_for=600), here)
+    finding = verdict.findings[0]
+
+    # It passes, and inject.py plainly does reach the contract — gated. The
+    # check cannot tell the two apart, which is the point of this test.
+    assert finding.holds

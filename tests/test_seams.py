@@ -570,3 +570,51 @@ def test_a_companion_session_can_always_end(fresh):
     off it must never say anything at all."""
     (fresh / "app.py").write_text('"""A."""\n\n\ndef w():\n    return 1\n')
     assert _hook("keep-going.sh", {"cwd": str(fresh)}) == {}
+
+
+def test_nothing_companion_facing_reaches_automation_ungated():
+    """The rule this user stated, made checkable.
+
+    "non-full auto is a companion, no consent" is a constraint on the code:
+    every use of the contract, adjudication or driving machinery from a path
+    that runs in an ordinary session must sit behind a driving gate. It was
+    stated in conversation, violated within the hour, and nothing noticed —
+    because a rule with no check cannot be broken detectably.
+    """
+    import ast
+    import inspect
+
+    from vesta import inject
+
+    tree = ast.parse(inspect.getsource(inject))
+    automation = {"contract", "asked", "driving"}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+
+        reaches = {
+            inner.module.lstrip(".")
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.ImportFrom) and inner.module
+        } | {
+            alias.name.lstrip(".")
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.Import)
+            for alias in inner.names
+        }
+        if not (reaches & automation):
+            continue
+        if node.name in ("_driving", "main"):
+            continue
+
+        gated = any(
+            isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Name)
+            and inner.func.id == "_driving"
+            for inner in ast.walk(node)
+        )
+        assert gated, (
+            f"{node.name} reaches {sorted(reaches & automation)} without asking "
+            "whether this project is being driven — companion mode would run it"
+        )
