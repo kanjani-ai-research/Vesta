@@ -1,9 +1,9 @@
 # Open questions
 
-Three things Vesta does not yet do well, written down while the evidence for
-each is fresh. Every number here was measured on this repository on the day it
-was written; where something is a suspicion rather than a measurement, it says
-so.
+Four things Vesta does not yet do well, written down while the evidence for
+each is fresh. Every number here was measured on a real repository on the day
+it was written; where something is a suspicion rather than a measurement, it
+says so.
 
 This is not a roadmap. Nothing here is scheduled, and at least one of them may
 turn out not to be worth doing — the point is that the reasoning behind each is
@@ -186,6 +186,47 @@ one project and that a user asks across them often enough to matter.
 
 ---
 
+## 4. A third of a real workspace is not code
+
+**Vesta resolves seven languages** — C, Rust, Python, Go, JS/TS, OCaml, Lua —
+and a repository is whatever those files say it is. On `~/Developer/causum/v4/
+ontos` that leaves a third of the workspace invisible:
+
+    metis          8,471 lines of Python   →  526 definitions
+    deps             617 lines of Python   →   31 definitions
+    bona-schemas   171 JSON, 1 Python      →   22 definitions
+
+`bona-schemas` is the densest artifact in that workspace and Vesta sees almost
+nothing in it. Its files carry `properties`, `handlers`, `idPattern`,
+`evidentiary_level`, `nodes`, `edges` — structure a graph could hold, and the
+kind of thing a change breaks silently.
+
+**The staleness problem is already solved.** The first objection to reading
+schemas is that reprocessing everything on every change is disastrous at scale.
+It would be, and `held._shape` is exactly the answer: a fingerprint of
+`path:size:mtime` per file, rebuilt only where it changed. That is snapshot
+plus change-detection, proven on code, and it would carry over unmodified.
+
+Nor is size the obstacle here — the whole of `bona-schemas` is 6.0MB and its
+largest file is 0.7MB. The concern is real for a workspace that ships a 100MB
+document; it is not what blocks this one.
+
+**What blocks it is that "a definition" has no single meaning.** Of those 171
+files: 104 look like JSON Schema, 35 are bare lists, 32 are loose objects. A
+resolver has to decide, per shape, what counts as a node and what counts as a
+reference — and deciding wrong produces false positives, which is the failure
+mode that made two other detectors untrustworthy on this same repository. A
+schema resolver that reports a live `$ref` as broken is worse than no schema
+resolver.
+
+**So it is deferred, not rejected.** The smaller version is worth costing
+first: not modelling a schema's internals at all, only detecting which code
+*loads* which schema file, so `touches` can answer "what reads this schema".
+That is a file-level edge, needs no opinion about what a definition is, and
+delivers the question people actually ask.
+
+---
+
 ## What was done before release
 
 Two things written up here were credibility problems rather than features, and
@@ -365,6 +406,64 @@ Three things that only surfaced by running it:
   overstated every holding by roughly half — in a report whose whole job is
   telling somebody how much they would get back.
 
+## What using it on somebody else's project turned up
+
+The three items above were found by reading Vesta's own output on Vesta. Then
+it was pointed at `v4/ontos` — a working project, not a test bed — and four
+things surfaced in an afternoon that reading never would have.
+
+**Two resolvers were wrong, and both made the survey untrustworthy.**
+
+`calls_to_nothing` matched relative imports against **file stems only**, so a
+package — a directory with an `__init__.py` — was never a module. Nine
+`from ..core import Document` lines were reported as *"no such module"* while
+`core/__init__.py` sat there exporting every one. That is the most alarming
+thing this survey says, *"raises the moment the line runs"*, and it was wrong
+about all nine. Fixing it exposed a second, latent bug: two files called
+`base.py` in different packages resolved to whichever was listed first, so
+imports from one were checked against the other's contents. Relative imports
+now resolve the way Python resolves them — by where the import was written and
+how many dots it used.
+
+`unreachable_definitions` had careful exclusions for tests, private helpers,
+methods and dynamic reach — and none for **decorators**. Sixteen FastAPI routes
+in one file were reported as unreferenced; `@app.get("/health")` *is* the
+reference, which is exactly why nothing calls `health()` by name. Together the
+two fixes took that workspace from about forty noisy sites to eighteen real
+ones.
+
+**Both bugs punish good structure**, which is what makes them worth recording
+rather than just fixing. `ontos` is a façade DSL whose `core/__init__.py`
+states that consumers depend on it and nothing else; Vesta was blind to
+precisely that idiom. A tool that reports well-organised code as broken is
+worse than one that says nothing.
+
+**And defects never surfaced at all.** Everything the survey found was
+reachable only by typing `vesta defects` or by an agent choosing to call a
+tool. Nothing in the prompt hook mentioned defects — so in ordinary use they
+were invisible, however good the finders were. A tool whose value depends on
+remembering its API has no value.
+
+The remedy follows `bears`, which had already solved this for rules: raise a
+finding **only when the prompt names the file it is in**. Naming
+`store/filesystem.py` mentions the two swallowed failures inside it; naming a
+clean file says nothing; naming no file says nothing at all. Only `clear` and
+`likely` findings speak, because interrupting somebody's work with a *worth a
+look* is what teaches them to skim the channel — and then the one that mattered
+goes past unread too.
+
+Two costs had to be paid down before that was usable. Surveying an unprepared
+workspace took **ten seconds**, and a hook that stalls a prompt that long is
+uninstalled before anybody discovers it was right; it now checks readiness
+first and stays silent, in about a millisecond. And running all seven finders
+to raise findings from four was a tax on every prompt — restricted to the ones
+that can raise, 1.6s became 420ms.
+
+**The lesson worth keeping** is not any of the four fixes. It is that a session
+spent using Vesta on an unfamiliar real project produced more than a day spent
+reading it on the project that built it. Nothing here was subtle; all of it was
+invisible from the inside.
+
 ## What is worth doing first
 
 Not a plan, but the honest ordering by evidence:
@@ -378,6 +477,10 @@ Not a plan, but the honest ordering by evidence:
    missing capability is not yet known, and finding out is cheap.
 3. **Decide whether `kind` earns its keep** — but only after (1), since the
    evidence for it is the same evidence.
+4. **Cost the file-level half of the schema question** — which code loads which
+   schema, without modelling a schema's internals. It needs no opinion about
+   what a definition is, so it cannot produce the false positives that make a
+   detector untrustworthy, and it answers the question people actually ask.
 
 The first is instrumentation rather than a feature, and that is the point: the
 remaining questions cannot be answered with evidence by a tool whose whole
