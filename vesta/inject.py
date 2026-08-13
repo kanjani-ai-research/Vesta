@@ -373,14 +373,18 @@ def _a_change_to_what_was_agreed(prompt: str, project: str) -> str:
     building it has already spent the work.
     """
     try:
-        from .asked import REFUSED, SURE, where_it_lands
+        from .asked import REFUSED, SURE, act
         from .contract import recall as recall_contract
 
         agreed = recall_contract(project)
         if agreed is None or not agreed.signed:
             return ""
 
-        landing = where_it_lands(prompt, project)
+        # `act`, not `where_it_lands`: deciding and recording are the same
+        # moment. Calling only the first meant a refused change was never
+        # kept for after delivery and a "sure" was never noted — the contract
+        # stayed empty and nobody found out until they read it.
+        landing = act(prompt, project)
     except Exception as exc:  # noqa: BLE001 - never break a prompt
         logger.info("could not place what was asked: %s", exc)
         return ""

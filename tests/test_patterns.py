@@ -242,3 +242,123 @@ def test_an_unparseable_file_claims_nothing(tmp_path):
 def test_a_star_import_is_left_alone(tmp_path):
     (tmp_path / "source.py").write_text("def thing():\n    return 1\n")
     assert _probe(tmp_path, "user.py", "from .source import *\n") == []
+
+
+# ── Code only its tests call ────────────────────────────────────────────────
+
+
+def _only_tests(tmp_path):
+    from vesta.dynamic import Blindspot
+    from vesta.graph import Graph
+    from vesta.held import graph_for
+    from vesta.patterns import reached_only_by_tests
+
+    return [
+        site
+        for found in reached_only_by_tests(
+            graph_for(tmp_path, rebuild=True), tmp_path, Blindspot()
+        )
+        for site in found.sites
+    ]
+
+
+def test_something_only_a_test_calls_is_found(tmp_path):
+    """The defect this repository shipped twice: an offer written, tested
+    directly, and never wired into the one place that had to call it. The
+    tests were green and the feature was dead."""
+    (tmp_path / "hooky.py").write_text(
+        "def _offer_one(p):\n    return 'one'\n\n\n"
+        "def _offer_two(p):\n    return 'two'\n\n\n"
+        "def main(p):\n    return _offer_one(p)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_hooky.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent.parent))\n"
+        "from hooky import _offer_one, _offer_two\n\n\n"
+        "def test_one():\n    assert _offer_one('x')\n\n\n"
+        "def test_two():\n    assert _offer_two('x')\n",
+        encoding="utf-8",
+    )
+
+    found = " ".join(s.describe() for s in _only_tests(tmp_path))
+    assert "_offer_two" in found
+    assert "_offer_one" not in found
+
+
+def test_a_reference_graph_alone_cannot_see_it(tmp_path):
+    """`nothing refers to this` asks whether *anything* refers to a definition,
+    and something does — the test. The question that matters is whether
+    anything in the code that ships does."""
+    (tmp_path / "hooky.py").write_text(
+        "def _dead(p):\n    return 1\n\n\ndef main(p):\n    return 2\n", encoding="utf-8"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_hooky.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent.parent))\n"
+        "from hooky import _dead\n\n\ndef test_it():\n    assert _dead(1)\n",
+        encoding="utf-8",
+    )
+
+    from vesta.dynamic import Blindspot
+    from vesta.held import graph_for
+    from vesta.patterns import unreachable_definitions
+
+    graph = graph_for(tmp_path, rebuild=True)
+    unreferenced = " ".join(
+        s.describe()
+        for f in unreachable_definitions(graph, tmp_path, Blindspot())
+        for s in f.sites
+    )
+    assert "_dead" not in unreferenced  # the test refers to it
+
+    assert "_dead" in " ".join(s.describe() for s in _only_tests(tmp_path))
+
+
+def test_a_function_in_a_dispatch_table_is_not_dead(tmp_path):
+    """Registering a function is using it. A detector that misses that reports
+    every plugin architecture as dead code."""
+    (tmp_path / "app.py").write_text(
+        "def finder(x):\n    return 1\n\n\n"
+        "PATTERNS = (('a name', finder),)\n\n\n"
+        "def main():\n    return PATTERNS\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent.parent))\n"
+        "from app import finder\n\n\ndef test_it():\n    assert finder(1)\n",
+        encoding="utf-8",
+    )
+    assert "finder" not in " ".join(s.describe() for s in _only_tests(tmp_path))
+
+
+def test_an_aliased_import_is_not_dead(tmp_path):
+    """`from .traverse import where as where_in` uses `where`."""
+    (tmp_path / "a.py").write_text("def where(x):\n    return 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text(
+        "from a import where as where_in\n\n\ndef main():\n    return where_in(1)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_a.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent.parent))\n"
+        "from a import where\n\n\ndef test_it():\n    assert where(1)\n",
+        encoding="utf-8",
+    )
+    assert "where" not in " ".join(s.describe() for s in _only_tests(tmp_path))
+
+
+def test_a_test_helper_is_not_reported(tmp_path):
+    """A test helper is reached only by tests and should be."""
+    (tmp_path / "app.py").write_text("def main():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "def helper():\n    return 2\n\n\ndef test_it():\n    assert helper()\n",
+        encoding="utf-8",
+    )
+    assert "helper" not in " ".join(s.describe() for s in _only_tests(tmp_path))

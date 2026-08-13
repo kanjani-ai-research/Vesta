@@ -440,12 +440,121 @@ def calls_to_nothing(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
     ]
 
 
+def is_test_path(relative: str) -> bool:
+    """Whether a path is test code rather than something that ships."""
+    low = relative.lower()
+    return (
+        low.startswith("test")
+        or "/test" in low
+        or low.endswith("_test.py")
+        or "/tests/" in low
+    )
+
+
+def reached_only_by_tests(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
+    """Code that only its tests call.
+
+    The defect this repository kept shipping. An offer is written, a test calls
+    it directly, and the one place that had to call it does not — so the tests
+    are green, nothing is unreferenced, and the feature is dead in production.
+    It happened twice while building the automation, and both times a live run
+    found it rather than the suite.
+
+    **The reference graph cannot see it.** `nothing refers to this` asks whether
+    anything refers to a definition, and something does: the test. The question
+    that matters is whether anything refers to it *from the code that ships*,
+    which is a different question and needs the answer split by where the
+    caller lives.
+
+    Narrow on purpose. A test helper is reached only by tests and should be; so
+    is a fixture, and so is anything a test was written to exercise before its
+    caller exists. What is reported is a definition in shipped code that only
+    test code calls — the shape of a feature nobody wired up.
+    """
+    import ast
+
+    from .propagate import is_test
+
+    # Names that shipped code imports, under whatever name it imports them.
+    # `from .traverse import where as where_in` makes `where` used, and the
+    # graph records the call against `where_in`. Without this the detector
+    # reports every aliased import as dead, and a detector that is wrong more
+    # often than right is one nobody reads.
+    imported: set = set()
+    for path, relative in _sources(root):
+        if is_test_path(relative):
+            continue
+        try:
+            tree = ast.parse("\n".join(_lines(path)))
+        except (SyntaxError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Attribute):
+                # `sidecar._does(...)` reaches `_does` without a plain call.
+                imported.add(node.attr)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                # Named as a value rather than called: registered in a table,
+                # passed as a callback, assigned to a name. Putting a function
+                # in a dispatch table is using it, and a detector that misses
+                # that reports every plugin architecture as dead code.
+                imported.add(node.id)
+
+    shipped: Dict[str, List[Site]] = {}
+
+    for node in graph.nodes.values():
+        if is_test(node) or "test" in node.path:
+            continue  # a test is allowed to be called only by tests
+        if node.name.startswith("_") and node.name.startswith("__"):
+            continue
+        if node.name in ("main", "__init__"):
+            continue
+        if node.container:
+            continue  # a method may be reached through its class
+
+        referring = graph.referenced_by(node.id)
+        if not referring:
+            continue  # that is `nothing refers to this`, not this
+
+        callers = [graph.nodes.get(edge.source) for edge in referring]
+        callers = [c for c in callers if c is not None]
+        if not callers:
+            continue
+        if any(not (is_test(c) or "test" in c.path) for c in callers):
+            continue  # something that ships calls it; nothing to say
+        if node.name in imported:
+            continue  # shipped code imports or reaches it by attribute
+
+        shipped.setdefault(node.path, []).append(
+            Site(
+                where=node.path,
+                line=node.line + 1,
+                what=f"{node.qualified} — only {len(callers)} test(s) call it",
+            )
+        )
+
+    return [
+        Found(
+            pattern="only its tests call this",
+            why=(
+                "the tests are green and the feature is dead: something that "
+                "ships was written, tested, and never wired up"
+            ),
+            confidence=LIKELY,
+            sites=sites,
+        )
+        for sites in shipped.values()
+    ]
+
+
 PATTERNS: Tuple[Tuple[str, Callable], ...] = (
     ("hardcoded language list", hardcoded_language_lists),
     ("swallowed failure", swallowed_failures),
     ("reached by name only", unresolvable_reach),
     ("nothing refers to this", unreachable_definitions),
     ("calls something that does not exist", calls_to_nothing),
+    ("only its tests call this", reached_only_by_tests),
 )
 
 

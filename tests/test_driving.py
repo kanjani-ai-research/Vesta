@@ -17,7 +17,18 @@ import pytest
 from vesta import driving
 from vesta.contract import Behaviour, Contract, keep, met, sign
 
-WORKS = '"""Filing tasks."""\n\n\ndef file_task(store, title):\n    """Put one in."""\n    store.append(title)\n    return store\n'
+# A project as one really is: something that ships calls the definition, not
+# only its test. A fixture whose only caller is a test is itself the defect
+# `only its tests call this` reports — the new detector found this fixture
+# before anybody else did.
+WORKS = (
+    '"""Filing tasks."""\n'
+    "import sys\n\n\n"
+    'def file_task(store, title):\n    """Put one in."""\n'
+    "    store.append(title)\n    return store\n\n\n"
+    'def main(argv):\n    """Run it."""\n    return file_task([], " ".join(argv))\n\n\n'
+    'if __name__ == "__main__":\n    main(sys.argv[1:])\n'
+)
 CHECKS = 'from todo import file_task\n\n\ndef test_file():\n    assert file_task([], "x") == ["x"]\n'
 
 
