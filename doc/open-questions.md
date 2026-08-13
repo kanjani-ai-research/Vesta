@@ -284,12 +284,36 @@ span to locate. It would have brought pandas, numpy, google-genai and
 google-cloud-storage for a problem this does not have. The idea was worth more
 than the code.
 
-**What is still open.** Whether this makes extraction *good* is now an
-empirical question rather than an architectural one, and it cannot be answered
-until the agent has run against the wider candidate set on a real repository.
-The `--declare` path still produced every clean rule here. And thirteen rules
-carry a named check strategy that has never executed, which remains a separate
-gap from having no strategy at all.
+**It was then measured, on a repository neither of us had been shaping.**
+`~/Research/taguchi` — 859 turns, a real working history, chosen because
+testing this on the repository being edited all day would prove nothing.
+
+    gated  →   89 candidates
+    ranked →  677 turns offered
+
+A haiku agent read all 677 under the existing `vesta-rules` brief and returned
+**58 standing rules**. The number that matters: **35 of them came from turns
+ranked below the old cut-off**, and a hand-checked sample confirmed it —
+*"'landmark' is my internal id for one of them not for public"*, a rule about
+what must never be published, was discarded outright by the regex. So were
+*"structure is essential for analysis"* and *"a model's self-assessment is an
+invalid analysis"*.
+
+Asked directly whether the deeper turns wasted its time, the agent said they
+were where the rules about IP handling, evaluation methodology and reviewer
+engagement lived, and that it would have wanted more turns rather than fewer.
+
+Grounding was checked against the same transcripts: every quotation the agent
+returned appears verbatim in a real turn. Two apparent failures during
+verification turned out to be **transcription slips in the check itself** —
+`that's` retyped as `that is` — which is the check working at exactly the
+granularity intended.
+
+**What is still open.** Extraction is no longer starved, and on this evidence
+it recovers roughly six times what it did. Whether the 58 are all *right* is a
+question only the user can settle, which is what adjudication is for. And
+thirteen rules carry a named check strategy that has never executed, which
+remains a separate gap from having no strategy at all.
 
 **Storage — nothing reported or reclaimed anything.** `vesta held`
 lists every holding by repository, biggest first, and `--reclaim` removes what
