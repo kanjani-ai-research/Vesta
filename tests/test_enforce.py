@@ -222,3 +222,111 @@ def test_a_definition_about_nothing_is_still_not_a_rule():
     assert not constrains("this is a nice day, no rain at all today thankfully")
     assert not constrains("run the tests again")
     assert not constrains("what does the companion mode do")
+
+
+def test_somebody_saying_they_do_not_know_is_not_stating_a_rule():
+    """Found in the live queue, awaiting a confirmation they had disclaimed.
+
+    "it should be conditional, I don't know whether your assertion holds"
+    reached adjudication as a candidate rule — a sentence in which the user
+    had already said they could not settle it. CONSTRAINS matches "should",
+    and nothing tested whether the same sentence withdrew the claim.
+
+    A queue full of these teaches somebody the feature is noise, and then they
+    stop reading the ones that are real.
+    """
+    from vesta.rules import constrains
+
+    assert not constrains(
+        "it should be conditional, I don't know whether your assertion holds. "
+        "i just know it's conditional"
+    )
+    assert not constrains(
+        "for question 1, I don't know but I can't see how UC3 is fundamentally "
+        "different from UC2 in this respect"
+    )
+    assert not constrains(
+        "i'm not sure if the graph should be rebuilt on every change or cached"
+    )
+    assert not constrains(
+        "not sure whether the ontology should carry the kind at all really"
+    )
+
+
+def test_the_unsure_guard_does_not_swallow_ordinary_rules():
+    """The guard is a whole-sentence veto, and that is a deliberate trade.
+
+    "I don't know why, but every module must open with a docstring" states a
+    constraint and disclaims only the *reason* — and this rejects it, because
+    nothing here parses which clause the disclaimer attaches to.
+
+    That is the right way to be wrong. A missed rule costs a user one
+    `/vesta:declare`; a queue of candidates they have already said they cannot
+    settle costs them their willingness to look at the queue at all.
+    """
+    from vesta.rules import constrains
+
+    assert constrains("every module must open with a docstring")
+    assert constrains("non-full auto is a companion, no consent")
+
+    # Stated plainly, the sentence is kept. The disclaimer is what loses it.
+    assert not constrains(
+        "I don't know why, but every module must open with a docstring"
+    )
+
+
+# ── Reporting what was and was not checked ──────────────────────────────────
+
+
+def test_a_rule_nothing_ran_against_is_not_counted_as_checked():
+    """The line a user saw first, and it read as three violations.
+
+    `describe` counted every finding as "checked" whatever happened, so three
+    rules that nothing could test printed as "3 rule(s) checked, 0 held, 3
+    could not be checked" — which a reader takes as three failures. Nothing
+    ran. Saying so is the whole fix.
+    """
+    from vesta.enforce import Finding, Verdict
+
+    verdict = Verdict(
+        findings=[
+            Finding(rule=f"rule {n}", said=f"rule {n}", undecided="nothing here can check this")
+            for n in range(3)
+        ]
+    )
+    said = verdict.describe()
+
+    assert "nothing could be checked" in said
+    assert "0 held" not in said
+    assert "3 rule(s) checked" not in said
+
+
+def test_what_ran_and_what_did_not_are_counted_apart():
+    from vesta.enforce import Finding, Site, Verdict
+
+    verdict = Verdict(
+        findings=[
+            Finding(rule="held one", said="held one"),
+            Finding(rule="broken one", said="broken one", sites=[Site(path="a.py", line=1)]),
+            Finding(rule="unchecked one", said="unchecked one", undecided="no check was written"),
+        ]
+    )
+    said = verdict.describe()
+
+    # Two ran; the third did not and must not inflate the denominator.
+    assert "2 rule(s) checked" in said
+    assert "1 held" in said
+    assert "1 broken" in said
+    assert "1 not checked" in said
+
+
+def test_the_reason_a_rule_could_not_be_checked_is_kept():
+    """It was computed and thrown away, so a user got a number they could not
+    act on — and could not tell an unverifiable rule from a verified one."""
+    from vesta.enforce import Finding, Verdict
+
+    verdict = Verdict(
+        findings=[Finding(rule="modes thing", said="modes thing", undecided="nothing here can check a rule of this kind")]
+    )
+    assert verdict.undecided
+    assert verdict.undecided[0].undecided

@@ -127,6 +127,17 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
             ("vesta used --since 60", "the last hour of it"),
         ],
     ),
+    (
+        "What is it keeping on my disk?",
+        "A graph, a vocabulary, your rules and notes, for every repository it "
+        "has been used in, all under ~/.vesta. Nothing is deleted unless you "
+        "ask — but a repository that no longer exists is holding space for an "
+        "answer nobody can ever want again.",
+        [
+            ("vesta held", "what is held, per repository, biggest first"),
+            ("vesta held --reclaim", "remove what belongs to repositories that are gone"),
+        ],
+    ),
 ]
 
 # What Vesta is, in the fewest words that are still true.

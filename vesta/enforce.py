@@ -101,12 +101,26 @@ class Verdict(BaseModel):
         return [f for f in self.findings if f.undecided]
 
     def describe(self) -> str:
-        held = len([f for f in self.findings if f.holds])
-        parts = [f"{len(self.findings)} rule(s) checked", f"{held} held"]
+        """What was found, counting only what was actually checked.
+
+        A rule nothing ran against was not checked, and saying "3 checked, 0
+        held" when nothing ran reads as three violations. The two numbers are
+        kept apart: what ran, and what could not be run at all.
+        """
+        ran = [f for f in self.findings if not f.undecided]
+        held = len([f for f in ran if f.holds])
+
+        if not ran:
+            return (
+                f"nothing could be checked — {len(self.undecided)} rule(s) "
+                "carry no check that runs here"
+            )
+
+        parts = [f"{len(ran)} rule(s) checked", f"{held} held"]
         if self.broken:
             parts.append(f"{len(self.broken)} broken")
         if self.undecided:
-            parts.append(f"{len(self.undecided)} could not be checked")
+            parts.append(f"{len(self.undecided)} not checked")
         return ", ".join(parts)
 
 

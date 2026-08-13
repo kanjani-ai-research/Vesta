@@ -125,8 +125,31 @@ class Asked(BaseModel):
 
     @property
     def waiting(self) -> List[Verdict]:
-        """Candidates the user has seen and not yet decided."""
-        return [v for v in self.verdicts if not v.settled]
+        """Candidates the user has seen and not yet decided.
+
+        Candidates whose own sentence withdraws the claim are dropped, because
+        nothing re-runs any test once a verdict is persisted — so tightening
+        the extractor would leave every already-captured fragment sitting here
+        and the queue would never get cleaner than the day it was worst. "it
+        should be conditional, I don't know whether your assertion holds"
+        asked a user to confirm something they had already said they could not.
+
+        **Only that.** The first attempt re-ran the whole `constrains` test
+        here, which was wrong twice over: it is the gate for scanning raw
+        transcripts, deliberately conservative, and candidates reach this
+        queue by other paths that were never subject to it. It dropped "one
+        .env for v3, not one per service" — a real rule, correctly extracted —
+        and it would have dropped every rule a user declared outright, since a
+        declared rule has no reason to match a harvesting pattern.
+
+        A candidate the user already settled is untouched either way. Their
+        verdict is theirs and a later change of ours does not overrule it.
+        """
+        from .rules import UNSURE
+
+        return [
+            v for v in self.verdicts if not v.settled and not UNSURE.search(v.text)
+        ]
 
     def lately(self, since: float) -> List[Verdict]:
         """What was recorded recently.

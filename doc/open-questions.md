@@ -203,6 +203,28 @@ re-reading.
 call only on a *miss*. The expensive path then runs at the frequency of
 failure rather than the frequency of use, and the common case stays free.
 
+**And whichever wins, it drags a UX problem behind it.** This is the part that
+makes the question larger than it looks. Choosing sentence-transformers is not
+one decision, it is three:
+
+- *which scorer* — native, local model, or haiku. A layer above the scoring
+  itself, and the honest default is not obvious: the right answer differs for a
+  user on a plane, a user paying per token, and a user who wants determinism.
+- *which embedding model*, if local — there are dozens, they differ by an order
+  of magnitude in size, and the good default changes yearly.
+- *installing it* — a model download inside a plugin the framework installed,
+  on first use, in a session where somebody is trying to do something else.
+
+That is exactly the shape this project has refused elsewhere: optional imports
+and configuration flags are how not to decide. A scorer chosen by a settings
+menu is three code paths that must all stay correct, and two of them will be
+untested in practice.
+
+So the question is not only *which scorer is best* but **whether Vesta can take
+a local model without becoming configurable** — and if it cannot, the fourth
+option above starts looking less like a compromise and more like the only shape
+that preserves the property that installing Vesta requires no decisions.
+
 ---
 
 ## 4. Cross-project metadata is a timestamp
@@ -301,21 +323,71 @@ implies.
 
 ---
 
+## What was done before release
+
+Two of the five were credibility problems rather than features, and both are
+fixed. Neither touches the research questions above; they are the parts where
+Vesta was **overstating what it knew**, which a tool built against that failure
+cannot ship.
+
+**From question 2 — reporting a check that never ran.** `describe()` counted
+every finding as "checked" whatever happened, so three rules nothing could test
+printed as `3 rule(s) checked, 0 held, 3 could not be checked` — which reads as
+three violations. It now separates what ran from what did not, and
+`decided --check` prints the reason each rule could not be checked instead of
+computing it and throwing it away.
+
+Extraction also stopped admitting sentences that withdraw their own claim.
+`CONSTRAINS` matches "should", and nothing tested whether the same sentence
+said "I don't know" — so *"it should be conditional, I don't know whether your
+assertion holds"* reached the queue as a rule awaiting confirmation the user
+had already disclaimed. The `UNSURE` guard rejects those, at harvest and in the
+queue. On this repository: 48 rules → 44, 37 gaps → 33, all three standing
+rules kept.
+
+That guard is a whole-sentence veto and it is wrong in one direction on
+purpose. *"I don't know why, but every module must open with a docstring"* is a
+real rule and this rejects it. A missed rule costs one `/vesta:declare`; a
+queue full of things a user has already said they cannot settle costs their
+willingness to look at the queue at all.
+
+**From question 5 — nothing reported or reclaimed anything.** `vesta held`
+lists every holding by repository, biggest first, and `--reclaim` removes what
+is dead. On this machine that was **343M → 12M**, of which 330.5M was a single
+graph rooted at `/private/tmp` — the system temp directory, walked as though it
+were a project.
+
+Three things that only surfaced by running it:
+
+- *Age is the wrong signal, and so is a temp root.* pytest puts every
+  `tmp_path` under `/private/var/folders`, so "anything temporary-rooted is
+  dead" marked live test repositories reclaimable. The rule is now: gone means
+  gone, and a graph of a temp root *itself* is junk — reported separately,
+  because it is not dead, it should never have been built.
+- *An unreachable path is not a deleted one.* An unmounted volume fails
+  `exists()` while the repository is perfectly alive, so that answers *unknown*
+  and is never in the set to remove.
+- *The sizes were doubly counted.* A graph is stored as JSON and SQLite;
+  counting the database beside each JSON, when the walk had already counted it,
+  overstated every holding by roughly half — in a report whose whole job is
+  telling somebody how much they would get back.
+
 ## What is worth doing first
 
 Not a plan, but the honest ordering by evidence:
 
-1. **Print why a rule could not be checked.** The reason is already computed and
-   thrown away. Smallest change, immediate effect, and it makes question 2
-   measurable rather than anecdotal.
-2. **Record the phrase and the hit count in `used.jsonl`.** Until that exists,
+Of what remains:
+
+1. **Record the phrase and the hit count in `used.jsonl`.** Until that exists,
    the similarity question can only be argued from preference — and the three
    candidates differ by two orders of magnitude in cost, which is too wide a
    gap to guess across.
-3. **Reclaim `~/.vesta`.** 331M of one abandoned graph is not a design problem,
-   it is a missing command.
+2. **Run the thirteen checks that already have a strategy.** They name
+   something specific and none of them executes. Whether that is a bug or a
+   missing capability is not yet known, and finding out is cheap.
+3. **Decide whether `kind` earns its keep** — but only after (1), since the
+   evidence for it is the same evidence.
 
-The first two are instrumentation, not features, and that is the point: three
-of the five questions above cannot currently be answered with evidence from a
-tool whose entire premise is answering with evidence. Everything else waits on
-them.
+The first is instrumentation rather than a feature, and that is the point:
+the remaining questions cannot be answered with evidence by a tool whose whole
+premise is answering with evidence. Everything else waits on it.

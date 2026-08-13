@@ -105,6 +105,28 @@ DELIBERATES = re.compile(
     re.I,
 )
 
+# Somebody saying outright that they do not know.
+#
+# Separate from DELIBERATES because it is a different act: deliberating is
+# floating a proposal, and this is stating a constraint while disclaiming the
+# knowledge to state it. Both produce a sentence containing "should", and
+# CONSTRAINS matches on "should".
+#
+# Found in live data. "it should be conditional, I don't know whether your
+# assertion holds" reached the adjudication queue as a rule awaiting the
+# user's confirmation — a sentence in which they had already said they could
+# not confirm it. A queue full of those teaches somebody the feature is noise,
+# and they stop looking at the ones that are real.
+UNSURE = re.compile(
+    r"\b(i (don'?t|do not) know\b|"
+    r"i'?m not (sure|certain)\b|"
+    r"not sure (if|whether|that)\b|"
+    r"i can'?t tell\b|"
+    r"no idea\b|"
+    r"who knows\b)",
+    re.I,
+)
+
 # A correction that scopes one turn. These expire; they are not standing rules.
 #
 # Widened after a live test recorded "don't edit anything yet, just tell me
@@ -356,6 +378,10 @@ def constrains(text: str) -> bool:
     if DELIBERATES.search(said):
         # A proposal or a question. Recording it would return a user's own open
         # question to them as an obligation, which is worse than missing it.
+        return False
+    if UNSURE.search(said):
+        # They said they do not know. Asking them to confirm it as a standing
+        # rule asks them to settle something they have just said they cannot.
         return False
     if DEFINES.search(said):
         # Stated as a definition rather than an instruction. Still a rule.

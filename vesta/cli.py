@@ -237,6 +237,17 @@ def _rules(args: argparse.Namespace) -> int:
         _say(f"   you said: {finding.said[:90]}")
         for site in finding.sites[: args.show]:
             _say(f"      {site.describe()[:96]}")
+
+    # Why a rule could not be checked, which was computed and thrown away. A
+    # user who is told "not checked" and not told why has been given a number
+    # they cannot act on — and cannot tell an unverifiable rule from a
+    # verified one, which is the same as being told nothing.
+    if verdict.undecided:
+        _say("")
+        _say(f"{len(verdict.undecided)} rule(s) nothing could check:")
+        for finding in verdict.undecided[: args.show]:
+            _say(f"  ? {finding.rule[:88]}")
+            _say(f"      {finding.undecided[:88]}")
     return 0
 
 
@@ -624,6 +635,33 @@ def _drive(args: argparse.Namespace) -> int:
     return 0
 
 
+def _held(args: argparse.Namespace) -> int:
+    """What Vesta is holding, and getting rid of what is dead.
+
+    Reports by default and removes only when asked. Deleting things in
+    somebody's home directory without showing them first is not a convenience.
+    """
+    from .reclaim import _size, held, reclaim
+
+    holding = held()
+    _say(holding.describe(show=args.show))
+
+    if not args.reclaim:
+        return 0
+
+    if not holding.dead:
+        _say("")
+        _say("Nothing to reclaim — every repository held here still exists.")
+        return 0
+
+    files, freed, refused = reclaim(holding.dead)
+    _say("")
+    _say(f"Reclaimed {_size(freed)} from {files} file(s).")
+    for why in refused[:5]:
+        _say(f"  could not remove {why}")
+    return 0
+
+
 def _tutorial(args: argparse.Namespace) -> int:
     """One chapter of the tutorial, for the agent to draw as a dialog.
 
@@ -811,6 +849,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     words.add_argument("--templates", action="store_true", help="what is shipped")
     words.add_argument("--root", default=".")
     words.set_defaults(run=_words)
+
+    kept = sub.add_parser("held", help="what vesta is holding, and what is dead")
+    kept.add_argument(
+        "--reclaim",
+        action="store_true",
+        help="remove what belongs to repositories that no longer exist",
+    )
+    kept.add_argument("--show", type=int, default=12)
+    kept.set_defaults(run=_held)
 
     tutorial = sub.add_parser("tutorial", help="learn vesta a page at a time")
     # A chapter number, or nothing to pick up where they left off. Positional,

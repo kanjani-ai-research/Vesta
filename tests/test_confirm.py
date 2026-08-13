@@ -248,3 +248,41 @@ def test_a_candidate_is_found_by_a_fragment(tmp_path):
 def test_an_unknown_handle_is_taken_at_face_value(tmp_path):
     """So declaring something new still works through the same door."""
     assert confirm.find(tmp_path, "something nobody said") == "something nobody said"
+
+
+def test_the_queue_drops_candidates_a_tightened_extractor_would_reject(tmp_path):
+    """Otherwise the queue never gets cleaner than the day it was worst.
+
+    Nothing re-runs the constraint test once a verdict is persisted, so
+    tightening the extractor left every fragment already captured sitting in
+    the queue — including "it should be conditional, I don't know whether your
+    assertion holds", a sentence in which the user disclaimed the very thing
+    they were being asked to confirm.
+    """
+    confirm.record(
+        tmp_path,
+        "it should be conditional, I don't know whether your assertion holds",
+        confirm.ABSTAINED,
+    )
+    confirm.record(tmp_path, "one .env for v3, not one per service", confirm.ABSTAINED)
+
+    waiting = [v.text for v in confirm.recall(tmp_path).waiting]
+
+    # A real rule stays, including one the harvest-time gate would reject —
+    # candidates reach this queue by paths that gate never saw.
+    assert "one .env for v3, not one per service" in waiting
+    assert not any("don't know" in text for text in waiting)
+
+
+def test_a_verdict_the_user_gave_is_not_overruled_by_a_later_change(tmp_path):
+    """Re-testing applies to the queue, not to decisions already made.
+
+    A user who said "yes, that is a rule" settled it. Tightening what Vesta
+    would have captured does not un-settle what they told it.
+    """
+    said = "it should be conditional, I don't know whether your assertion holds"
+    confirm.record(tmp_path, said, confirm.IS_A_RULE)
+
+    asked = confirm.recall(tmp_path)
+    assert not asked.waiting
+    assert any(v.text == said and v.settled for v in asked.verdicts)
