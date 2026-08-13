@@ -1301,6 +1301,69 @@ def build_server():
         return answer or "No rule you have set is in doubt for these files."
 
     @server.tool()
+    async def how(context: Context = None) -> str:
+        """Ask the user how they want a project built, and record it.
+
+        Two ways to work, and which one somebody wants is not inferable from
+        what they said. "Build me an expense tracker" is the most ordinary
+        request there is: most of the time it means build it, and sometimes it
+        means drive it to completion. Guessing either way is wrong often
+        enough to be useless, so this asks — once, when it matters.
+
+        Call this when the user asks for a whole project to be built and
+        nothing has been agreed for it yet. Do not call it for ordinary work
+        in a project that already exists.
+        """
+        from typing import Literal as _Literal
+
+        from pydantic import BaseModel as _Model
+        from pydantic import Field as _Field
+
+        here = await project_of(context)
+        if here is None:
+            return "Could not tell which project this is."
+
+        class Choice(_Model):
+            how: _Literal["build it", "drive it to completion"] = _Field(
+                description=(
+                    "build it: I work as usual and you review as we go. "
+                    "drive it: agree a short list of behaviours first, then I "
+                    "build until every one is met, tested, and your rules are "
+                    "honoured — stopping on counts, not on my say-so."
+                ),
+            )
+
+        try:
+            answer = await context.elicit(
+                message=f"How should {Path(here).name} be built?", schema=Choice
+            )
+        except Exception as exc:  # noqa: BLE001 - a client need not support this
+            logger.info("could not ask: %s", exc)
+            return (
+                "Could not ask. Building it the ordinary way; "
+                "`/vesta:drive on` switches to driving at any point."
+            )
+
+        if getattr(answer, "action", "") != "accept" or answer.data is None:
+            return (
+                "Nothing chosen. Building it the ordinary way; "
+                "`/vesta:drive on` switches to driving at any point."
+            )
+
+        import anyio
+
+        if answer.data.how.startswith("drive"):
+            from . import driving
+
+            await anyio.to_thread.run_sync(driving.start, here)
+            return (
+                "Driving. Run the `vesta-spec` subagent now to turn what they "
+                "asked for into a short list of behaviours, show them, and "
+                "wait for `/vesta:agree` before writing any code."
+            )
+        return "Building it the ordinary way. Carry on."
+
+    @server.tool()
     async def declare(rule: str, context: Context = None) -> str:
         """Record a standing rule the user has just stated.
 

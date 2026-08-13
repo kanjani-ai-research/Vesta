@@ -508,6 +508,15 @@ def _drive(args: argparse.Namespace) -> int:
 
     if args.on:
         driving.start(where)
+        from .contract import recall as recall_contract
+
+        if recall_contract(where) is None:
+            _say(f"Driving {where.name}, with nothing agreed yet.")
+            _say("")
+            _say("Say what you want built. Vesta will put a short list of")
+            _say("behaviours in front of you to agree to before anything is")
+            _say("written, and then build until they are met and tested.")
+            return 0
         _say(f"Driving {where.name}. It will run until:")
         _say("  every agreed behaviour is built and reached by a test")
         _say("  the tests pass")

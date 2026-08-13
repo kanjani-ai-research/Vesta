@@ -462,7 +462,11 @@ def test_the_stop_hook_blocks_after_agreeing(tmp_path):
 
 def test_a_build_request_demands_no_contract_as_a_companion(fresh):
     """The regression this covers: full-auto machinery reached a plain session,
-    and "build me a script" was met with a specification to approve."""
+    and "build me a script" was met with a specification to approve.
+
+    Asking *which way* to build is not that — it is one dialog with two
+    options, and the ordinary one is the default. What must never happen is a
+    companion session being handed a specification to sign."""
     assert not __import__("vesta.driving", fromlist=["x"]).state(fresh).on
     said = _said(
         _hook(
@@ -470,7 +474,8 @@ def test_a_build_request_demands_no_contract_as_a_companion(fresh):
             {"prompt": "build me a script that renames files in bulk", "cwd": str(fresh)},
         )
     )
-    assert said == "", f"companion mode asked for a contract: {said[:120]}"
+    assert "vesta-spec" not in said, f"companion mode demanded a contract: {said[:120]}"
+    assert "/vesta:agree" not in said
 
 
 def test_a_change_is_not_adjudicated_as_a_companion(fresh):
@@ -572,49 +577,62 @@ def test_a_companion_session_can_always_end(fresh):
     assert _hook("keep-going.sh", {"cwd": str(fresh)}) == {}
 
 
-def test_nothing_companion_facing_reaches_automation_ungated():
-    """The rule this user stated, made checkable.
+# ── Which way to build is asked, not guessed ────────────────────────────────
 
-    "non-full auto is a companion, no consent" is a constraint on the code:
-    every use of the contract, adjudication or driving machinery from a path
-    that runs in an ordinary session must sit behind a driving gate. It was
-    stated in conversation, violated within the hour, and nothing noticed —
-    because a rule with no check cannot be broken detectably.
-    """
-    import ast
-    import inspect
 
-    from vesta import inject
-
-    tree = ast.parse(inspect.getsource(inject))
-    automation = {"contract", "asked", "driving"}
-
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-
-        reaches = {
-            inner.module.lstrip(".")
-            for inner in ast.walk(node)
-            if isinstance(inner, ast.ImportFrom) and inner.module
-        } | {
-            alias.name.lstrip(".")
-            for inner in ast.walk(node)
-            if isinstance(inner, ast.Import)
-            for alias in inner.names
-        }
-        if not (reaches & automation):
-            continue
-        if node.name in ("_driving", "main"):
-            continue
-
-        gated = any(
-            isinstance(inner, ast.Call)
-            and isinstance(inner.func, ast.Name)
-            and inner.func.id == "_driving"
-            for inner in ast.walk(node)
+def test_a_fresh_project_asks_how_rather_than_assuming(fresh):
+    """"Build me an expense tracker" is the most ordinary request there is,
+    and it means "build it" far more often than "drive it to completion".
+    Offering automation on every such prompt is noise on the commonest thing
+    anybody says; assuming it is worse. So the user is asked."""
+    said = _said(
+        _hook(
+            "inject.sh",
+            {
+                "prompt": (
+                    "Build an expense tracker I can use from the terminal. I "
+                    "want to record an expense with an amount, a category and "
+                    "a note, and see what I have spent this month broken down "
+                    "by category."
+                ),
+                "cwd": str(fresh),
+            },
         )
-        assert gated, (
-            f"{node.name} reaches {sorted(reaches & automation)} without asking "
-            "whether this project is being driven — companion mode would run it"
+    )
+    assert "`how` tool" in said
+    assert "do not decide for them" in said.lower()
+
+
+def test_once_driving_the_question_is_not_asked_again(fresh):
+    from vesta import driving
+
+    driving.start(fresh)
+    said = _said(
+        _hook(
+            "inject.sh",
+            {
+                "prompt": (
+                    "Build an expense tracker I can use from the terminal. I "
+                    "want to record an expense with an amount, a category and "
+                    "a note, and see what I have spent this month broken down "
+                    "by category."
+                ),
+                "cwd": str(fresh),
+            },
         )
+    )
+    assert "vesta-spec" in said
+    assert "`how` tool" not in said
+
+
+def test_the_how_tool_exists_and_takes_nothing(fresh):
+    """It asks; it is not told."""
+    import asyncio
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    from vesta.sidecar import build_server
+
+    tools = {t.name: t for t in asyncio.run(build_server().list_tools())}
+    assert "how" in tools
+    assert not (tools["how"].inputSchema or {}).get("properties")

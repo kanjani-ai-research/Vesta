@@ -352,9 +352,6 @@ def _something_to_build(prompt: str, project: str) -> str:
     agent built the whole thing with no contract, no verification and no
     consent. Everything was installed correctly and none of it was used.
     """
-    if not _driving(project):
-        return ""
-
     try:
         from .contract import recall as recall_contract
 
@@ -385,6 +382,22 @@ def _something_to_build(prompt: str, project: str) -> str:
     if existing and len(prompt.split()) < 25:
         return ""
 
+    # Which way somebody wants a project built is not inferable from what they
+    # said, and guessing is wrong often enough to be useless: "build me an
+    # expense tracker" is the most ordinary request there is, and it means
+    # "build it" far more often than "drive it to completion". Offering
+    # automation on every such prompt is noise on the commonest thing anybody
+    # says; assuming it is worse. So the user is asked, once, in a dialog they
+    # answer with one keystroke.
+    if not _driving(project):
+        return (
+            "This asks for a whole project to be built and nothing has been "
+            "agreed for it. Call the `how` tool — it asks them whether to "
+            "build it the ordinary way or drive it to completion, and records "
+            "the answer. Then carry on with whichever they chose.\n\n"
+            "Do not ask them in prose and do not decide for them."
+        )
+
     return (
         "This asks for something to be built and nothing has been agreed for "
         "this project yet.\n\n"
@@ -392,8 +405,7 @@ def _something_to_build(prompt: str, project: str) -> str:
         "what they asked for into a short list of behaviours, which you show "
         "them and they agree to with `/vesta:agree`. **Do not start building "
         "until they have agreed** — the point is that they see what will be "
-        "built while changing it is still free.\n\n"
-        "If they would rather you just built it, they will say so."
+        "built while changing it is still free."
     )
 
 
