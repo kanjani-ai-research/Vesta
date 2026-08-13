@@ -312,3 +312,42 @@ def test_a_fresh_repository_answers_what_it_can_without_preparation(tmp_path):
 
     defects = _defects(tmp_path, 3)
     assert "agent" not in defects.lower()
+
+
+def test_every_offer_the_hook_defines_is_actually_called():
+    """The failure this covers: two offers were written, tested directly, and
+    never wired into `main`. Their tests passed and the hook produced nothing —
+    a whole feature dead in the one place it had to run.
+
+    A reference graph cannot see this: the functions exist and are referenced
+    by their tests, so nothing is unreferenced. What is missing is a call from
+    one specific place."""
+    import ast
+    import inspect
+
+    from vesta import inject
+
+    source = inspect.getsource(inject)
+    tree = ast.parse(source)
+
+    offers = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name.startswith(("_a_", "_something_"))
+    }
+    assert offers, "no offers found at all"
+
+    main = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "main"
+    )
+    called = {
+        node.func.id
+        for node in ast.walk(main)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+    missing = offers - called
+    assert not missing, f"defined but never called by the hook: {sorted(missing)}"

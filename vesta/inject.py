@@ -225,7 +225,12 @@ def main() -> int:
     # in the course of asking for something else does not match a description
     # about asking. Verified the hard way — in a live session the instruction
     # was never in front of the agent, so nothing was recorded.
-    for offer in (_a_rule_stated(prompt), _a_rule_in_doubt(prompt, project)):
+    for offer in (
+        _something_to_build(prompt, project),
+        _a_rule_stated(prompt),
+        _a_change_to_what_was_agreed(prompt, project),
+        _a_rule_in_doubt(prompt, project),
+    ):
         if offer:
             parts.append(offer)
 
@@ -284,6 +289,79 @@ def _a_rule_in_doubt(prompt: str, project: str) -> str:
     except Exception as exc:  # noqa: BLE001 - never break the session
         logger.info("could not check what bears on this: %s", exc)
         return ""
+
+
+# Somebody asking for something to be built, rather than asking about code that
+# already exists. Deliberately broad: the cost of mentioning the contract on a
+# prompt that did not need it is one line the agent ignores, and the cost of
+# missing one is a project built with nothing agreed — which is what happened
+# the first time this was run for real.
+TO_BUILD = re.compile(
+    r"\b(build|make|create|write|implement|add)\b.{0,60}\b("
+    r"me |a |an |the |app|application|tool|script|cli|api|service|"
+    r"program|site|website|server|library|package|game|bot)",
+    re.I,
+)
+
+# What marks a prompt as being about code that is already there, which is the
+# ordinary case and needs no contract.
+ABOUT_WHAT_EXISTS = re.compile(
+    r"\b(fix|debug|why|explain|what does|where is|refactor|rename|review|"
+    r"test this|the bug|failing|broken|this file|this function)\b",
+    re.I,
+)
+
+
+def _something_to_build(prompt: str, project: str) -> str:
+    """Whether they are asking for something to be built with nothing agreed.
+
+    **This is a hook rather than a skill for a reason that was learned the hard
+    way.** The instruction lived in the skill, whose description is about
+    answering questions on an existing repository — so "build me a todo list"
+    in an empty directory matched nothing, the skill never loaded, and the
+    agent built the whole thing with no contract, no verification and no
+    consent. Everything was installed correctly and none of it was used.
+    """
+    try:
+        from .contract import recall as recall_contract
+
+        if recall_contract(project) is not None:
+            return ""  # something is already agreed; nothing to elicit
+    except Exception as exc:  # noqa: BLE001 - never break a prompt
+        logger.info("could not read the contract: %s", exc)
+        return ""
+
+    if not TO_BUILD.search(prompt) or ABOUT_WHAT_EXISTS.search(prompt):
+        return ""
+
+    # A whole thing, not a piece of one. "Add a field to the form" is ordinary
+    # work in something that already exists; demanding a contract for it would
+    # make the tool insufferable. What marks a project is that there is nothing
+    # here yet, or that they described several things they want it to do.
+    from pathlib import Path as _Path
+
+    root = _Path(project).expanduser()
+    try:
+        existing = [
+            p for p in root.rglob("*.py")
+            if not any(part.startswith(".") for part in p.parts)
+        ]
+    except OSError:
+        existing = []
+
+    if existing and len(prompt.split()) < 25:
+        return ""
+
+    return (
+        "This asks for something to be built and nothing has been agreed for "
+        "this project yet.\n\n"
+        "Run the `vesta-spec` subagent now, before writing any code. It turns "
+        "what they asked for into a short list of behaviours, which you show "
+        "them and they agree to with `/vesta:agree`. **Do not start building "
+        "until they have agreed** — the point is that they see what will be "
+        "built while changing it is still free.\n\n"
+        "If they would rather you just built it, they will say so."
+    )
 
 
 def _a_change_to_what_was_agreed(prompt: str, project: str) -> str:

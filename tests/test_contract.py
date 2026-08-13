@@ -343,3 +343,42 @@ def test_the_spec_agent_is_told_not_to_argue_with_it():
     said = _flat(SPEC.read_text(encoding="utf-8"))
     assert "do not argue with it" in said
     assert 'say "sure" and nothing else' in said
+
+
+def test_a_brief_with_nothing_agreed_reaches_the_agent():
+    """The live failure. Everything was installed — the spec agent was listed,
+    the server connected, every command registered — and the agent built the
+    whole project with no contract, no verification and no consent, because
+    the instruction lived in a skill whose description is about answering
+    questions on an existing repository."""
+    from vesta.inject import _something_to_build
+
+    import tempfile
+
+    empty = Path(tempfile.mkdtemp())
+    said = _something_to_build(
+        "Build a command-line todo list.\n\nI want to be able to add a task, "
+        "see my tasks, mark one done, and delete one. Tasks should survive "
+        "between runs.",
+        str(empty),
+    )
+    assert "vesta-spec" in said
+    assert "do not start building until they have agreed" in said.lower()
+
+
+def test_ordinary_work_does_not_demand_a_contract(tmp_path):
+    """Demanding one for "add a field to the form" would make the tool
+    insufferable."""
+    from vesta.inject import _something_to_build
+
+    (tmp_path / "app.py").write_text("def x():\n    return 1\n", encoding="utf-8")
+    assert _something_to_build("add a field to the form", str(tmp_path)) == ""
+    assert _something_to_build("why is this test failing?", str(tmp_path)) == ""
+    assert _something_to_build("refactor the storage module", str(tmp_path)) == ""
+
+
+def test_nothing_is_said_once_something_is_agreed(tmp_path):
+    from vesta.inject import _something_to_build
+
+    keep(Contract(goal="x", behaviours=[Behaviour(does="a user can y")]), tmp_path)
+    assert _something_to_build("build me a todo app", str(tmp_path)) == ""
