@@ -40,8 +40,6 @@ from .home import home
 
 logger = logging.getLogger("vesta.domain")
 
-# Where a repository's ontology is kept.
-ONTOLOGIES = home() / "ontologies"
 
 # How many module docstrings to ground the analysis in. Enough to describe the
 # project, few enough that the purpose stays about the project rather than

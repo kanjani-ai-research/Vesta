@@ -1383,11 +1383,21 @@ def build_server():
         from . import driving
 
         await anyio.to_thread.run_sync(driving.start, here)
+        from .inject import _launcher
+
         return (
             "Agreed, and building. Behaviour is fixed from here: a request "
             "that would change what the system does is a different project.\n\n"
+            "**As you finish each behaviour, record it.** Nothing else tells "
+            "the contract it is done, and a behaviour it does not know about "
+            "is one the loop keeps asking for:\n\n"
+            f"  V={_launcher()}\n"
+            '  $V contract --met "<the behaviour, word for word>" '
+            '--node "file.py:function" --test "test_file.py:test_name"\n\n'
+            "One call per behaviour. Copy the wording from the contract "
+            "exactly — a near miss matches nothing.\n\n"
             "The session will not end while anything is outstanding — a "
-            "behaviour unbuilt or untested, a failing test, a defect. Those "
+            "behaviour unbuilt or unrecorded, a failing test, a defect. Those "
             "are counted, not judged. Work through them."
         )
 

@@ -801,3 +801,120 @@ def test_nothing_tells_the_agent_to_spawn_a_subagent_for_the_spec(fresh):
     )
     assert "subagent" not in said.lower().replace("do not spawn a subagent", "")
     assert "yourself, in this session" in said
+
+
+def test_the_agent_is_told_to_record_each_behaviour(fresh):
+    """A live run built everything, wrote 32 passing tests, and recorded none
+    of it — because nothing ever said to. The contract then read `not built`
+    for all five, so the loop had no way to know the work was done.
+
+    Two runs had done it by inference. The third did not, and inference is not
+    a mechanism.
+    """
+    from vesta import driving
+    from vesta.contract import Behaviour, Contract, keep, sign
+
+    keep(Contract(goal="x", behaviours=[Behaviour(does="a user can do it")]), fresh)
+    sign(fresh)
+    driving.start(fresh)
+    (fresh / "app.py").write_text('"""D."""\n\n\ndef w():\n    return 1\n')
+
+    answered = _hook("keep-going.sh", {"cwd": str(fresh)})
+    assert answered.get("decision") == "block"
+    assert "contract --met" in answered["reason"]
+    assert "word for word" in answered["reason"]
+
+
+def test_agreeing_says_how_to_record_what_is_built():
+    """Said at the moment building starts, not only when the loop complains."""
+    import inspect
+
+    from vesta import sidecar
+
+    source = " ".join(inspect.getsource(sidecar).split())
+    at = source.index("Agreed, and building")
+    said = source[at : at + 700]
+    assert "contract --met" in said
+    assert "as you finish each behaviour, record it" in said.lower()
+
+
+# ── Which model does which work ────────────────────────────────────────────
+#
+# Analysis of text for labels is haiku. Synthesis run selectively is sonnet.
+#
+# Not a preference: labelling happens once for every definition and every turn
+# in a repository, and a larger model at that volume makes the approach too
+# expensive to use at all. This was the original design and it was silently
+# replaced with sonnet everywhere, which is why it is a test now.
+
+ANALYSIS = {"vesta-domain", "vesta-rules", "vesta-defects"}
+SYNTHESIS = {"vesta-spec"}
+
+
+@pytest.mark.parametrize(
+    "path", sorted((HERE / "agents").glob("*.md")), ids=lambda p: p.stem
+)
+def test_analysis_runs_on_haiku_and_synthesis_on_sonnet(path):
+    front = path.read_text(encoding="utf-8").split("---", 2)[1]
+    model = next(
+        line.split(":", 1)[1].strip()
+        for line in front.splitlines()
+        if line.startswith("model:")
+    )
+
+    if path.stem in ANALYSIS:
+        assert model == "haiku", (
+            f"{path.stem} reads text and labels it, once for every definition "
+            f"or turn — that is haiku's work, not {model}'s"
+        )
+    elif path.stem in SYNTHESIS:
+        assert model == "sonnet"
+    else:
+        raise AssertionError(f"{path.stem} is classified as neither")
+
+
+@pytest.mark.parametrize(
+    "path", sorted((HERE / "agents").glob("*.md")), ids=lambda p: p.stem
+)
+def test_the_model_field_carries_no_comment(path):
+    """The loader takes the whole trimmed value, so a trailing comment becomes
+    part of the model name."""
+    front = path.read_text(encoding="utf-8").split("---", 2)[1]
+    model = next(
+        line.split(":", 1)[1].strip()
+        for line in front.splitlines()
+        if line.startswith("model:")
+    )
+    assert model in ("haiku", "sonnet", "opus", "inherit")
+    assert "#" not in model
+
+
+def test_nothing_hardcodes_a_model_in_code():
+    """A model named in code is one nobody can change without editing Vesta.
+
+    Checked against string literals rather than the file, since a docstring
+    explaining the bug quotes the very thing it warns about.
+    """
+    import ast
+
+    for path in (HERE / "vesta").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        docstrings = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(
+                node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            )
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            if id(node) in docstrings:
+                continue
+            for named in ("claude-sonnet", "claude-haiku", "claude-opus"):
+                assert named not in node.value, (
+                    f"{path.name}:{node.lineno} hardcodes {named}"
+                )

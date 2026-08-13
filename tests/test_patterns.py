@@ -362,3 +362,75 @@ def test_a_test_helper_is_not_reported(tmp_path):
         encoding="utf-8",
     )
     assert "helper" not in " ".join(s.describe() for s in _only_tests(tmp_path))
+
+
+# ── A constant nobody reads ────────────────────────────────────────────────
+
+
+def test_a_constant_nothing_reads_is_found(tmp_path):
+    """Invisible to everything else here.
+
+    A language server reports functions and classes as symbols and mostly does
+    not report assignments, so a constant sits outside the graph entirely —
+    `nothing refers to this` cannot see it. And `calls something that does not
+    exist` looks the other way: at names used and missing, not defined and
+    unused.
+
+    `SHARPER = "anthropic/claude-sonnet-4-5"` survived the removal of the code
+    that used it, sat there for weeks, and was noticed by a person reading the
+    file. It was a wrong value by then — a model choice nobody had made — which
+    is what makes a stale constant worse than a stale function: it reads as a
+    decision.
+    """
+    from vesta.dynamic import Blindspot
+    from vesta.graph import Graph
+    from vesta.patterns import constants_nobody_reads
+
+    (tmp_path / "app.py").write_text(
+        'SHARPER = "a model nobody chose"\n'
+        'USED = "still needed"\n\n\n'
+        "def work():\n    return USED\n",
+        encoding="utf-8",
+    )
+    found = " ".join(
+        s.describe()
+        for f in constants_nobody_reads(Graph(root=str(tmp_path)), tmp_path, Blindspot())
+        for s in f.sites
+    )
+    assert "SHARPER" in found
+    assert "USED" not in found
+
+
+def test_a_constant_read_from_another_file_is_not_dead(tmp_path):
+    (tmp_path / "a.py").write_text('SHARED = "x"\n', encoding="utf-8")
+    (tmp_path / "b.py").write_text(
+        "from a import SHARED\n\n\ndef w():\n    return SHARED\n", encoding="utf-8"
+    )
+    from vesta.dynamic import Blindspot
+    from vesta.graph import Graph
+    from vesta.patterns import constants_nobody_reads
+
+    found = " ".join(
+        s.describe()
+        for f in constants_nobody_reads(Graph(root=str(tmp_path)), tmp_path, Blindspot())
+        for s in f.sites
+    )
+    assert "SHARED" not in found
+
+
+def test_vesta_carries_no_constant_nobody_reads():
+    """Seven were found the first time this ran, every one a leftover from the
+    removal of the inference path."""
+    from pathlib import Path as _Path
+
+    from vesta.dynamic import Blindspot
+    from vesta.held import graph_for
+    from vesta.patterns import constants_nobody_reads
+
+    here = _Path(__file__).resolve().parent.parent
+    found = [
+        s.describe()
+        for f in constants_nobody_reads(graph_for(here, trust_for=600), here, Blindspot())
+        for s in f.sites
+    ]
+    assert not found, f"stale constants: {found}"

@@ -261,19 +261,6 @@ class Worth(BaseModel):
     )
 
 
-SIFTING = """Does the following, said by a user to a coding agent, contain
-anything about how work should be done in their repository?
-
-Say yes for corrections, preferences, conventions, constraints, and standards —
-however casually put. Say no for questions, pure requests to do a task, and
-remarks that carry no expectation about future work.
-
-This only decides what is read more carefully afterwards, so lean towards yes.
-
-\"\"\"
-{said}
-\"\"\"
-"""
 
 
 def _names_in(text: str) -> List[str]:

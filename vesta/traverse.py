@@ -332,23 +332,6 @@ class Reading(BaseModel):
     )
 
 
-READING = """This is a definition from a codebase, with what it says about itself:
-
-    {name}  ({where})
-{body}
-
-The work this codebase performs has been named as follows:
-
-{vocabulary}
-
-Which of those name what this definition does? Choose only labels that genuinely
-apply — usually one or two, sometimes none. A definition that resolves symbols
-is not "repository auditing" merely because it is in a tool that audits.
-
-Names are not evidence. `corpus_id` returning a knowledge base identifier is
-about knowledge bases whatever it is called, and a function called `build` is
-about whatever it builds. Read what it says it does.
-"""
 
 
 def _body_of(node: Node, root: Path, lines: int = 26) -> str:

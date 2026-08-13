@@ -92,9 +92,6 @@ TOO_MANY = 25  # sites
 # this codebase — both passed the "does it match" gate and neither describes a
 # defect. Judging *whether* an exchange named a defect is cheap; writing the
 # expression that finds it is not.
-SHARPER = "anthropic/claude-sonnet-4-5"
-
-
 class Pattern(BaseModel):
     """A defect worth looking for, and how to look for it."""
 
@@ -195,64 +192,6 @@ class Learned(BaseModel):
         return f"{said}, {len(self.dropped)} dropped" if self.dropped else said
 
 
-NOTICING = """An agent working in a codebase did this:
-
-\"\"\"
-{did}
-\"\"\"
-
-and the user responded:
-
-\"\"\"
-{said}
-\"\"\"
-
-Was the user pointing at a defect in the code — something that is wrong on its own
-terms and would be worth finding elsewhere in the repository?
-
-Say yes only for a property of the code that could be looked for: hardcoded
-lists that should be open, errors discarded silently, configuration that should
-not be optional, duplicated logic that should be shared. These are things a
-regular expression over source lines could find.
-
-Say no for requests to build something, questions, praise, complaints about the
-agent's conduct, and preferences about process rather than about code.
-
-If yes, describe the finder: what to match, what not to report, and why the
-thing is a defect. The pattern must match the *defect* and not the ordinary
-case — a pattern matching every error handler in the repository describes
-Python, not a problem.
-
-Four defects found this way in this project, as calibration:
-
-  the agent hardcoded a list of file suffixes and the user said it was "wholly
-  insufficient, this would be disastrous" for languages not on it
-  -> match `(languages?|suffixes?|extensions?)\\s*[=:]\\s*[\\[\\(]`, not
-     reporting test fixtures, because every language absent from such a list is
-     one the tool silently cannot handle
-
-  an exception was caught and discarded, and a failure surfaced later as
-  silence rather than as an error
-  -> match a handler whose whole body is `pass`, not reporting handlers that
-     log or re-raise, because the caller cannot tell failure from success
-
-  a function was written, superseded, and left behind
-  -> match nothing textual; this is a graph property, so answer is_defect false
-
-  the user asked a question about the design
-  -> is_defect false: a question is not a defect
-
-The expression is the hard part. It must find the defect and nothing else:
-
-  `git` matches every line mentioning git, including imports, comments, and
-  the word in prose — it describes a topic, not a defect
-  `(?:regex|pattern|match)\\s*[=:]` matches most assignments in a codebase that
-  works with patterns at all
-
-If you cannot write an expression that separates the defect from the ordinary
-case, answer is_defect false. A finder that fires everywhere is worse than no
-finder, because a reader stops reading the whole channel.
-"""
 
 
 class Noticed(BaseModel):

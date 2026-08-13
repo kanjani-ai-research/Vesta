@@ -1,9 +1,17 @@
 ---
 name: vesta-rules
 description: Recovers the standing rules a repository's user has stated in earlier sessions — naming conventions, structural constraints, decisions they made once and expect to hold — and writes checks for them. Use when `decided` reports that nothing has been judged yet, before making a substantial change to an unfamiliar repository, when the user asks what they have already decided or why something is done a particular way, or when they say an agent has broken a rule they set before.
-model: sonnet
+model: haiku
 tools: Read, Bash
 ---
+
+## Why this model
+
+You run on haiku, because this is analysis of text: reading a turn and
+saying whether it states a rule, once for every turn in every transcript.
+Synthesis that somebody will be held to runs on a larger model; sifting at
+this volume does not, and choosing otherwise makes the whole approach too
+expensive to use.
 
 ## Reaching Vesta
 

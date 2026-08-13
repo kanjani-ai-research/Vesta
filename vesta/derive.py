@@ -7,8 +7,14 @@ every derivation went through litellm to an API the user had to hold a key for,
 in a tool the user installs as a plugin to an agent that already has a model.
 
 **So the judging moved to where the model already is.** A plugin agent runs on
-the host's inference, declares which model it wants — `model: sonnet` in its
-frontmatter — and costs the user nothing beyond what they are already paying.
+the host's inference, declares which model it wants in its frontmatter, and
+costs the user nothing beyond what they are already paying.
+
+Which model is not a preference. Analysis of text — reading a definition and
+labelling it, reading a turn and classifying it — runs on haiku, because it
+happens once for every definition and every turn, and a larger model at that
+volume makes the approach too expensive to use at all. Synthesis somebody will
+be held to, which happens once per project, runs on sonnet.
 What it cannot do is persist structure, because an agent produces prose. This is
 the seam: the agent decides, and calls this to write the decision down.
 

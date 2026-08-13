@@ -548,6 +548,87 @@ def reached_only_by_tests(graph: Graph, root: Path, blind: Blindspot) -> List[Fo
     ]
 
 
+def constants_nobody_reads(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
+    """A module-level constant nothing refers to.
+
+    Invisible to everything else here. A language server reports functions and
+    classes as symbols and mostly does not report assignments, so a constant
+    sits outside the graph entirely — `nothing refers to this` cannot see it,
+    because it is not a definition the graph holds. And `calls something that
+    does not exist` looks the other way: at names used and missing, not names
+    defined and unused.
+
+    Found the hard way. `SHARPER = "anthropic/claude-sonnet-4-5"` survived the
+    removal of the code that used it, sat in the module for weeks, and was
+    noticed by a person reading the file rather than by any check. It was also
+    a *wrong* value by then — a model choice nobody had made — which is what
+    makes a stale constant worse than a stale function: it reads as a decision.
+    """
+    import ast
+
+    by_file: Dict[str, List[Site]] = {}
+
+    for path, relative in _sources(root):
+        if is_test_path(relative):
+            continue
+        try:
+            tree = ast.parse("\n".join(_lines(path)))
+        except (SyntaxError, ValueError):
+            continue
+
+        # Named at module level, in the way a constant is named.
+        declared: Dict[str, int] = {}
+        for node in tree.body:
+            targets = []
+            if isinstance(node, ast.Assign):
+                targets = [t for t in node.targets if isinstance(t, ast.Name)]
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets = [node.target]
+            for target in targets:
+                if target.id.isupper() and len(target.id) > 2:
+                    declared[target.id] = node.lineno
+
+        if not declared:
+            continue
+
+        # Read anywhere in this file, or named anywhere else in the tree. A
+        # constant is usually imported by name, so a mention elsewhere counts
+        # however it is used.
+        read = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+        }
+        elsewhere = set()
+        for other, other_relative in _sources(root):
+            if other == path:
+                continue
+            text = "\n".join(_lines(other))
+            for name in declared:
+                if name in text:
+                    elsewhere.add(name)
+
+        for name, line in sorted(declared.items()):
+            if name in read or name in elsewhere:
+                continue
+            by_file.setdefault(relative, []).append(
+                Site(where=relative, line=line, what=f"{name} — nothing reads it")
+            )
+
+    return [
+        Found(
+            pattern="a constant nobody reads",
+            why=(
+                "carried and maintained while deciding nothing, and a stale "
+                "one reads as a decision somebody made"
+            ),
+            confidence=LIKELY,
+            sites=sites,
+        )
+        for sites in by_file.values()
+    ]
+
+
 PATTERNS: Tuple[Tuple[str, Callable], ...] = (
     ("hardcoded language list", hardcoded_language_lists),
     ("swallowed failure", swallowed_failures),
@@ -555,6 +636,7 @@ PATTERNS: Tuple[Tuple[str, Callable], ...] = (
     ("nothing refers to this", unreachable_definitions),
     ("calls something that does not exist", calls_to_nothing),
     ("only its tests call this", reached_only_by_tests),
+    ("a constant nobody reads", constants_nobody_reads),
 )
 
 

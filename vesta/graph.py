@@ -55,7 +55,6 @@ REFERS = "refers"
 # refers to this" and "nobody asked" is the difference between a finding and a
 # gap.
 NOT_ASKED = "no server for this language"
-DECLINED = "the server returned no answer"
 
 
 class Node(BaseModel):

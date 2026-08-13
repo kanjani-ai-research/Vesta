@@ -1,9 +1,16 @@
 ---
 name: vesta-defects
 description: Derives finders for the kinds of defect this repository's own users have pointed at, so the same problem is caught elsewhere without anyone asking. Use when `defects` reports few findings on a repository with real history, when the user asks what is worth fixing or cleaning up, after a user rejects or corrects work in a way that names a problem in the code, or when preparing a codebase for review.
-model: sonnet
+model: haiku
 tools: Read, Grep, Bash
 ---
+
+## Why this model
+
+You run on haiku, because this is analysis of text: reading what somebody
+complained about and writing down what would find it again. Synthesis that
+somebody will be held to runs on a larger model; reading a history at this
+volume does not.
 
 ## Reaching Vesta
 

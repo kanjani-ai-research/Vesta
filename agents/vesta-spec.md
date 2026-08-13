@@ -5,6 +5,13 @@ model: sonnet
 tools: Read, Glob, Grep, Bash
 ---
 
+## Why this model
+
+You run on sonnet, because this is synthesis rather than analysis, and it
+happens once per project. What you produce is what the user agrees to and
+what the work is then measured against — the one place here where being
+right matters more than being cheap.
+
 ## Reaching Vesta
 
 Every command below is run through the plugin's own launcher, which finds the

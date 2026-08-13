@@ -29,18 +29,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
-# What the brief asked for. Written before either arm ran, in the order the
-# brief says it, and deliberately about behaviour rather than interface: an arm
-# is free to build a CLI any way it likes.
-WANTED = [
-    "add a task",
-    "list tasks",
-    "mark a task done",
-    "delete a task",
-    "tasks survive between runs",
-    "tag a task",
-    "filter by tag",
-]
 
 
 def _python(where: Path) -> List[Path]:

@@ -90,7 +90,11 @@ def _answer(payload: dict) -> int:
                     "Continue until each is cleared. Do not say the work is "
                     "done while any remains — this is checked, not taken on "
                     "trust. If something here cannot be cleared, say what and "
-                    "why rather than working around it."
+                    "why rather than working around it.\n\n"
+                    "A behaviour you have already built still shows as `not "
+                    "built` until you record it:\n"
+                    '  $V contract --met "<the behaviour, word for word>" '
+                    '--node "file.py:function" --test "test_file.py:test"'
                 ),
                 "systemMessage": (
                     f"Vesta: {len(verdict.outstanding)} outstanding "
