@@ -248,13 +248,48 @@ attaches to. A missed rule costs one `/vesta:declare`; a queue full of things a
 user has already said they cannot settle costs their willingness to look at the
 queue at all.
 
-**What is still open.** None of this makes extraction *good* — it makes it stop
-lying about provenance. The uncomfortable possibility stands: a standing
-decision and a passing remark are not syntactically different, so pattern
-mining may be the wrong idea outright and the answer may be to make *stating* a
-rule cheap enough that people bother. Every clean rule in this repository
-arrived by `--declare`. And thirteen rules carry a named check strategy that
-has never executed, which is a separate gap from having no strategy at all.
+**Extraction — the patterns were the decision.** The guards above stopped the
+lying about provenance but left the deeper problem: a standing decision and a
+passing remark are not syntactically different, so no pattern can separate
+them. The conclusion drawn from that was to write better patterns. It was
+wrong.
+
+`from_sessions` dropped every turn `constrains` rejected, and the model — a
+haiku agent that exists, runs, and has a carefully written brief — only ever
+saw what survived. On this repository that was **42 turns of 446, 9.4%**.
+Everything in the other 404 was invisible, and no amount of prompting could
+recover it because nothing was ever asked. Among the discarded: *"it shouldn't
+be configurable, commit or change main/active should write to FS-"* — a
+standing architectural decision phrased in a way no pattern anticipated.
+
+The patterns now **rank rather than gate**. Every turn the user actually said
+goes to the thing that can judge it, ordered so a reader with a budget starts
+with the promising ones. On this repository: **42 candidates → 357**. Scoring
+zero is the only way a turn is dropped, and that is reserved for what is not
+the user speaking at all — summaries, assistant turns, pasted code.
+
+The corpus is 150k characters, read once per repository. Being thorough is
+cheap; being wrong costs a rule the user has to state twice.
+
+**And a rule must be grounded in words somebody said.** The discipline is
+borrowed from Google's `langextract`, which makes a model return exact source
+text and then verifies it against the source rather than trusting it. Vesta now
+checks that a rule's quotation appears in a real turn and refuses it otherwise.
+Trimming and reformatting are fine; inventing is not.
+
+That library was considered as a dependency and declined. Its valuable asset is
+`resolver.py`'s alignment cascade, which answers *"where in this document is the
+span the model quoted"* — and here the turn is already the unit, so there is no
+span to locate. It would have brought pandas, numpy, google-genai and
+google-cloud-storage for a problem this does not have. The idea was worth more
+than the code.
+
+**What is still open.** Whether this makes extraction *good* is now an
+empirical question rather than an architectural one, and it cannot be answered
+until the agent has run against the wider candidate set on a real repository.
+The `--declare` path still produced every clean rule here. And thirteen rules
+carry a named check strategy that has never executed, which remains a separate
+gap from having no strategy at all.
 
 **Storage — nothing reported or reclaimed anything.** `vesta held`
 lists every holding by repository, biggest first, and `--reclaim` removes what

@@ -59,9 +59,19 @@ back to them later as an obligation they never made.
 
 ## What to do
 
-1. Get the candidates: `vesta-rules --repo "<REPO>" --candidates`. These are turns
-   where the user said something that might constrain how work is done. Most are
-   not rules.
+1. Get the turns: `vesta-rules --repo "<REPO>" --candidates`. These are
+   **everything the user said in this repository**, most promising first — not
+   a pre-filtered shortlist.
+
+   That ordering is a hint from cheap pattern-matching, and it is often wrong.
+   Patterns were the filter once and discarded nine turns in ten, including
+   *"it shouldn't be configurable, commit or change main/active should write
+   to FS-"* — a standing architectural decision no pattern anticipated. So
+   read past the promising ones. **The rules worth most are the ones phrased
+   in a way nothing could have predicted.**
+
+   Expect the large majority to be nothing: chatter, questions, thinking
+   aloud. That is the normal ratio and it is not a reason to lower the bar.
 
 2. For each that is a rule, state it plainly and impersonally, as something a
    reader could check, and say what evidence would show it violated:
@@ -90,6 +100,15 @@ back to them later as an obligation they never made.
    Three fields: the check kind, the rule as a reader could check it, and the
    user's own words. Their words matter — a finding that cannot say whose
    constraint it is reads as the tool having an opinion.
+
+   **The third field must be quoted from the turn, not paraphrased.** It is
+   checked against the transcript, and a rule whose quotation appears in no
+   turn is refused rather than recorded. Copy the sentence; trimming it or
+   collapsing whitespace is fine, rewording it is not.
+
+   This is not bureaucracy. A rule recorded against words the user never said
+   is the worst thing this can do — it hands somebody an obligation they never
+   made and attributes it to them.
 
 3. **Write the check.** A rule nobody can check is a note. Under any rule whose
    kind is not `underived`, add a line saying how to find a violation:

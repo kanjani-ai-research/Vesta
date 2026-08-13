@@ -651,6 +651,81 @@ def keep(found: Found, repo: Path | str) -> Path:
 # So the patterns above are a *sieve*, not a decision. They cheaply narrow
 # hundreds of turns to a few dozen candidates; what each candidate actually is
 # gets settled by something that reads it.
+#
+# **Except they were the decision, and that was the defect.** `from_sessions`
+# drops anything `constrains` rejects, so on this repository the model saw 42
+# of 446 turns — 9.4%. Everything in the other 404 was invisible, and no prompt
+# could recover it, because nothing was ever asked. Among them: "it shouldn't
+# be configurable, commit or change main/active should write to FS-", which is
+# a standing architectural decision phrased in a way no pattern anticipated.
+#
+# `for_reading` is the honest shape. Every turn goes to the thing that can
+# judge it, and the patterns survive as a *score* that decides reading order
+# rather than membership. The corpus is 150k characters and is read once per
+# repository, so the cost of being thorough is small and the cost of being
+# wrong is a rule the user has to state twice.
+
+
+def worth_reading(said: str) -> int:
+    """How likely a turn is to carry a decision. A hint, never a gate.
+
+    Ordering only. Everything is read whatever this returns — the number
+    decides what an agent looks at first when it has a limit, so that a budget
+    spent early is spent on the most promising turns rather than on whatever
+    the transcript happened to record first.
+    """
+    if _not_the_user(said) or _is_code(said) or _is_mostly_output(said):
+        return 0
+    if _is_vestas_own(said):
+        return 0
+
+    score = 1
+    if CONSTRAINS.search(said):
+        score += 3
+    if DEFINES.search(said):
+        score += 2
+    if UNSURE.search(said) or DELIBERATES.search(said):
+        score -= 2
+    if THIS_TURN.search(said):
+        score -= 2
+    if said.endswith("?"):
+        score -= 1
+    # A turn nobody could act on is unlikely to be a decision about the code,
+    # but shortness alone does not disqualify: "no bare excepts" is a rule.
+    if len(said) < 25:
+        score -= 1
+    return max(score, 1)
+
+
+def for_reading(
+    repo: Path | str, transcripts: Optional[Sequence[Path]] = None
+) -> List[Tuple[str, float, int]]:
+    """Every turn the user actually said, best candidates first.
+
+    Ungated on purpose. What comes back is `(what they said, when, score)`,
+    ordered by score, so a caller with a budget reads the promising ones first
+    and a caller without one reads everything.
+    """
+    root = Path(repo).expanduser().resolve()
+    if transcripts is None:
+        from .harvest import _sessions_for
+
+        transcripts = _sessions_for(root)
+
+    seen: set = set()
+    found: List[Tuple[str, float, int]] = []
+    for path in transcripts:
+        for said, stamp in _turns(path):
+            key = _normalise(said)
+            if key in seen:
+                continue
+            seen.add(key)
+            score = worth_reading(said)
+            if score:
+                found.append((said, stamp, score))
+
+    found.sort(key=lambda entry: (-entry[2], entry[1]))
+    return found
 
 class Judgement(BaseModel):
     """What something a user said actually is.
@@ -774,9 +849,50 @@ CHECK = re.compile(
 )
 
 
-def read_judged(text: str) -> List[Rule]:
-    """Parse the rules an agent kept, ignoring whatever else it wrote."""
+def _flatten(text: str) -> str:
+    """Text reduced to what a quotation and its source have in common.
+
+    Case, punctuation and whitespace go; word order stays, because order is
+    the whole evidence that one string was copied out of another.
+    """
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _grounded_in(said: str, turns: Sequence[str]) -> bool:
+    """Whether these are really somebody's words, from a turn they really said.
+
+    The discipline is borrowed from langextract, which makes a model return
+    exact source text and then verifies it against the source rather than
+    trusting it. The failure it prevents here is the one that matters most: a
+    rule attributed to a user who never said it.
+
+    Matched on flattened text rather than exactly, because an agent quoting a
+    turn will reasonably trim it, collapse its whitespace or drop a trailing
+    clause. What is not allowed is a quotation that appears in no turn at all.
+
+    Deliberately not `_normalise`, which sorts and dedupes words to compare
+    whole turns as sets — substring containment against a sorted bag of words
+    is meaningless, and using it here refused every legitimate quotation.
+    """
+    wanted = _flatten(said)
+    if len(wanted) < 12:
+        # Too short to be evidence of anything. A handful of characters will
+        # appear inside some turn by accident, which would ground a rule on a
+        # coincidence.
+        return False
+    return any(wanted in _flatten(turn) for turn in turns)
+
+
+def read_judged(text: str, turns: Optional[Sequence[str]] = None) -> List[Rule]:
+    """Parse the rules an agent kept, ignoring whatever else it wrote.
+
+    `turns` is what the user actually said. When given, a rule quoting words
+    that appear in no turn is refused rather than recorded — an agent reading
+    hundreds of turns will occasionally attribute a paraphrase, and a rule the
+    user never stated is worse than a rule missed.
+    """
     found: List[Rule] = []
+    refused = 0
     for line in text.splitlines():
         line = line.lstrip("-*• \t")
 
@@ -796,6 +912,10 @@ def read_judged(text: str) -> List[Rule]:
         kind, stated, said = matched.groups()
         if len(stated) < 10:
             continue
+        if turns is not None and not _grounded_in(said.strip(), turns):
+            logger.info("refused a rule nobody said: %r", said[:80])
+            refused += 1
+            continue
         found.append(
             Rule(
                 text=said.strip(),
@@ -806,6 +926,11 @@ def read_judged(text: str) -> List[Rule]:
                 first=time.time(),
                 last=time.time(),
             )
+        )
+
+    if refused:
+        logger.warning(
+            "refused %d rule(s) quoting words that appear in no turn", refused
         )
     return found
 
@@ -821,22 +946,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--candidates", action="store_true")
     parser.add_argument("--write", action="store_true")
-    parser.add_argument("--limit", type=int, default=60)
+    # High enough that a normal repository is read whole. The gate used to be
+    # `constrains`, which discarded 90% before anything could judge it; a limit
+    # that quietly reinstated the same cut-off would be the same bug wearing a
+    # different name. 150k characters of transcript is one cheap pass.
+    parser.add_argument("--limit", type=int, default=500)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
     root = Path(args.repo).expanduser().resolve()
 
     if args.candidates:
-        # Patterns only: narrowing hundreds of turns to a few dozen needs no
-        # model, and what each one *is* needs one that reads it.
-        found = from_sessions(root)
-        for rule in found.rules[: args.limit]:
-            print(f"--- {rule.text[:600]}")
+        # Everything the user said, most promising first. Ungated: the
+        # patterns decide reading order, never membership, because a rule
+        # phrased in a way no pattern anticipated is exactly the rule nothing
+        # else can recover.
+        for said, _, _ in for_reading(root)[: args.limit]:
+            print(f"--- {said[:600]}")
         return 0
 
     if args.write:
-        kept = read_judged(sys.stdin.read())
+        # Verified against what the user actually said. An agent that read
+        # four hundred turns will occasionally attribute a paraphrase, and a
+        # rule the user never stated is worse than a rule missed.
+        kept = read_judged(
+            sys.stdin.read(), turns=[said for said, _, _ in for_reading(root)]
+        )
         found = Found(rules=kept, considered=len(kept))
         keep_rules(found, root)
         print(f"kept {len(kept)} rule(s) for {root}")

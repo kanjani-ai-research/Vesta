@@ -414,3 +414,111 @@ def test_stating_a_rule_then_asking_about_it_is_still_a_rule():
         "in this project every module must open with a docstring saying what "
         "it is for. can you check whether resolve.py follows that?"
     )
+
+
+# ── Every turn reaches the thing that can judge it ──────────────────────────
+
+
+def test_the_patterns_rank_rather_than_gate(tmp_path):
+    """The architectural defect behind poor extraction.
+
+    `constrains` was a hard filter in front of the model, so on this
+    repository haiku saw 42 of 446 turns — 9.4%. Everything in the other 404
+    was invisible and no prompt could recover it, because nothing was asked.
+    Among them: "it shouldn't be configurable, commit or change main/active
+    should write to FS-", a standing architectural decision phrased in a way
+    no pattern anticipated.
+    """
+    from vesta.rules import constrains, worth_reading
+
+    unanticipated = (
+        "it shouldn't be configurable, commit or change main/active should "
+        "write to FS-"
+    )
+    # The pattern misses it — which is fine, so long as it is still read.
+    assert not constrains(unanticipated)
+    assert worth_reading(unanticipated) > 0
+
+
+def test_an_obvious_rule_outranks_chatter():
+    from vesta.rules import worth_reading
+
+    rule = "there should be one .env for v3, not one for each repo"
+    chatter = "ok"
+
+    assert worth_reading(rule) > worth_reading(chatter)
+
+
+def test_what_is_certainly_not_the_user_scores_nothing():
+    """Scoring zero is the one way a turn is dropped, and it is reserved for
+    things that are not the user speaking at all."""
+    from vesta.rules import worth_reading
+
+    assert worth_reading("⏺ I'll check that first.") == 0
+    assert worth_reading("def f():\n    return 1\n") == 0
+    assert (
+        worth_reading(
+            "This session is being continued from a previous conversation "
+            "that ran out of context."
+        )
+        == 0
+    )
+
+
+def test_hedged_and_turn_scoped_turns_rank_low_but_are_still_read():
+    """They are usually not rules, and occasionally they are. Ranking says
+    'read these last'; it must not say 'never read these'."""
+    from vesta.rules import worth_reading
+
+    hedged = "i'm not sure if the graph should be rebuilt on every change"
+    plain = "the graph must be rebuilt on every change"
+
+    assert 0 < worth_reading(hedged) < worth_reading(plain)
+
+
+def test_a_rule_quoting_words_nobody_said_is_refused():
+    """Borrowed from langextract's discipline: make the model return exact
+    source text, then verify it against the source rather than trusting it.
+
+    A rule recorded against words the user never said hands somebody an
+    obligation they never made and attributes it to them.
+    """
+    from vesta.rules import read_judged
+
+    turns = ["there should be one .env for v3, not one for each repo"]
+    judged = (
+        "artefact | There is one .env for the workspace. | there should be "
+        "one .env for v3, not one for each repo\n"
+        "artefact | Every file is under 200 lines. | keep every file under "
+        "two hundred lines\n"
+    )
+
+    kept = read_judged(judged, turns=turns)
+    assert [r.stated for r in kept] == ["There is one .env for the workspace."]
+
+
+def test_a_trimmed_quotation_is_still_grounded():
+    """An agent quoting a long turn will reasonably trim it. What is refused
+    is a quotation appearing in no turn at all, not an inexact one."""
+    from vesta.rules import read_judged
+
+    turns = [
+        "like I said originally, things like openai key and anthropic key are "
+        "shared by multiple services. there should be one .env for v3, not "
+        "one .env for each repo"
+    ]
+    judged = (
+        "artefact | There is one .env for the workspace. | there should be "
+        "one .env for v3, not one .env for each repo\n"
+    )
+
+    assert len(read_judged(judged, turns=turns)) == 1
+
+
+def test_grounding_is_skipped_when_there_is_nothing_to_check_against():
+    """Callers that have no transcript still work; verification is opt-in by
+    supplying the turns."""
+    from vesta.rules import read_judged
+
+    judged = "artefact | A rule about something. | words nobody in particular said\n"
+    assert len(read_judged(judged)) == 1
