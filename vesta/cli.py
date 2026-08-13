@@ -391,6 +391,75 @@ def _learn(args: argparse.Namespace) -> int:
     return 0
 
 
+def _contract(args: argparse.Namespace) -> int:
+    """Write, show, or sign what was agreed to be built.
+
+    The seam the `vesta-spec` agent calls. It decides what the behaviours are —
+    that is judgement, on the host's inference — and this writes them down.
+    """
+    from . import contract as agreed_with
+
+    where = Path(args.root).expanduser().resolve()
+
+    if args.verify:
+        agreed = agreed_with.recall(where)
+        if agreed is None:
+            _say("Nothing has been agreed for this project yet.")
+            return 1
+        _say(agreed.to_verify())
+        return 0
+
+    if args.sign:
+        agreed = agreed_with.sign(where)
+        if agreed is None:
+            _say("There is nothing to agree to.")
+            return 1
+        _say("Agreed. Behaviour is fixed from here; a change to it after this")
+        _say("is a different project.")
+        _say(f"  {agreed.describe()}")
+        return 0
+
+    if args.defer:
+        agreed = agreed_with.defer(where, args.defer)
+        if agreed is None:
+            _say("There is no contract to defer against.")
+            return 1
+        _say(f"Kept for after delivery: {args.defer[:70]}")
+        return 0
+
+    if args.met:
+        agreed = agreed_with.met(
+            where, args.met, nodes=args.node or None, tests=args.test or None
+        )
+        if agreed is None:
+            _say("There is no contract.")
+            return 1
+        _say(agreed.describe())
+        return 0
+
+    if args.does or args.goal:
+        agreed = agreed_with.Contract(
+            goal=args.goal,
+            behaviours=[agreed_with.Behaviour(does=d) for d in args.does],
+            constraints=list(args.constraint),
+            inferred=list(args.inferred),
+        )
+        agreed_with.keep(agreed, where)
+        _say(agreed.to_verify())
+        _say("")
+        _say("Nothing is agreed until `vesta contract --sign`.")
+        return 0
+
+    agreed = agreed_with.recall(where)
+    if agreed is None:
+        _say("Nothing has been agreed for this project yet.")
+        return 1
+    _say(agreed.describe())
+    for behaviour in agreed.behaviours:
+        _say(f"  {behaviour.describe()}")
+    return 0
+
+
 def _guide(args: argparse.Namespace) -> int:
     """What Vesta is and what a user can do with it.
 
@@ -507,6 +576,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bears.add_argument("paths", nargs="+")
     bears.add_argument("--root", default=".")
     bears.set_defaults(run=_asked)
+
+    contract = sub.add_parser(
+        "contract", help="what was agreed to be built, and whether it has been"
+    )
+    contract.add_argument("--root", default=".")
+    contract.add_argument("--goal", default="", help="what is being built, in one line")
+    contract.add_argument("--does", action="append", default=[], help="a behaviour")
+    contract.add_argument(
+        "--constraint", action="append", default=[], help="how it must be built"
+    )
+    contract.add_argument(
+        "--inferred", action="append", default=[], help="what was chosen unasked"
+    )
+    contract.add_argument("--verify", action="store_true", help="what to show the user")
+    contract.add_argument("--sign", action="store_true", help="record their agreement")
+    contract.add_argument("--met", default="", help="a behaviour now built")
+    contract.add_argument("--node", action="append", default=[], help="what implements it")
+    contract.add_argument("--test", action="append", default=[], help="what checks it")
+    contract.add_argument("--defer", default="", help="a change to have after delivery")
+    contract.set_defaults(run=_contract)
 
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")
     guide.add_argument("topic", nargs="?", default="")

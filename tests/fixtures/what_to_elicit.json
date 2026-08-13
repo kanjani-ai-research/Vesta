@@ -1,0 +1,29 @@
+{
+  "note": "Fixed before the spec agent was tested. Each case is something somebody would actually say; the expectations are about which category each part of it lands in.",
+  "cases": [
+    {
+      "said": "build me a todo app with tags, use sqlite, and make it clean and fast",
+      "behaviours_at_least": 4,
+      "constraints_include": ["sqlite"],
+      "must_drop": ["clean", "fast"],
+      "must_not_ask_about": ["storage", "schema", "persist", "table"],
+      "why": "clean and fast are not falsifiable; storage is structure"
+    },
+    {
+      "said": "a CLI that renames files in bulk using a regex",
+      "behaviours_at_least": 3,
+      "constraints_include": [],
+      "must_drop": [],
+      "must_not_ask_about": ["exit code", "argument", "stdin"],
+      "why": "CLI conventions are structure and inferable"
+    },
+    {
+      "said": "an HTTP API for orders, must be python 3.11, no external services",
+      "behaviours_at_least": 3,
+      "constraints_include": ["python 3.11", "no external services"],
+      "must_drop": [],
+      "must_not_ask_about": ["status code", "content type", "route"],
+      "why": "HTTP semantics are structure; the version and isolation are stated"
+    }
+  ]
+}
