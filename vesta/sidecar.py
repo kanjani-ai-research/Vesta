@@ -1314,45 +1314,66 @@ def build_server():
         nothing has been agreed for it yet. Do not call it for ordinary work
         in a project that already exists.
         """
-        from typing import Literal as _Literal
-
-        from pydantic import BaseModel as _Model
-        from pydantic import Field as _Field
-
         here = await project_of(context)
         if here is None:
             return "Could not tell which project this is."
 
-        class Choice(_Model):
-            how: _Literal["build it", "drive it to completion"] = _Field(
-                description=(
-                    "build it: I work as usual and you review as we go. "
-                    "drive it: agree a short list of behaviours first, then I "
-                    "build until every one is met, tested, and your rules are "
-                    "honoured — stopping on counts, not on my say-so."
-                ),
-            )
+        # The schema the host renders: one question, two options, no typing.
+        # Sent as a raw JSON schema through `elicit_form` rather than through
+        # `Context.elicit`, which the SDK deprecated — a live session came back
+        # "could not ask" because the deprecated request is refused, and a
+        # silent fallback made that indistinguishable from a user's choice.
+        wanted = {
+            "type": "object",
+            "properties": {
+                "how": {
+                    "type": "string",
+                    "title": "How should this be built?",
+                    "enum": ["build it", "drive it to completion"],
+                    "enumNames": [
+                        "Build it — I work as usual, you review as we go",
+                        "Drive it — agree the behaviours first, then build "
+                        "until every one is met and tested",
+                    ],
+                }
+            },
+            "required": ["how"],
+        }
+
+        chosen = ""
+        asking = f"How should {Path(here).name} be built?"
+        why = ""
 
         try:
-            answer = await context.elicit(
-                message=f"How should {Path(here).name} be built?", schema=Choice
+            answer = await context.session.elicit_form(
+                message=asking, requestedSchema=wanted
             )
+            if getattr(answer, "action", "") == "accept":
+                chosen = (answer.content or {}).get("how", "")
         except Exception as exc:  # noqa: BLE001 - a client need not support this
-            logger.info("could not ask: %s", exc)
+            why = f"{type(exc).__name__}: {exc}"
+            logger.info("could not ask with elicit_form: %s", exc)
+
+        if not chosen and not why:
+            # Asked, and they closed it. Not an error and not a choice.
             return (
-                "Could not ask. Building it the ordinary way; "
+                "They did not choose. Building it the ordinary way; "
                 "`/vesta:drive on` switches to driving at any point."
             )
 
-        if getattr(answer, "action", "") != "accept" or answer.data is None:
+        if not chosen:
+            _record("how", here, 0.0, 0, asked=False, why=why[:200])
             return (
-                "Nothing chosen. Building it the ordinary way; "
-                "`/vesta:drive on` switches to driving at any point."
+                f"Could not show a dialog here ({why[:110]}).\n\n"
+                "Ask them in one line instead: build it the ordinary way, or "
+                "drive it to completion — behaviours agreed first, then built "
+                "until every one is met and tested. Then carry on with "
+                "whichever they choose; `/vesta:drive on` is the second."
             )
 
         import anyio
 
-        if answer.data.how.startswith("drive"):
+        if chosen.startswith("drive"):
             from . import driving
 
             await anyio.to_thread.run_sync(driving.start, here)
