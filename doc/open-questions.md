@@ -1,13 +1,17 @@
 # Open questions
 
-Five things Vesta does not yet do well, written down while the evidence for
+Three things Vesta does not yet do well, written down while the evidence for
 each is fresh. Every number here was measured on this repository on the day it
 was written; where something is a suspicion rather than a measurement, it says
 so.
 
-This is not a roadmap. Nothing here is scheduled, and at least two of them may
+This is not a roadmap. Nothing here is scheduled, and at least one of them may
 turn out not to be worth doing — the point is that the reasoning behind each is
 recorded now, rather than reconstructed later from a stale intuition.
+
+Two more were written down here and then fixed before release, because they
+were not open questions at all — they were places Vesta overstated what it
+knew. What they were, and what running them turned up, is at the end.
 
 ---
 
@@ -62,91 +66,7 @@ being asked.
 
 ---
 
-## 2. Intent capture produces fragments, not intentions
-
-**This is the sticking point, and it has numbers.** On this repository:
-
-    50 rules recovered from 523 user turns
-    13 have a check that could in principle run
-    37 have none — "no known check covers what this constrains"
-     0 were actually checked
-
-Here is what the 37 look like:
-
-    "for question 1, I don't know but I can't see how UC3 is fundamentally
-     different from UC…"
-    "1. same generator  2. I think one call one row, I don't know and have
-     some concerns: you…"
-    "it seems you identified a vulnerability in the spec that must be
-     addressed, anserable by…"
-
-These are not intentions. They are conversational turns that matched a pattern.
-Meanwhile the rules that *are* clean — "the consent to build is only for full
-auto mode", "non-full auto is a companion, no consent" — all arrived by
-`--declare`, a user stating one outright, rather than by extraction.
-
-**So the extractor's yield is poor at both ends.** 523 turns in, 50 candidates
-out, 13 of them checkable in principle and none checked in fact. It is finding
-syntax that resembles a decision without any test of whether a decision was
-made — and the 37 it cannot check are not a checking failure so much as
-evidence that they were never rules.
-
-The check strategies it *does* name are worth reading, because they show what
-the mechanism can already reason about:
-
-    run the suite and compare what it covers against the claim      5
-    inspect the files produced for the stated property              2
-    find every site that loads configuration and check what it
-      resolves to                                                   2
-    find the sites introducing optionality and check they are on
-      decision paths                                                2
-    run both and compare observable output for shared inputs        1
-    inspect the commits produced against the stated shape           1
-
-Those are real, specific, and none of them ran. Which points at checking as a
-second, separate gap rather than a consequence of the first.
-
-**Three separable problems, currently tangled.**
-
-*Extraction* — deciding a turn contains a standing intention. Today: regexes
-over user turns (`CORRECTS`, `DEFINES`, and friends). A person saying "no, use
-SQLite" and a person saying "no, I don't think that's right" are
-indistinguishable to a pattern.
-
-*Adjudication* — the user confirming it. Today: `vesta learn <handle> rule`,
-with `AskUserQuestion` in-session. The UX was hard-won and works, but it is
-only as good as what is put in front of it. **Five candidates waiting on a user
-who has already answered dozens is a queue nobody drains** — and the queue is
-mostly fragments, which trains the user to ignore it.
-
-*Checking* — deciding whether the code honours it. Today: `enforce.against`
-builds a `Check` from a rule, and `_check_on` returns `None` for anything it
-cannot turn into a grep-like test. Everything else is `undecided`, and the CLI
-does not print the reason, so a user sees "could not be checked" with no way to
-find out why. Thirteen rules here carry a named strategy and **none of them
-ran** — which is a different failure from having no strategy at all.
-
-**The question.** Which of the three is the bottleneck? Probably not one:
-extraction produces 37 fragments that should never have reached the queue, and
-checking fails to run 13 strategies it already articulated. Fixing either alone
-leaves the pipeline broken.
-
-But there is a more uncomfortable possibility worth stating: **extraction by
-pattern may be the wrong idea outright.** A standing decision and a passing
-remark are not syntactically different — "no, use SQLite" and "no, I don't
-think that's right" differ only in meaning. If that is true, the right move is
-to stop mining transcripts and instead make *stating* a rule cheap enough that
-users bother. The `--declare` path produced every clean rule in this
-repository.
-
-**Smallest useful step, regardless.** Print `Finding.undecided` in
-`vesta decided --check`. The reasons are computed and discarded, which makes an
-unverifiable rule look the same as a verified one to anybody reading the
-output.
-
----
-
-## 3. What should score similarity
+## 2. What should score similarity
 
 **Today it is a set intersection.** `_bag()` lowercases, splits on
 non-alphanumerics, drops words of two characters or fewer and a stoplist, and
@@ -227,7 +147,7 @@ that preserves the property that installing Vesta requires no decisions.
 
 ---
 
-## 4. Cross-project metadata is a timestamp
+## 3. Cross-project metadata is a timestamp
 
 **What exists.** `~/.vesta/referred.json` is one object mapping a project path
 to when it was last referred to:
@@ -266,92 +186,77 @@ one project and that a user asks across them often enough to matter.
 
 ---
 
-## 5. Storage grows and nothing evicts
-
-**Measured today.**
-
-    ~/.vesta/graphs   337M
-      of which one abandoned tmp- graph:  193M .db + 138M .json  = 331M
-    34 .db files, 37 .json files
-
-Two facts fall out of that.
-
-*Nothing evicts.* A graph built for `/tmp/…` during a test in August is still
-there. 331M of 337M is one abandoned temporary repository. There is no
-eviction, no age-out, and no command that reports what is held or reclaims it.
-
-*Every graph is stored twice, and both are live.* 34 `.db` and 37 `.json`. The
-duplication is not an accident and neither file is a leftover — they serve two
-different access patterns:
-
-- the **JSON** is the whole-graph cache. `held.graph_for` reads it entire and
-  validates it into a `Graph` in memory, because traversal needs the whole
-  thing and re-walking the tree costs an order of magnitude more.
-- the **SQLite** is the queryable store. `store.py` opens a read-only URI
-  connection and answers `WHERE name = ?` against an index, without loading
-  anything.
-
-So the question is not "which one is dead" — it is whether a process that has
-already paid for the JSON should ever consult the database, and vice versa.
-The three orphaned JSON files with no database beside them are a smaller
-question: probably graphs written before the store existed.
-
-**Indexing is in better shape than expected.** The SQLite schema already
-carries what the queries need:
-
-    idx_nodes_name, idx_nodes_path, idx_edges_source, idx_edges_target
-
-and `store.py` queries with `SELECT … WHERE` and a read-only URI connection
-rather than loading a graph whole. So *lookup* is not the problem the heading
-implies.
-
-**The real questions are about lifecycle, not speed.**
-
-- What reclaims space, and on what signal? Age is the obvious one and probably
-  wrong: a project untouched for a month is the one where a cached
-  understanding is worth *most*. Whether the repository still exists is a
-  better signal, and cheap — the abandoned 331M is a path under `/tmp` that has
-  not existed for weeks.
-- Ontologies, maps, rules, notes and patterns are all one-file-per-repository
-  under separate directories. That is easy to reason about and easy to
-  reconcile — this session found two bugs caused by an ontology and a map going
-  out of step. Would a single store per repository have prevented them, or just
-  moved the seam?
-- Sharding is named as a concern but not yet a measured one. The largest real
-  graph here is 684K. **Nothing suggests a scale problem yet**; the problem
-  that exists today is hygiene.
-
----
-
 ## What was done before release
 
-Two of the five were credibility problems rather than features, and both are
-fixed. Neither touches the research questions above; they are the parts where
-Vesta was **overstating what it knew**, which a tool built against that failure
-cannot ship.
+Two things written up here were credibility problems rather than features, and
+both are fixed. Neither touches the research questions above; they are the
+parts where Vesta was **overstating what it knew**, which a tool built against
+that failure cannot ship.
 
-**From question 2 — reporting a check that never ran.** `describe()` counted
+**Reporting a check that never ran.** `describe()` counted
 every finding as "checked" whatever happened, so three rules nothing could test
 printed as `3 rule(s) checked, 0 held, 3 could not be checked` — which reads as
 three violations. It now separates what ran from what did not, and
 `decided --check` prints the reason each rule could not be checked instead of
 computing it and throwing it away.
 
-Extraction also stopped admitting sentences that withdraw their own claim.
-`CONSTRAINS` matches "should", and nothing tested whether the same sentence
-said "I don't know" — so *"it should be conditional, I don't know whether your
-assertion holds"* reached the queue as a rule awaiting confirmation the user
-had already disclaimed. The `UNSURE` guard rejects those, at harvest and in the
-queue. On this repository: 48 rules → 44, 37 gaps → 33, all three standing
-rules kept.
+**Intent capture — harvesting words the user never said.** This was the real
+defect, and it was found by asking where one specific rule came from.
 
-That guard is a whole-sentence veto and it is wrong in one direction on
-purpose. *"I don't know why, but every module must open with a docstring"* is a
-real rule and this rejects it. A missed rule costs one `/vesta:declare`; a
-queue full of things a user has already said they cannot settle costs their
-willingness to look at the queue at all.
+*"in this project every module must open with a docstring saying what it is
+for"* was sitting in the candidate queue as something the user had decided. It
+exists nowhere in this repository except as **fixture data inside
+`tests/test_seams.py`**, written to exercise the harvester. Vesta was mining
+its own test suite out of the transcript and presenting it as the user's
+decisions — the same class of failure as inventing a finding.
 
-**From question 5 — nothing reported or reclaimed anything.** `vesta held`
+It arrived three ways, all recorded in the transcript with `role: user`:
+
+- **compaction summaries**, which replay an entire conversation as one turn.
+  Every rule-shaped sentence in a digest is harvested again as though freshly
+  stated. 53 in this project's transcripts.
+- **assistant turns**, echoed back with their `⏺` marker. 24 more.
+- a genuine turn where somebody pasted the fixture to talk about it.
+
+The first two are not the user at any remove, so they are dropped at the point
+of reading rather than filtered later — a summary is not a weaker signal of
+intent, it is a different speaker. Across all transcripts that is **357 turns**
+that were being mined as decisions and were nobody's.
+
+Three narrower guards went in beside it:
+
+- *Source is not a decision.* A turn containing a definition, an import, a
+  fenced block or an assertion is code being shown, whatever sentences are
+  inside it.
+- *A turn that closes by asking is a question.* `ASKS_ABOUT_IT` anchors at the
+  start, so an imperative ending in a question slipped through — *"address the
+  extraction now instead of shifting it in the document, or are you saying it's
+  not worth doing?"* was captured as a standing rule. What a turn wants is in
+  its last clause.
+- *A sentence that withdraws its own claim is not a rule.* `CONSTRAINS` matches
+  "should" and nothing tested for "I don't know" in the same breath, so *"it
+  should be conditional, I don't know whether your assertion holds"* asked a
+  user to confirm what they had just disclaimed.
+
+On this repository: **523 turns → 444**, 48 rules → 41, 37 gaps → 32, all three
+standing rules kept.
+
+Two of those guards are wrong in one direction on purpose. *"I don't know why,
+but every module must open with a docstring"* is a real rule and the unsure
+guard rejects it, because nothing here parses which clause a disclaimer
+attaches to. A missed rule costs one `/vesta:declare`; a queue full of things a
+user has already said they cannot settle costs their willingness to look at the
+queue at all.
+
+**What is still open.** None of this makes extraction *good* — it makes it stop
+lying about provenance. The uncomfortable possibility stands: a standing
+decision and a passing remark are not syntactically different, so pattern
+mining may be the wrong idea outright and the answer may be to make *stating* a
+rule cheap enough that people bother. Every clean rule in this repository
+arrived by `--declare`. And thirteen rules carry a named check strategy that
+has never executed, which is a separate gap from having no strategy at all.
+
+**Storage — nothing reported or reclaimed anything.** `vesta held`
 lists every holding by repository, biggest first, and `--reclaim` removes what
 is dead. On this machine that was **343M → 12M**, of which 330.5M was a single
 graph rooted at `/private/tmp` — the system temp directory, walked as though it
@@ -376,8 +281,6 @@ Three things that only surfaced by running it:
 
 Not a plan, but the honest ordering by evidence:
 
-Of what remains:
-
 1. **Record the phrase and the hit count in `used.jsonl`.** Until that exists,
    the similarity question can only be argued from preference — and the three
    candidates differ by two orders of magnitude in cost, which is too wide a
@@ -388,6 +291,6 @@ Of what remains:
 3. **Decide whether `kind` earns its keep** — but only after (1), since the
    evidence for it is the same evidence.
 
-The first is instrumentation rather than a feature, and that is the point:
-the remaining questions cannot be answered with evidence by a tool whose whole
+The first is instrumentation rather than a feature, and that is the point: the
+remaining questions cannot be answered with evidence by a tool whose whole
 premise is answering with evidence. Everything else waits on it.

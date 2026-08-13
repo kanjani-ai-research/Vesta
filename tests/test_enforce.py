@@ -330,3 +330,87 @@ def test_the_reason_a_rule_could_not_be_checked_is_kept():
     )
     assert verdict.undecided
     assert verdict.undecided[0].undecided
+
+
+# ── Whose words these are ───────────────────────────────────────────────────
+
+
+def test_a_compaction_summary_is_not_the_user_speaking():
+    """The mechanism that turned a test fixture into somebody's decision.
+
+    A summary replays an entire conversation as one turn recorded with
+    `role: user`, so every rule-shaped sentence in the digest is harvested
+    again as though freshly stated. There were 53 of these in this project's
+    transcripts and 357 across all of them.
+    """
+    from vesta.rules import _not_the_user
+
+    assert _not_the_user(
+        "This session is being continued from a previous conversation that ran "
+        "out of context. The summary below covers the earlier portion."
+    )
+    assert _not_the_user(
+        "Caveat: The messages below were generated while summarising."
+    )
+    assert not _not_the_user("every module must open with a docstring")
+
+
+def test_an_assistant_turn_echoed_back_is_not_the_user():
+    from vesta.rules import _not_the_user
+
+    assert _not_the_user("⏺ I'll check what the project has recorded first.")
+    assert _not_the_user("[Request interrupted by user]")
+
+
+def test_source_being_shown_is_not_a_decision():
+    """A sentence inside a string literal is not something somebody decided.
+
+    `in this project every module must open with a docstring` sat in the
+    candidate queue as a user's rule while existing nowhere but as fixture
+    data in `tests/test_seams.py`.
+    """
+    from vesta.rules import constrains
+
+    assert not constrains("def f():\n    return 1\n")
+    assert not constrains("here is the fix:\n\n```python\nx = 1\n```")
+    assert not constrains('you must use SQLite\n\n    assert constrains("x")')
+
+
+def test_showing_code_does_not_swallow_a_rule_about_code():
+    """Naming an identifier is not the same as pasting a definition."""
+    from vesta.rules import constrains
+
+    assert constrains("the namespace should be causum:vesta, not vesta:vesta")
+    assert constrains(
+        "always import from vesta.home, never construct the path yourself"
+    )
+
+
+def test_a_turn_that_closes_by_asking_is_a_question():
+    """`ASKS_ABOUT_IT` anchors at the start, so an imperative that *ends* in a
+    question slipped through — "address the extraction now instead of shifting
+    it in the document, or are you saying it's not worth doing?" was captured
+    as a standing rule."""
+    from vesta.rules import constrains
+
+    assert not constrains(
+        "address the extraction now instead of shifting it in the document, "
+        "or are you saying it's not worth doing rn?"
+    )
+    assert not constrains(
+        "we should use SQLite for this, or do you think postgres is better?"
+    )
+
+
+def test_stating_a_rule_then_asking_about_it_is_still_a_rule():
+    """The distinction the whole guard turns on. Somebody who states a
+    constraint and then asks whether the code honours it has stated one."""
+    from vesta.rules import constrains
+
+    assert constrains(
+        "every module must open with a docstring — does resolve.py follow that?"
+    )
+    assert constrains(
+        "in this project every module must open with a docstring saying what "
+        "it is for. can you check whether resolve.py follows that?"
+    )

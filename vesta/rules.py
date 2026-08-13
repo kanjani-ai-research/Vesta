@@ -152,6 +152,27 @@ ASKS_ABOUT_IT = re.compile(
     re.I,
 )
 
+# A turn that ends by asking something, whatever it opened with.
+#
+# `ASKS_ABOUT_IT` anchors at the start, so it only catches a turn that *begins*
+# as a question. It missed "address the extraction now instead of shifting it
+# in the document, or are you saying it's not worth doing?" — which opens with
+# an imperative, matches CONSTRAINS on it, and is a question about what to do
+# next rather than a rule about the code.
+#
+# The last clause is what decides, because that is where a turn says what it
+# actually wants. Somebody who states a constraint and then asks whether the
+# code honours it has stated a constraint; somebody whose closing clause is
+# itself the question has asked one.
+ASKS_AT_THE_END = re.compile(
+    r"(^|[,;]\s*|\.\s+)"
+    r"(or\s+)?"
+    r"(are|is|do|does|did|can|could|should|would|will|shall|have|has|am)\s+"
+    r"(you|we|i|it|that|this|they|there)\b"
+    r"[^.?]*\?\s*$",
+    re.I,
+)
+
 # How something a user said becomes checkable.
 TRAVERSAL = "traversal"    # a property of how definitions refer to each other
 BEHAVIOUR = "behaviour"    # a property of what the artifact does when run
@@ -321,6 +342,34 @@ OUR_OWN = re.compile(
 )
 
 
+# Source code, in a turn where somebody was showing or editing it.
+#
+# Found the worst way. `in this project every module must open with a docstring
+# saying what it is for` was sitting in the candidate queue as a rule the user
+# had stated — and it exists nowhere except as **fixture data inside
+# `tests/test_seams.py`**, where it was written to exercise the harvester. It
+# reached the transcript when the file was read or written, and the harvester
+# read it back as somebody's decision.
+#
+# That is the same failure as inventing a finding: the tool asserting the user
+# said something they did not. A sentence lifted out of a string literal is not
+# a decision about the code, whatever it says.
+IS_CODE = re.compile(
+    r"(^|\n)\s*(def |class |import |from \w+ import|return |assert |@\w|"
+    r"[\w.]+\s*=\s*[\[{(\"']|"
+    r"\"\"\"|'''|```)",
+)
+
+# What a Python string literal looks like when it has been wrapped across lines
+# by a formatter: a line ending in a quote, or beginning with one, mid-sentence.
+WRAPPED_LITERAL = re.compile(r"(\"\s*\n\s*\"|'\s*\n\s*')")
+
+
+def _is_code(said: str) -> bool:
+    """Whether this is source rather than something somebody decided."""
+    return bool(IS_CODE.search(said) or WRAPPED_LITERAL.search(said))
+
+
 def _is_vestas_own(said: str) -> bool:
     """Whether this is something Vesta said, not something a user said."""
     return bool(OUR_OWN.search(said))
@@ -362,13 +411,18 @@ def constrains(text: str) -> bool:
     said = text.strip()
     if len(said) < 20 or len(said) > 600:
         return False
-    if _is_mostly_output(said) or _is_vestas_own(said):
-        # Output pasted in to be looked at, not a decision about the code.
+    if _is_mostly_output(said) or _is_vestas_own(said) or _is_code(said):
+        # Output pasted in to be looked at, or source being shown or edited —
+        # not a decision about the code.
         return False
     if PREDICTS_NOTHING.match(said):
         return False
     if THIS_TURN.search(said):
         # Scoped to a turn: real, and expiring. Not a standing rule.
+        return False
+    if said.endswith("?") and ASKS_AT_THE_END.search(said):
+        # It closes by asking something. What a turn wants is in its last
+        # clause, and this one wants an answer rather than a constraint kept.
         return False
     if said.endswith("?") and ASKS_ABOUT_IT.match(said):
         # The constraint itself is the question, not a statement followed by
@@ -387,6 +441,45 @@ def constrains(text: str) -> bool:
         # Stated as a definition rather than an instruction. Still a rule.
         return True
     return bool(CONSTRAINS.search(said))
+
+
+# A turn recorded as the user's that is not the user speaking.
+#
+# Found by asking where a rule came from. `in this project every module must
+# open with a docstring saying what it is for` was sitting in the candidate
+# queue as something the user had decided, and it exists nowhere but as fixture
+# data inside `tests/test_seams.py`. It reached the queue three separate ways,
+# and all three are recorded in the transcript with `role: user`:
+#
+# - **a compaction summary**, which replays an entire conversation as one turn.
+#   Every rule-shaped sentence in a digest gets re-harvested as though it were
+#   freshly stated, and there were 53 of these in this project's transcripts.
+# - **an assistant turn**, echoed back with its `⏺` marker. 24 of those.
+# - a genuine turn where somebody pasted the fixture to talk about it.
+#
+# The first two are not the user at any remove, so they are dropped here rather
+# than filtered later — a summary is not a weaker signal of intent, it is a
+# different speaker.
+NOT_THE_USER = re.compile(
+    r"^(⏺|"
+    r"This session is being continued from a previous conversation|"
+    r"Caveat: The messages below were generated|"
+    r"\[Request interrupted)",
+)
+
+# The same, but anywhere in the opening rather than at the very start: a
+# summary sometimes carries a preamble before it says what it is.
+SUMMARISED = re.compile(
+    r"(conversation that ran out of context|"
+    r"The summary below covers the earlier portion|"
+    r"Continue the conversation from where it left off)",
+    re.I,
+)
+
+
+def _not_the_user(said: str) -> bool:
+    """Whether a turn recorded as the user's was somebody else."""
+    return bool(NOT_THE_USER.match(said) or SUMMARISED.search(said[:1500]))
 
 
 def _turns(path: Path) -> Iterable[Tuple[str, float]]:
@@ -416,7 +509,7 @@ def _turns(path: Path) -> Iterable[Tuple[str, float]]:
             continue
         said = said.strip()
         # Harness-injected content is not the user speaking.
-        if said and not said.startswith("<"):
+        if said and not said.startswith("<") and not _not_the_user(said):
             yield said, stamp
 
 
