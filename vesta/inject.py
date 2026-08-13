@@ -230,6 +230,7 @@ def main() -> int:
         _a_rule_stated(prompt),
         _a_change_to_what_was_agreed(prompt, project),
         _a_rule_in_doubt(prompt, project),
+        _something_already_wrong(prompt, project),
     ):
         if offer:
             parts.append(offer)
@@ -268,6 +269,51 @@ def _a_rule_stated(prompt: str) -> str:
         "words, say in one line that it was recorded, and carry on with what "
         "they actually asked for. If it only scopes this turn, do nothing."
     )
+
+
+def _something_already_wrong(prompt: str, project: str) -> str:
+    """A defect that is already in the file somebody is about to change.
+
+    **Surfacing is the whole value, and it has one condition.** Every defect
+    Vesta finds was findable before this existed, by typing a command — and
+    nobody types it. A tool whose usefulness depends on remembering its API is
+    a tool that does not get used, which makes the finder academic however good
+    it is.
+
+    But surfacing is only bearable when the thing surfaced is about the work in
+    hand. Eighteen findings across a workspace is a report. The two swallowed
+    failures inside the file being edited are a remark worth making, in the one
+    moment somebody can act on them for free — they are already in that file.
+    Sending everything, or sending the wrong thing, is worse than sending
+    nothing: it teaches somebody to skim the channel, and then the finding that
+    mattered goes past unread too.
+
+    So this fires only when the prompt names a file, and only for what is in
+    that file. Same shape as `_a_rule_in_doubt`, for the same reason.
+    """
+    import re as _re
+
+    paths = _re.findall(r"[\w./-]+\.[a-zA-Z]{1,6}\b", prompt)
+    if not paths:
+        return ""
+
+    try:
+        # Never build here. Surveying an unprepared repository took ten seconds
+        # on a real workspace, and a hook that stalls a prompt for ten seconds
+        # is uninstalled long before anybody discovers it was right. If nothing
+        # is ready, preparation is already under way from the branch above and
+        # the next prompt can answer; this one was never owed an answer.
+        from .ready import readiness
+
+        if not readiness(project).can_answer:
+            return ""
+
+        from .sidecar import _defects_in
+
+        return _defects_in(paths[:6], Path(project))
+    except Exception as exc:  # noqa: BLE001 - never break the session
+        logger.info("could not check what is wrong here: %s", exc)
+        return ""
 
 
 def _a_rule_in_doubt(prompt: str, project: str) -> str:

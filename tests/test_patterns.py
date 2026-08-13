@@ -434,3 +434,124 @@ def test_vesta_carries_no_constant_nobody_reads():
         for s in f.sites
     ]
     assert not found, f"stale constants: {found}"
+
+
+# ── Packages, façades and same-named modules ────────────────────────────────
+
+
+def _tree(root, files: dict):
+    """Write a package tree, and forget any cached listing of it."""
+    from vesta.patterns import _LISTED
+
+    for name, source in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    _LISTED.clear()
+    return _sites(root)
+
+
+def _sites(root):
+    from vesta.dynamic import Blindspot
+    from vesta.graph import Graph
+    from vesta.patterns import calls_to_nothing
+
+    return [
+        site
+        for found in calls_to_nothing(Graph(root=str(root)), root, Blindspot())
+        for site in found.sites
+    ]
+
+
+def test_importing_from_a_package_is_not_a_missing_module(tmp_path):
+    """Found on a real codebase, and it made the survey untrustworthy.
+
+    `metis/core/` is a package whose `__init__.py` says what consumers may
+    import. Nine `from ..core import …` lines were reported as "no such
+    module" — the most alarming thing this survey says, "raises the moment the
+    line runs" — and it was wrong about all nine. Matching only file stems
+    means no directory is ever a module.
+    """
+    sites = _tree(
+        tmp_path,
+        {
+            "pkg/__init__.py": "",
+            "pkg/core/__init__.py": "from .model import Graph\n",
+            "pkg/core/model.py": "class Graph:\n    pass\n",
+            "pkg/use.py": "from .core import Graph\n",
+        },
+    )
+    assert sites == []
+
+
+def test_a_re_export_makes_a_name_importable_from_the_package(tmp_path):
+    """A façade re-exports: `from .document import Document` inside
+    `core/__init__.py` makes `Document` a name `from ..core import Document`
+    correctly finds."""
+    sites = _tree(
+        tmp_path,
+        {
+            "pkg/__init__.py": "",
+            "pkg/core/__init__.py": "from .document import Document\n",
+            "pkg/core/document.py": "class Document:\n    pass\n",
+            "pkg/cli/__init__.py": "",
+            "pkg/cli/main.py": "from ..core import Document\n",
+        },
+    )
+    assert sites == []
+
+
+def test_a_name_a_package_does_not_export_is_still_found(tmp_path):
+    """The fix must not blind the detector. A package that does not supply the
+    name is exactly the defect this exists to catch."""
+    sites = _tree(
+        tmp_path,
+        {
+            "pkg/__init__.py": "",
+            "pkg/core/__init__.py": "from .model import Graph\n",
+            "pkg/core/model.py": "class Graph:\n    pass\n",
+            "pkg/use.py": "from .core import Missing\n",
+        },
+    )
+    assert len(sites) == 1
+    assert "core has no Missing" in sites[0].what
+
+
+def test_two_modules_sharing_a_name_resolve_to_the_right_one(tmp_path):
+    """`from .base import X` means the sibling `base`, not any `base`.
+
+    Two files called `base.py` in different packages made resolution return
+    whichever was listed first, so imports from one were checked against the
+    other's contents — nine more false positives, in the same codebase.
+    """
+    sites = _tree(
+        tmp_path,
+        {
+            "pkg/__init__.py": "",
+            "pkg/store/__init__.py": "",
+            "pkg/store/base.py": "class Store:\n    pass\n",
+            "pkg/store/use.py": "from .base import Store\n",
+            "pkg/pipelines/__init__.py": "",
+            "pkg/pipelines/base.py": "class Stage:\n    pass\n",
+            "pkg/pipelines/use.py": "from .base import Stage\n",
+        },
+    )
+    assert sites == []
+
+
+def test_the_wrong_sibling_is_still_reported(tmp_path):
+    """Resolving to the right module must not mean accepting any name: asking
+    `store.base` for something only `pipelines.base` has is a real defect."""
+    sites = _tree(
+        tmp_path,
+        {
+            "pkg/__init__.py": "",
+            "pkg/store/__init__.py": "",
+            "pkg/store/base.py": "class Store:\n    pass\n",
+            "pkg/store/use.py": "from .base import Stage\n",
+            "pkg/pipelines/__init__.py": "",
+            "pkg/pipelines/base.py": "class Stage:\n    pass\n",
+        },
+    )
+    assert len(sites) == 1
+    assert "base has no Stage" in sites[0].what

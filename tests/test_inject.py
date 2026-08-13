@@ -123,3 +123,160 @@ def test_the_script_never_leaks_an_error(tmp_path):
     assert done.stderr.strip() == ""
     assert "command not found" not in done.stdout + done.stderr
     assert done.returncode == 0
+
+
+# ── Defects raised at the moment they apply ─────────────────────────────────
+
+
+def _prepared(repo):
+    """Build the graph, as a session's first prompt would have done.
+
+    The hook never builds — surveying an unprepared repository took ten
+    seconds on a real workspace, and a hook that stalls a prompt that long is
+    uninstalled before anybody finds out it was right. So a test that wants an
+    answer has to have prepared, exactly as a real session does.
+    """
+    from vesta.held import graph_for
+    from vesta.patterns import _LISTED
+
+    _LISTED.clear()
+    graph_for(repo, rebuild=True)
+    return repo
+
+
+def _repo_with_a_swallowed_failure(tmp_path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    # Shaped like the real thing: a bare `pass` whose body says nothing, in a
+    # function something else calls. A `return` anywhere in the try makes the
+    # handler look like it reports, which is the detector working as intended.
+    (tmp_path / "keep.py").write_text(
+        "def store(items):\n"
+        "    kept = []\n"
+        "    for item in items:\n"
+        "        try:\n"
+        "            kept.append(item)\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "    return kept\n"
+        "\n"
+        "def use():\n"
+        "    return store([1])\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "clean.py").write_text(
+        "def add(a, b):\n"
+        '    """Sum two numbers."""\n'
+        "    return a + b\n",
+        encoding="utf-8",
+    )
+    return _prepared(tmp_path)
+
+
+def test_a_defect_is_raised_when_the_file_is_named(tmp_path, monkeypatch):
+    """The whole point of surfacing.
+
+    Every defect Vesta finds was findable before this existed, by typing a
+    command — and nobody types it. A tool whose usefulness depends on
+    remembering its API does not get used.
+    """
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    repo = _repo_with_a_swallowed_failure(tmp_path / "repo")
+
+    from vesta.inject import _something_already_wrong
+
+    said = _something_already_wrong("add a retry to keep.py", str(repo))
+    assert "keep.py" in said
+    assert "swallowed failure" in said
+
+
+def test_nothing_is_said_about_a_file_with_nothing_wrong(tmp_path, monkeypatch):
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    repo = _repo_with_a_swallowed_failure(tmp_path / "repo")
+
+    from vesta.inject import _something_already_wrong
+
+    assert _something_already_wrong("tidy up clean.py", str(repo)) == ""
+
+
+def test_nothing_is_said_when_no_file_is_named(tmp_path, monkeypatch):
+    """Sending every defect on every prompt is the other way to be useless."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    repo = _repo_with_a_swallowed_failure(tmp_path / "repo")
+
+    from vesta.inject import _something_already_wrong
+
+    assert _something_already_wrong("what does this project do", str(repo)) == ""
+    assert _something_already_wrong("add a new endpoint", str(repo)) == ""
+
+
+def test_a_defect_elsewhere_is_not_raised(tmp_path, monkeypatch):
+    """Relevance is the condition. A finding in another file is a report, and
+    a report nobody asked for teaches somebody to skim the channel."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    repo = _repo_with_a_swallowed_failure(tmp_path / "repo")
+
+    from vesta.inject import _something_already_wrong
+
+    said = _something_already_wrong("edit clean.py", str(repo))
+    assert "keep.py" not in said
+
+
+def test_the_agent_is_told_not_to_stop_work_over_it(tmp_path, monkeypatch):
+    """A remark, not an instruction. Fixing something unasked mid-task is how
+    a helpful channel becomes one somebody turns off."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    repo = _repo_with_a_swallowed_failure(tmp_path / "repo")
+
+    from vesta.inject import _something_already_wrong
+
+    said = _something_already_wrong("add a retry to keep.py", str(repo)).lower()
+    assert "do not fix them unasked" in said
+    assert "do not stop what you were asked to do" in said
+
+
+def test_a_weak_signal_does_not_interrupt(tmp_path, monkeypatch):
+    """Only `clear` and `likely` speak. "worth a look" is a signal, and
+    raising one unasked mid-edit is exactly the noise this must not add."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    repo = tmp_path / "weak"
+    repo.mkdir()
+    # Unreferenced definition — reported, but only ever "worth a look".
+    (repo / "lonely.py").write_text(
+        "def nobody_calls_this():\n    return 1\n", encoding="utf-8"
+    )
+
+    from vesta.inject import _something_already_wrong
+
+    assert _something_already_wrong("edit lonely.py", str(repo)) == ""
+
+
+def test_an_unprepared_repository_is_never_surveyed_in_a_hook(tmp_path, monkeypatch):
+    """A hook that stalls a prompt is uninstalled before it is understood.
+
+    Surveying an unprepared workspace took **ten seconds** on a real project.
+    Nothing is built here: if the graph is not ready the offer is silent, and
+    the next prompt can answer.
+    """
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "keep.py").write_text(
+        "def store(items):\n"
+        "    kept = []\n"
+        "    for item in items:\n"
+        "        try:\n"
+        "            kept.append(item)\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "    return kept\n",
+        encoding="utf-8",
+    )
+
+    from vesta.inject import _something_already_wrong
+
+    # Nothing prepared: silent, and fast.
+    import time
+
+    started = time.time()
+    assert _something_already_wrong("edit keep.py", str(repo)) == ""
+    assert time.time() - started < 2.0

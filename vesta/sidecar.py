@@ -42,7 +42,7 @@ from .traverse import about, neighbours
 from .traverse import recall as recall_map
 from .traverse import where as where_in
 from .learned import everything as learned_patterns
-from .patterns import survey
+from .patterns import CLEAR, LIKELY, WORTH_A_LOOK, Site, survey
 from .propagate import from_files, is_test
 from .home import home, repository_name
 
@@ -963,6 +963,101 @@ def _bears_on(paths: List[str], project: Optional[Path]) -> str:
         # rather than being absent.
         bearing.queue(verdict.findings, covers, paths, project)
 
+    return "\n".join(lines)
+
+
+# The finders whose findings are ever strong enough to raise unasked.
+#
+# Kept as a list rather than filtered afterwards, because the cost is in the
+# looking: a full survey walks every file with every detector, and computing
+# findings that will then be discarded for being too weak is a tax paid on
+# every prompt that names a file.
+#
+# `nothing refers to this` and `only its tests call this` are deliberately
+# absent — both are `worth a look` by design, and interrupting somebody's work
+# with a signal is what makes a channel worth turning off.
+RAISEABLE = (
+    "swallowed failure",
+    "calls something that does not exist",
+    "a constant nobody reads",
+    "hardcoded language list",
+)
+
+
+def _defects_in(paths: List[str], project: Optional[Path]) -> str:
+    """Defects in the files somebody is about to change, and nothing else.
+
+    **A report nobody runs is a report nobody reads.** Everything this needs
+    already existed — `survey` finds defects, and every finding carries the
+    file and line it is at — and none of it ever reached a user who had not
+    typed a command to ask for it. A tool whose value depends on remembering
+    its API has no value.
+
+    What makes surfacing bearable is the same thing that makes `bears`
+    bearable: it is about *these* files. Eighteen findings across a workspace
+    is a report; the two swallowed failures inside the file being edited are a
+    remark worth making. Sending all of them, or the wrong ones, is worse than
+    sending none — it teaches somebody to skim past the channel, and then the
+    one that mattered goes past too.
+
+    So: only findings whose site is in a named file, only the most confident
+    of them, and silence in every other case.
+    """
+    if project is None or not paths:
+        return ""
+
+    wanted = {p.lstrip("./") for p in paths}
+    if not wanted:
+        return ""
+
+    with quiet_stdout():
+        graph = graph_for(project, trust_for=300)
+        # Only the finders that can produce something strong enough to raise.
+        # A whole survey costs about a second on a ten-thousand-line workspace
+        # and this runs on every prompt naming a file — spending that to
+        # compute findings too weak to be mentioned is a tax on every prompt
+        # for nothing. The rest stay available to `vesta defects`, which is
+        # where somebody has actually asked for the full picture.
+        found = survey(graph, project, only=RAISEABLE, trust_for=300)
+
+    here: List[Tuple[str, str, Site]] = []
+    for finding in found.found:
+        for site in finding.sites:
+            if any(site.where.endswith(name) or name.endswith(site.where)
+                   for name in wanted):
+                here.append((finding.confidence, finding.pattern, site))
+
+    if not here:
+        return ""
+
+    # The strongest evidence first, and only that. A list of six things to
+    # consider before an edit is a list nobody reads before an edit.
+    order = {CLEAR: 0, LIKELY: 1, WORTH_A_LOOK: 2}
+    here.sort(key=lambda entry: (order.get(entry[0], 3), entry[2].where, entry[2].line))
+
+    # Anything weaker than "likely" is a signal, not a finding, and raising one
+    # unasked in the middle of somebody's work is exactly the noise that makes
+    # a channel worthless.
+    strong = [e for e in here if e[0] in (CLEAR, LIKELY)]
+    if not strong:
+        return ""
+
+    lines = [
+        f"{len(strong)} thing(s) already known to be wrong in what you are "
+        "about to change:"
+    ]
+    for confidence, pattern, site in strong[:3]:
+        lines.append(f"  {site.where}:{site.line}  {pattern} — {site.what[:60]}")
+
+    if len(strong) > 3:
+        lines.append(f"  … and {len(strong) - 3} more in these files.")
+
+    lines.append("")
+    lines.append(
+        "Mention these once, briefly, and only if the work touches them. Do "
+        "not fix them unasked and do not stop what you were asked to do. If "
+        "the user is not interested, say nothing further about them."
+    )
     return "\n".join(lines)
 
 

@@ -250,6 +250,49 @@ def unresolvable_reach(graph: Graph, root: Path, blind: Blindspot) -> List[Found
     ]
 
 
+def _decorated(root: Path) -> Set[Tuple[str, str]]:
+    """Definitions a decorator registers, as `(path, name)`.
+
+    **A decorator is a reference.** `@app.get("/health")` hands the function to
+    something that will call it later, which is exactly why nothing calls it by
+    name — and a resolver following call edges sees a definition nobody
+    mentions.
+
+    Found on a real codebase: sixteen FastAPI routes in one file reported as
+    "nothing refers to this", every one of them live and serving. Sixteen of
+    seventeen findings for that component were this single blind spot, which
+    is how a survey teaches somebody to skim past it.
+
+    Bare `@property` and `@staticmethod` are not registrations — they modify a
+    definition that is still reached the ordinary way — so they do not exempt
+    anything. What counts is a decorator that *takes* the function somewhere:
+    an attribute call like `@app.get(...)`, or a name the module imported.
+    """
+    import ast
+
+    found: Set[Tuple[str, str]] = set()
+    plain = {"property", "staticmethod", "classmethod", "abstractmethod",
+             "cached_property", "override", "dataclass"}
+
+    for path, relative in _sources(root):
+        try:
+            tree = ast.parse("\n".join(_lines(path)))
+        except (SyntaxError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                continue
+            for mark in node.decorator_list:
+                said = mark.func if isinstance(mark, ast.Call) else mark
+                if isinstance(said, ast.Attribute):
+                    found.add((relative, node.name))  # @app.get(...)
+                elif isinstance(said, ast.Name) and said.id not in plain:
+                    found.add((relative, node.name))  # @register, @tool
+    return found
+
+
 def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
     """Code nothing refers to, which nothing will notice breaking.
 
@@ -263,6 +306,7 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
     too, so what remains is genuinely unreferenced.
     """
     reachable_by_name = {entry.name for entry in blind.found}
+    registered = _decorated(root)
     by_file: Dict[str, List[Site]] = {}
     for node in graph.nodes.values():
         if graph.referenced_by(node.id):
@@ -273,6 +317,8 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
             continue  # private helpers and entry points
         if node.name in reachable_by_name:
             continue  # something reaches it by name; the graph just cannot see
+        if (node.path, node.name) in registered:
+            continue  # a decorator registered it; that *is* the reference
         if node.container:
             continue  # a method may be reached through its class
         by_file.setdefault(node.path, []).append(
@@ -293,13 +339,67 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
     ]
 
 
-def _named_in(root: Path, module: str) -> set:
-    """Every name a module of this package defines at the top level."""
+def _module_files(
+    root: Path, module: str, near: Optional[Path] = None, level: int = 1
+) -> List[Path]:
+    """The file a relative import names, resolved the way Python resolves it.
+
+    Two things this has to get right, and each was wrong in its own way.
+
+    **A module is a `<module>.py` or a package** — a directory holding an
+    `__init__.py`. Matching only file stems meant every package looked deleted:
+    on a codebase built as a façade, nine `from ..core import …` lines were
+    reported as "no such module" while `core/__init__.py` sat there exporting
+    every name. That is the most alarming thing this survey says — "raises the
+    moment the line runs" — and it was wrong about all nine.
+
+    **And `from .base import X` means the sibling `base`, not any `base`.**
+    Two files called `base.py` in different packages made resolution return
+    whichever was found first, so imports from one were checked against the
+    other's contents. `near` and `level` say where the import was written and
+    how many dots it used, which is the only thing that makes the answer
+    unambiguous.
+
+    Without `near` this falls back to matching anywhere, which is what callers
+    that have no importing file can ask for.
+    """
+    candidates = []
+    for path, _ in _sources(root):
+        if path.stem == module and path.name != "__init__.py":
+            candidates.append(path)
+        elif path.name == "__init__.py" and path.parent.name == module:
+            candidates.append(path)
+
+    if near is None or len(candidates) < 2:
+        return candidates
+
+    # `.x` is a sibling of the importing file; `..x` a sibling of its parent,
+    # and so on. Anything else in the tree with the same name is a different
+    # module that happens to share a name.
+    where = near.parent
+    for _ in range(max(level - 1, 0)):
+        where = where.parent
+
+    exact = [p for p in candidates if p.parent == where or p.parent.parent == where]
+    return exact or candidates
+
+
+def _named_in(
+    root: Path, module: str, near: Optional[Path] = None, level: int = 1
+) -> set:
+    """Every name a module of this package defines at the top level.
+
+    For a package this reads its `__init__.py`, which is exactly where a
+    façade declares its surface — and re-exports count, so `from .document
+    import Document` there makes `Document` a name `from ..core import
+    Document` correctly finds.
+
+    `near` and `level` are where the import was written and how many dots it
+    used, so that two modules sharing a name resolve to the right one.
+    """
     import ast
 
-    for path, _ in _sources(root):
-        if path.stem != module:
-            continue
+    for path in _module_files(root, module, near=near, level=level):
         try:
             tree = ast.parse("\n".join(_lines(path)))
         except (SyntaxError, ValueError):
@@ -354,7 +454,16 @@ def calls_to_nothing(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
 
     # Every module this package holds, so a `from .x import y` naming a deleted
     # module is caught as surely as a call to a deleted function.
+    #
+    # Packages count. A stem-only set contains no directory, so every façade
+    # package read as deleted — the failure that made this detector report
+    # nine imports of live code as raising on the first line.
     modules = {path.stem for path, _ in _sources(root)}
+    modules |= {
+        path.parent.name
+        for path, _ in _sources(root)
+        if path.name == "__init__.py"
+    }
 
     for path, relative in _sources(root):
         try:
@@ -365,7 +474,7 @@ def calls_to_nothing(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
             continue
 
         defined: set = set(known_builtins)
-        imported_from: List[Tuple[str, str, int]] = []
+        imported_from: List[Tuple[str, str, int, int]] = []
 
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -386,13 +495,15 @@ def calls_to_nothing(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
                 # which is why checking calls alone missed it.
                 if node.level and node.module and "." not in node.module:
                     for alias in node.names:
-                        imported_from.append((node.module, alias.name, node.lineno))
+                        imported_from.append(
+                            (node.module, alias.name, node.lineno, node.level)
+                        )
             elif isinstance(node, ast.alias):
                 defined.add(node.asname or node.name.split(".")[0])
 
         sites: List[Site] = []
 
-        for module, what, line in imported_from:
+        for module, what, line, level in imported_from:
             if module not in modules:
                 sites.append(
                     Site(
@@ -401,7 +512,9 @@ def calls_to_nothing(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
                         what=f"from .{module} import {what} — no such module",
                     )
                 )
-            elif what != "*" and what not in _named_in(root, module):
+            elif what != "*" and what not in _named_in(
+                root, module, near=path, level=level
+            ):
                 sites.append(
                     Site(
                         where=relative,
