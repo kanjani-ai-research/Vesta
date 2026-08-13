@@ -142,11 +142,42 @@ def test_the_runner_finds_vesta_when_it_is_there():
     assert "Vesta" in done.stdout
 
 
-@pytest.mark.parametrize("command", guide_commands(), ids=lambda c: c.split()[1])
+@pytest.mark.parametrize("command", guide_commands(), ids=lambda c: c.replace(" ", "-"))
 def test_the_guide_only_shows_commands_that_exist(command):
-    """A guide that drifts is worse than none, because it is believed."""
+    """A guide that drifts is worse than none, because it is believed.
+
+    Both surfaces are checked. The guide cites `vesta words` and
+    `/vesta:tutorial`, and a slash command that does not exist is exactly as
+    misleading as a subcommand that does not.
+    """
+    if command.startswith("/vesta:"):
+        here = Path(__file__).resolve().parent.parent / "commands"
+        name = command.split(":", 1)[1].split()[0]
+        assert (here / f"{name}.md").is_file(), (
+            f"the guide shows `{command}`, which is not a command"
+        )
+        return
+
     word = command.split()[1]
     assert word in SUBCOMMANDS, f"the guide shows `{command}`, which does not exist"
+
+
+def test_the_guide_mentions_every_command_a_user_would_run():
+    """The drift that actually happened, in the direction nobody checks.
+
+    The guide was held to "everything it shows must exist", which it always
+    passed — while `contract`, `drive` and `words` were added and never
+    mentioned. A reference silently missing a third of the tool is worse than
+    one naming something that is gone, because nothing ever fails.
+    """
+    shown = {c.split()[1] for c in guide_commands() if not c.startswith("/")}
+
+    # What a user never types: `graph` and `prepare` are what `status` does
+    # for them, and `guide` is the thing they are already reading.
+    theirs = SUBCOMMANDS - {"graph", "prepare", "guide", "tutorial"}
+
+    missing = theirs - shown
+    assert not missing, f"the guide never mentions: {sorted(missing)}"
 
 
 # ── The manifest the framework reads ────────────────────────────────────────

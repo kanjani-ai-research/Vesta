@@ -23,12 +23,25 @@ from typing import Dict, List, Tuple
 # is the whole answer — a user who reads only the snippet has lost nothing.
 SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
     (
+        "How do I use this at all?",
+        "Two ways, and the first needs nothing from you. As a companion Vesta "
+        "answers and records while you work normally — there is nothing to "
+        "start. Automated mode is offered when you ask for a whole project to "
+        "be built, and only then; choosing to work interactively means you "
+        "are not asked again.",
+        [
+            ("/vesta:tutorial", "learn it a page at a time, on this repository"),
+            ("vesta guide", "this, the reference"),
+        ],
+    ),
+    (
         "Where does this repository do X?",
         "Ask in the words of the work. Vesta answers in the words of the code, "
         "which are usually different — that crossing is the point.",
         [
             ("vesta does 'retrying a failed request'", "definitions that do that work"),
             ("vesta means Graph.referenced_by", "what one definition is for"),
+            ("vesta known Graph.resolve", "what earlier sessions already worked out about it"),
         ],
     ),
     (
@@ -78,6 +91,42 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
             ("vesta defects", "things worth fixing, most consequential first"),
         ],
     ),
+    (
+        "What words is my project described in?",
+        "Everything answered about the work rather than the syntax is answered "
+        "in these. They are read from your code, which makes them a good first "
+        "draft and a bad final answer — so they are yours to change. Removing "
+        "a word removes what was attached to it, and putting it back does not "
+        "restore those bindings.",
+        [
+            ("vesta words", "the vocabulary this project uses"),
+            ("vesta words --edit", "open it in $EDITOR, one word per line"),
+            ("vesta words --templates", "shipped vocabularies for common domains"),
+            ("vesta words --template security", "add one; it supplies words, never bindings"),
+            ("vesta words --set ours.md", "replace them from a file, so deletions take effect"),
+        ],
+    ),
+    (
+        "What was agreed, and is it built yet?",
+        "Automated mode only. The behaviours are agreed before any code "
+        "exists and do not move: while driving, a request that changes one is "
+        "refused rather than weighed, and you choose whether to carry on, "
+        "start over, or have it after delivery.",
+        [
+            ("vesta contract", "what was agreed, and how much of it is done"),
+            ("vesta drive", "whether it is driving, and what is left"),
+        ],
+    ),
+    (
+        "What has it actually saved me?",
+        "The honest accounting, kept as it happens: not what it might save, "
+        "what it did — questions answered from what was already known rather "
+        "than by reading the repository again.",
+        [
+            ("vesta used", "what Vesta was asked, and what answering cost"),
+            ("vesta used --since 60", "the last hour of it"),
+        ],
+    ),
 ]
 
 # What Vesta is, in the fewest words that are still true.
@@ -87,8 +136,14 @@ and what earlier sessions already worked out — so an agent can ask instead of
 reading, and you do not pay twice for the same understanding.
 
 Both halves are learned from the repository itself. The vocabulary comes from
-what this code is for, not from a template, and the rules come from the
-corrections its own users have made."""
+what this code is for, and the rules from the corrections its own users have
+made. A template can lend you words for a specialised domain, but never which
+of your definitions do the work — that is read from your code every time.
+
+You do not have to run any of it. As a companion Vesta answers your agent's
+questions and records what you decide while you work normally. Automated mode,
+where it agrees a contract and builds to it, is offered only when you ask for a
+whole project and is never entered on your behalf."""
 
 # Said once, at the end, because it is the thing users most often ask about a
 # tool that reads their code.

@@ -624,6 +624,25 @@ def _drive(args: argparse.Namespace) -> int:
     return 0
 
 
+def _tutorial(args: argparse.Namespace) -> int:
+    """One chapter of the tutorial, for the agent to draw as a dialog.
+
+    What is printed is an instruction rather than a page, because the page is
+    drawn by the host: a plugin cannot render a menu, but it can hand the agent
+    something to render with `AskUserQuestion`, whose preview pane is a genuine
+    navigable interface.
+    """
+    from .tutorial import got_to, instruction
+
+    said = str(args.chapter).strip()
+    if said and not said.isdigit():
+        _say(f"There is no chapter {said!r}. There are five, numbered 1 to 5.")
+        return 1
+
+    _say(instruction(int(said) if said else got_to(), Path(args.root)))
+    return 0
+
+
 def _guide(args: argparse.Namespace) -> int:
     """What Vesta is and what a user can do with it.
 
@@ -792,6 +811,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     words.add_argument("--templates", action="store_true", help="what is shipped")
     words.add_argument("--root", default=".")
     words.set_defaults(run=_words)
+
+    tutorial = sub.add_parser("tutorial", help="learn vesta a page at a time")
+    # A chapter number, or nothing to pick up where they left off. Positional,
+    # because `vesta tutorial 3` is how somebody says it.
+    tutorial.add_argument("chapter", nargs="?", default="", help="1-5")
+    tutorial.add_argument("--root", default=".")
+    tutorial.set_defaults(run=_tutorial)
 
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")
     guide.add_argument("topic", nargs="?", default="")
