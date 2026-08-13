@@ -9,11 +9,27 @@ model that did the work, so a cheaper model doing more work can cost less than
 a dearer one doing less. Token counts are kept because they are the evidence,
 but the number that matters is dollars.
 
-**Quality is what a stranger could check.** Whether the tests pass, whether the
-thing runs, what is wrong with the code by the crudest possible reading — bare
-excepts, swallowed failures, dead code. Nothing here uses Vesta: scoring the
-arm that ships Vesta with Vesta's own measurements would show only that a tool
-agrees with itself.
+**Quality is what a stranger could check.** Whether the tests pass, what is
+wrong with the code by the crudest possible reading — bare excepts, swallowed
+failures, dead code — and two things about the run rather than the artifact:
+
+- *how many times the user had to say something*, because an answer that takes
+  sixteen interventions is worse than the same answer taking one, whatever the
+  code looks like at the end
+- *how much was produced per intervention*, because volume without direction is
+  not quality either
+
+Nothing here uses Vesta: scoring the arm that ships Vesta with Vesta's own
+measurements would show only that a tool agrees with itself.
+
+**And the briefs carry a curveball each.** A todo list, a pomodoro timer and a
+markdown outliner are shapes a model has seen ten thousand times, and a battery
+of them measures recall rather than method — both arms produce something fluent
+and the comparison says nothing. So each brief ends with a requirement that
+cannot be pattern-matched from the familiar shape: a timer that must resume in
+real elapsed time, an outliner that must not see headings inside code fences, a
+ledger with an inferred blank posting and per-currency balancing. Each is
+checkable, and each is a place a plausible implementation is wrong.
 
 **Time is wall clock, from the transcript.** Not a stopwatch anybody had to
 watch, and not the model's estimate of its own effort.
@@ -118,19 +134,26 @@ def spent(where: Path) -> Dict:
     }
 
 
-def quality(where: Path) -> Dict:
+def quality(where: Path, cost: Dict) -> Dict:
     """What was produced, judged by anything but Vesta."""
     from score import counted, defects, tests_pass  # noqa: E402
 
+    built = counted(where)
+    turns = max(cost.get("turns", 0), 1)
     return {
-        "built": counted(where),
+        "built": built,
         "defects": defects(where),
         "tests_pass": tests_pass(where),
+        # What the user had to do to get it, and what each intervention bought.
+        "interventions": cost.get("turns", 0),
+        "lines_per_intervention": round(built["lines"] / turns, 1),
+        "tests_per_intervention": round(built["tests"] / turns, 1),
     }
 
 
 def one(where: Path) -> Dict:
-    return {"where": where.name, "cost": spent(where), "quality": quality(where)}
+    paid = spent(where)
+    return {"where": where.name, "cost": paid, "quality": quality(where, paid)}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
