@@ -1,15 +1,16 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "vesta-local",
+  "name": "causum",
+  "description": "Causum: tools for understanding and governing a codebase.",
   "owner": {
-    "name": "Causum"
+    "name": "Causum",
+    "url": "https://gitlab.com/causum"
   },
   "plugins": [
     {
       "name": "vesta",
       "source": "./",
-      "description": "An adaptive ontology over a resolved code graph: the vocabulary is learned from this repository, the rules from its own users' corrections. Ask what a change touches, where a kind of work is done, what has already been decided, and what is worth fixing."
+      "description": "Answers structural questions about a repository from a resolved graph of what refers to what, and surfaces what it already knows at the moment you are about to change something. Install it and work normally \u2014 there is nothing to run."
     }
-  ],
-  "description": "Vesta: an adaptive ontology over a resolved code graph."
+  ]
 }

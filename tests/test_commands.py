@@ -462,3 +462,60 @@ def test_a_broken_environment_is_a_sentence_not_a_stack():
     assert done.returncode == 0
     if "resolved nothing" in said:
         assert "no server for this language" in said
+
+
+# ── What a stranger receives ────────────────────────────────────────────────
+
+
+def test_the_plugin_declares_what_a_marketplace_needs():
+    """Submission is reviewed, and a manifest missing its licence or its
+    source is a submission that comes back."""
+    manifest = _manifest()
+
+    for field in ("name", "version", "description", "author", "license",
+                  "homepage", "repository", "keywords"):
+        assert manifest.get(field), f"plugin.json has no {field}"
+
+    assert manifest["license"] == "Apache-2.0"
+    assert manifest["repository"].startswith("http")
+
+
+def test_the_marketplace_is_not_named_for_development():
+    """`vesta-local` is a development artifact. Users type the marketplace
+    name to install — `/plugin install vesta@causum` — so it is public."""
+    import json
+
+    said = json.loads(
+        (HERE / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    assert not said["name"].endswith("-local")
+    assert said["owner"].get("name")
+
+
+def test_the_licence_ships():
+    """Apache 2.0 requires the licence and the NOTICE to travel with the code,
+    and a plugin is distributed by copying its directory."""
+    licence = (HERE / "LICENSE").read_text(encoding="utf-8")
+    assert "Apache License" in licence
+    assert "Version 2.0" in licence
+
+    notice = (HERE / "NOTICE.md").read_text(encoding="utf-8")
+    assert "Copyright" in notice
+    assert "Apache License" in notice
+
+
+def test_the_readme_describes_what_this_is_now():
+    """It described the first-generation Vesta — theory acquisition, a Brave
+    API key, tools that no longer exist — and it is the first thing a stranger
+    reads."""
+    said = (HERE / "README.md").read_text(encoding="utf-8")
+
+    assert "BRAVE_API_KEY" not in said
+    assert "does not read, search or navigate code" not in said
+    assert "/plugin install vesta@" in said
+
+    # Every slash command it names must exist.
+    for name in re.findall(r"/vesta:(\w[\w-]*)", said):
+        assert (HERE / "commands" / f"{name}.md").is_file(), (
+            f"the README shows /vesta:{name}, which is not a command"
+        )
