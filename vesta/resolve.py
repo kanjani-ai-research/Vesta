@@ -40,11 +40,50 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, Field
 
+from .home import NOT_THE_PROJECT
+
 logger = logging.getLogger("vesta.resolve")
 
 # Directories never worth handing to a server. Third-party source resolves and
 # is not a propagation target, and sending it multiplies indexing time.
-_SKIP = (".venv", "node_modules", ".git", "target", "__pycache__", "dist", "build")
+#
+# `dist` and `build` are added to the shared list here: a server indexing
+# generated code is slow rather than wrong, which is the opposite trade from
+# a graph that would then be missing somebody's source.
+_SKIP = NOT_THE_PROJECT + ("dist", "build")
+
+
+def _settings() -> Dict[str, Any]:
+    """What to tell a server about the workspace when it asks.
+
+    Servers ask for configuration and, given nothing, index everything they can
+    reach. That is the right default for an editor, where a user wants
+    completions from their dependencies, and the wrong one here: this needs
+    references between *the project's own* definitions, and a virtualenv is not
+    the project.
+
+    Written as the union of what several servers understand rather than one
+    server's schema. A key a server does not recognise is ignored, and the
+    alternative — a table of settings per server — is more to maintain for the
+    same effect.
+    """
+    excluded = [f"**/{name}/**" for name in _SKIP]
+    return {
+        # pyright / basedpyright
+        "python": {
+            "analysis": {
+                "exclude": excluded,
+                "ignore": excluded,
+                # Only what is open. `workspace` walks the tree behind us.
+                "diagnosticMode": "openFilesOnly",
+                "useLibraryCodeForTypes": False,
+                "indexing": False,
+            }
+        },
+        # typescript-language-server, gopls and others read a flat `exclude`.
+        "exclude": excluded,
+        "files": {"exclude": {f"**/{name}": True for name in _SKIP}},
+    }
 
 # How long to wait for a server to answer one request. Servers index in the
 # background and a request arriving mid-index can be slow; a request that never
@@ -231,6 +270,10 @@ class Session:
                 "workspaceFolders": [
                     {"uri": self.root.as_uri(), "name": self.root.name}
                 ],
+                # Said at initialize as well as on request. pyright decides
+                # what to index before it asks for configuration, so answering
+                # only the later question is answering it too late.
+                "initializationOptions": _settings(),
                 "capabilities": {
                     "workspace": {
                         "configuration": True,
@@ -429,10 +472,15 @@ class Session:
         """
         method = request.get("method", "")
         if method == "workspace/configuration":
-            # One settings object per item asked for. Empty is a valid answer
-            # and means "no opinion, use your defaults".
+            # One settings object per item asked for.
+            #
+            # **Not empty.** "No opinion, use your defaults" meant pyright
+            # indexed the whole workspace, and on a repository of 62 source
+            # files beside a 656M `venv/` that is minutes of work to answer a
+            # question about the 62. Excluding directories from *our* walk does
+            # not stop the server walking them itself, so it has to be told.
             items = (request.get("params") or {}).get("items") or [{}]
-            result: Any = [{} for _ in items]
+            result: Any = [_settings() for _ in items]
         elif method in ("client/registerCapability", "client/unregisterCapability"):
             result = None
         elif method == "workspace/workspaceFolders":

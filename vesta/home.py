@@ -24,6 +24,30 @@ from typing import Dict, Optional, Tuple
 # a project without belonging to it, and nobody wants them in a diff.
 VESTA_HOME = Path.home() / ".vesta"
 
+# Directories that are not the project, wherever a repository is walked.
+#
+# **Dependencies are not the project.** A real repository was 62 source files
+# and one `venv/` holding 13,613 — every one of them walked, and preparation
+# on it had not finished after five minutes. The list said `.venv` with a dot
+# and the directory was named `venv` without one, which is at least as common.
+#
+# It lives here because `home` imports nothing else, and the alternative was
+# what was there before: three separate lists in three modules with three
+# different contents, so what the resolver walked and what the graph called
+# its shape could disagree. The spelling that mattered was in none of them.
+#
+# `build` and `dist` are deliberately absent: output in most projects and
+# somebody's source in others, and excluding a directory somebody works in is
+# a worse failure than walking one they do not.
+NOT_THE_PROJECT = (
+    ".venv", "venv", "env", "virtualenv", ".virtualenv", ".tox", ".conda",
+    "node_modules", "bower_components", "vendor", "site-packages",
+    ".git", ".hg", ".svn",
+    "target", ".eggs",
+    "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    ".vesta", ".idea", ".vscode",
+)
+
 # Where things are actually written, which is `VESTA_HOME` unless somebody has
 # said otherwise. Read through a function rather than bound at import: twelve
 # modules imported the constant directly, so pointing the store somewhere else

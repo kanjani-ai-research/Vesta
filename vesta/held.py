@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from .graph import Graph, build
+from .home import NOT_THE_PROJECT as IGNORED
 from .home import home
 
 logger = logging.getLogger("vesta.held")
@@ -43,8 +44,8 @@ def GRAPH_DIR() -> Path:
 
 # What counts as the repository's shape, for deciding whether a graph is stale.
 # Names and sizes and modification times, not contents: hashing every file costs
-# more than the check is worth on a large tree.
-IGNORED = (".venv", "node_modules", ".git", "target", "__pycache__", ".vesta")
+# more than the check is worth on a large tree. `IGNORED` is shared, so what the
+# graph calls its shape and what the resolver walks cannot disagree.
 
 
 _SHAPES: Dict[str, Tuple[str, float]] = {}

@@ -29,6 +29,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 from pydantic import BaseModel, Field
 
 from .dynamic import Blindspot, scan
+from .home import NOT_THE_PROJECT
 from .graph import Graph, Node
 from .propagate import is_test
 
@@ -770,7 +771,7 @@ def _sources(root: Path) -> Iterable[Tuple[Path, str]]:
     found = [
         (path, str(path.relative_to(root)))
         for path in sorted(root.rglob("*.py"))
-        if not any(p in (".venv", ".git", "__pycache__", ".vesta") for p in path.parts)
+        if not any(p in NOT_THE_PROJECT for p in path.parts)
     ]
     _LISTED[str(root)] = (_time.time(), found)
     return found

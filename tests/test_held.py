@@ -67,3 +67,59 @@ def test_the_graph_survives_a_restart(repo: Path):
     second = graph_for(repo)
 
     assert set(second.nodes) == set(first.nodes)
+
+
+# ── Dependencies are not the project ────────────────────────────────────────
+
+
+def test_a_virtualenv_without_a_dot_is_not_the_project():
+    """The defect that made a large repository unusable.
+
+    A real project was 62 source files beside a `venv/` holding 13,613. The
+    exclusion list said `.venv` with a dot; the directory was named `venv`
+    without one, which is at least as common. Vesta walked all 13,675.
+    """
+    from vesta.home import NOT_THE_PROJECT
+
+    for spelling in ("venv", ".venv", "env", "virtualenv", ".tox", "site-packages"):
+        assert spelling in NOT_THE_PROJECT, f"{spelling} is not the project"
+
+
+def test_the_exclusion_list_is_shared_by_everything_that_walks():
+    """There were three lists in three modules with three different contents,
+    so what the resolver walked and what the graph called its shape could
+    disagree — and the spelling that mattered was in none of them."""
+    from vesta.held import IGNORED
+    from vesta.home import NOT_THE_PROJECT
+    from vesta.resolve import _SKIP
+
+    assert IGNORED is NOT_THE_PROJECT
+    for name in NOT_THE_PROJECT:
+        assert name in _SKIP, f"the resolver would walk {name}"
+
+
+def test_output_directories_somebody_might_work_in_are_not_excluded():
+    """`build` and `dist` are output in most projects and source in others.
+    Excluding a directory somebody works in is a worse failure than walking
+    one they do not."""
+    from vesta.home import NOT_THE_PROJECT
+
+    assert "build" not in NOT_THE_PROJECT
+    assert "dist" not in NOT_THE_PROJECT
+
+
+def test_a_tree_with_a_venv_resolves_only_the_project(tmp_path):
+    from vesta.home import NOT_THE_PROJECT
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("def main(): pass\n", encoding="utf-8")
+    deep = tmp_path / "venv" / "lib" / "python3.13" / "site-packages" / "dep"
+    deep.mkdir(parents=True)
+    for n in range(20):
+        (deep / f"mod{n}.py").write_text("x = 1\n", encoding="utf-8")
+
+    walked = [
+        p for p in tmp_path.rglob("*.py")
+        if not any(part in NOT_THE_PROJECT for part in p.parts)
+    ]
+    assert [p.name for p in walked] == ["app.py"]

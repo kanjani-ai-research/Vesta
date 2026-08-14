@@ -227,6 +227,64 @@ delivers the question people actually ask.
 
 ---
 
+## 5. A graph costs one server round trip per definition
+
+**Enabling the plugin midstream on a large project does not work yet**, and
+the reason is arithmetic rather than a bug.
+
+Measured on `~/Research/taguchi`:
+
+    references call to pyright     0.9s
+    definitions in the repository  ~2000
+    graph build                    ~30 minutes
+
+Nothing hangs. `symbols` for all 62 source files takes two seconds; a single
+file resolves in under one. The cost is entirely `references`, called once per
+definition, each searching a workspace whose `venv/` is 656MB.
+
+**Two things were fixed on the way to finding that, and both were real.**
+
+*Dependencies were being walked as if they were the project.* The exclusion
+list said `.venv` with a dot; the directory was named `venv` without one. So
+13,613 of 13,675 files Vesta considered were somebody's installed packages,
+and the actual project was 62 files. Worse, there were **three separate
+exclusion lists** — in `held`, `resolve` and `patterns` — with three different
+contents, so what the resolver walked and what the graph called its shape could
+disagree. They are now one list in `home`, and it names every spelling anybody
+uses.
+
+*The language server was told nothing about what to skip.* `workspace/
+configuration` answered `{}` — "no opinion, use your defaults" — and pyright's
+default is to index everything it can reach. Excluding directories from Vesta's
+own walk does not stop the server walking them. It is now told, at initialize
+and on request.
+
+Neither fix touched the 0.9s. **The remaining cost is structural**: a graph of
+N definitions is N round trips to a process that answers each by searching the
+workspace.
+
+**What the options look like, none of them costed.**
+
+- *Ask for fewer.* Most definitions are never asked about. A graph built lazily
+  — resolve on demand, cache the answer — would make the first question slow
+  and the rest free, at the cost of a graph that is never complete and cannot
+  answer "what refers to nothing".
+- *Ask in parallel.* Requests are sequential today. A server that indexes once
+  can usually answer several at a time, and this is the cheapest thing to try.
+- *Ask something else.* `workspace/symbol` or a batch request, where a server
+  supports it, trades per-definition calls for one large answer.
+- *Do not resolve third-party code at all.* pyright resolves imports into the
+  virtualenv because that is what makes a reference correct; refusing to would
+  make some answers wrong in a way that is hard to see, which is the failure
+  this project is most careful about.
+
+**What is not in doubt** is that the current behaviour is the wrong shape for a
+plugin: preparation is detached and never blocks a prompt, so nothing breaks —
+but on a repository like this one it would still be preparing half an hour
+later, and every question in between is answered with "not ready yet".
+
+---
+
 ## What was done before release
 
 Two things written up here were credibility problems rather than features, and
