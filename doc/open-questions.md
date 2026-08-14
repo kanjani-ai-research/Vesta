@@ -1,6 +1,6 @@
 # Open questions
 
-Four things Vesta does not yet do well, written down while the evidence for
+Six things Vesta does not yet do well, written down while the evidence for
 each is fresh. Every number here was measured on a real repository on the day
 it was written; where something is a suspicion rather than a measurement, it
 says so.
@@ -289,6 +289,50 @@ trips.** The 0.9s figure stands, but the count was wrong: the repository has
 It builds in well under a minute now. The per-definition cost is still the
 shape of the thing and still worth the four options above — but it is a
 question about very large repositories, not about ordinary ones.
+
+---
+
+## 6. The graph is one step away from control flow
+
+**The proposal.** A reference graph says *what refers to what*. Control flow
+says *under what conditions, and in what order*. With both, an internal engine
+could walk paths without running them — abstract interpretation over the graph
+— and find defects no current detector can see: a value that is `None` on one
+branch and dereferenced after the join, a lock taken on one path and released
+on another, a failure swallowed only when a particular condition holds.
+
+That is a real capability and the graph is genuinely most of the way there.
+Three things decide whether it is worth building, and none of them is settled.
+
+**It is a different kind of claim, and that is the risk.** Everything Vesta
+asserts today is *observed*: this definition refers to that one, this handler
+catches and discards, this constant is read nowhere. An execution engine
+asserts *inferred*: this **could** happen. Inference is where confident false
+positives come from, and this codebase has twice watched a detector become
+untrustworthy exactly that way — nine live imports reported as raising on the
+first line, sixteen live routes reported as unreferenced. Both were observation
+done wrongly. An engine that reasons about paths has far more room to be
+plausibly wrong, and a survey nobody believes is worth less than no survey.
+
+**The resolver supplies no control flow.** LSP answers "what does this refer
+to"; it does not give a control-flow graph. Building one is per-language work,
+and the seven-language claim is what makes this more than a Python tool. A
+Python-only execution engine would be a different product wearing the same
+name.
+
+**And the field is not empty.** mypy, pyright's own inference, ruff, and forty
+years of abstract-interpretation literature already do intraprocedural
+reasoning well. The honest question is what this would do that they do not, and
+the plausible answer is *cross-definition and cross-file, using the graph* —
+following a value from where it is produced, through the definitions that pass
+it along, to where it is finally used. That is the thing a per-file checker
+structurally cannot do, and it is also the thing that gets expensive fastest.
+
+**What would settle it.** Not an argument. Take the defects already confirmed
+in a real repository and ask how many needed control flow to find — if the
+answer is few, the engine is elegant and unnecessary. Then take a handful of
+bugs that reached production and ask how many a path-sensitive check would have
+caught. That measurement is cheap and nobody has made it.
 
 ---
 
