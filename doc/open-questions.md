@@ -283,7 +283,61 @@ plugin: preparation is detached and never blocks a prompt, so nothing breaks —
 but on a repository like this one it would still be preparing half an hour
 later, and every question in between is answered with "not ready yet".
 
+**Since measured, most of the 30 minutes turned out not to be the round
+trips.** The 0.9s figure stands, but the count was wrong: the repository has
+252 definitions, not 2000, once the walk stops descending into a virtualenv.
+It builds in well under a minute now. The per-definition cost is still the
+shape of the thing and still worth the four options above — but it is a
+question about very large repositories, not about ordinary ones.
+
 ---
+
+## The graph is current whenever Vesta is active
+
+An invariant, added after asking what happens when the plugin is enabled
+midstream in a project somebody has been working in for months. The answer was
+that it could serve a graph up to five minutes old, and in three separate ways
+did not notice the code had changed at all.
+
+**Nothing hidden is ever read.** Anything beginning with a dot is skipped
+outright — `.env`, `.aws`, `.ssh`, `.git`, `.venv`, and every private thing
+nobody has thought of yet. A rule rather than a list, because a list of names
+is always one spelling short. Alongside it, a banlist of the *visible*
+dependency and build directories across languages, since most of them are not
+hidden: `venv`, `node_modules`, `site-packages`, `target`, `vendor`, `Pods`,
+`miniconda3`, `third_party`. Names that mean "dependency" in one project and
+"my code" in another — `bin`, `deps`, `pkg`, `packages`, `external` — are
+deliberately absent: this repository keeps its launcher in `bin/` and the
+workspace next door keeps a real component in `deps/`, and hiding somebody's
+source is silent where walking a dependency is only slow.
+
+**The walk prunes as it descends.** `rglob` visited every excluded directory
+in full and then discarded each path: 66,010 paths to fingerprint 77 source
+files, taking 3.6 seconds. It now visits what it keeps, and takes 8ms.
+
+That is the whole reason the invariant was affordable. Three things had traded
+correctness for that 3.6 seconds, and each was quietly wrong:
+
+- *`readiness` reported READY whenever a graph file existed*, however old, and
+  every caller took that as permission to read it. It now compares the
+  fingerprint and reports `moved on` — which still counts as answerable,
+  because `graph_for` rebuilds on the way past.
+- *Every sidecar tool asked for `trust_for=300`*, accepting a graph up to five
+  minutes stale. During an active session — the one time code changes minute
+  to minute — answers could be a hundred edits behind, and a stale answer looks
+  exactly like a fresh one.
+- *The fingerprint memo was two seconds.* An agent that writes a file and then
+  asks about it, which is the ordinary rhythm of a session, was answered from
+  the tree as it stood before the write.
+
+**And a fourth defect, older than any of them.** The fingerprint used
+`int(st.st_mtime)` — one-second resolution — beside a file size, so changing
+`x = 1` to `x = 2` within a second moved nothing. Same-length corrections made
+quickly are the commonest edit in a live session, and every one of them was
+invisible.
+
+The cost of the guarantee, measured in a fresh process on an unchanged tree:
+**15ms** on this repository, **38ms** on a workspace of 2,768 definitions.
 
 ## What was done before release
 

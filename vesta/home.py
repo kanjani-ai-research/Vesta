@@ -39,14 +39,94 @@ VESTA_HOME = Path.home() / ".vesta"
 # `build` and `dist` are deliberately absent: output in most projects and
 # somebody's source in others, and excluding a directory somebody works in is
 # a worse failure than walking one they do not.
+# Visible directories that are not the project: dependencies somebody
+# installed, and output somebody's build produced.
+#
+# Two rules, and both are needed. Anything beginning with a dot is skipped
+# outright — that covers `.venv`, `.git`, `.tox`, `.conda`, `.gradle`,
+# `.cargo` and every private thing nobody has thought of yet, and it cannot
+# fall out of date. **But most dependency directories are not hidden**, and a
+# dot rule alone would have walked all of them: `venv`, `node_modules`,
+# `site-packages`, `target`, `Pods`. The list below is the visible half, and
+# `venv` without a dot is precisely the spelling whose absence cost one
+# repository 13,613 files of somebody's virtualenv.
+#
+# Named across languages rather than for Python, because the graph resolves
+# seven and the failure is identical in each.
+# A name is here only when it means "not mine" in every project that uses it.
+# `bin`, `deps`, `pkg`, `packages`, `external` and `obj` are deliberately
+# absent: each is a dependency directory somewhere and somebody's own source
+# elsewhere — this repository keeps its launcher in `bin/`, and the workspace
+# next door keeps a real component in `deps/`. Excluding a directory somebody
+# works in is a worse failure than walking one they do not, because the first
+# is silent and the second is only slow.
 NOT_THE_PROJECT = (
-    ".venv", "venv", "env", "virtualenv", ".virtualenv", ".tox", ".conda",
-    "node_modules", "bower_components", "vendor", "site-packages",
-    ".git", ".hg", ".svn",
-    "target", ".eggs",
-    "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    ".vesta", ".idea", ".vscode",
+    # Python
+    "venv", "virtualenv", "site-packages", "dist-packages", "__pycache__",
+    "conda-meta", "condabin", "anaconda3", "miniconda3",
+    # JavaScript and friends
+    "node_modules", "bower_components", "jspm_packages", "web_modules",
+    # Rust, Go, Java, Scala, Elixir
+    "vendor", "target", "_build",
+    # Ruby, Swift, Objective-C
+    "Pods", "Carthage",
+    # C, C++, CMake
+    "CMakeFiles", "_deps", "third_party", "thirdparty",
 )
+
+
+def worth_walking(path: Path, root: Optional[Path] = None) -> bool:
+    """Whether a path is part of the project and safe to read.
+
+    **Nothing hidden, ever.** A dotfile or dot-directory is somebody's private
+    business — credentials in `.env`, tokens in `.aws`, a shell history, an
+    editor's state — and a tool that reads a repository to answer questions
+    about its code has no reason to look inside one. This is cheaper than a
+    list of names and cannot fall out of date.
+
+    A repository whose own path contains a dotted component is still walked:
+    the test is applied to the parts *below* the root, not to where the root
+    happens to live. Somebody working in `~/.local/src/thing` has not asked for
+    their project to be invisible.
+    """
+    parts = path.parts
+    if root is not None:
+        try:
+            parts = path.relative_to(root).parts
+        except ValueError:
+            pass
+    return not any(
+        part.startswith(".") or part in NOT_THE_PROJECT for part in parts
+    )
+
+
+def walk(root: Path, suffix: str = "") -> "list":
+    """Every file under `root` that is part of the project.
+
+    Prunes as it descends rather than filtering afterwards. `rglob` walks into
+    every excluded directory in full and then discards each path: on an
+    ordinary repository that was 66,010 paths visited to find 77 source files.
+    """
+    found = []
+    stack = [root]
+    while stack:
+        here = stack.pop()
+        try:
+            entries = sorted(here.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name.startswith(".") or entry.name in NOT_THE_PROJECT:
+                continue
+            try:
+                if entry.is_dir():
+                    stack.append(entry)
+                elif entry.is_file() and (not suffix or entry.suffix == suffix):
+                    found.append(entry)
+            except OSError:
+                continue
+    found.sort()
+    return found
 
 # Where things are actually written, which is `VESTA_HOME` unless somebody has
 # said otherwise. Read through a function rather than bound at import: twelve

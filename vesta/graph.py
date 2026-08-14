@@ -187,8 +187,12 @@ def build(
     graph = Graph(root=str(root), coverage=coverage(root, ignore))
 
     by_server: Dict[str, List[Path]] = defaultdict(list)
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or any(part in ignore for part in path.parts):
+    # Pruned as it descends, and never into anything hidden. `rglob` visits
+    # every excluded directory in full before discarding it.
+    from .home import walk
+
+    for path in walk(root):
+        if any(part in ignore for part in path.parts):
             continue
         server = for_suffix(path.suffix)
         if server is None:

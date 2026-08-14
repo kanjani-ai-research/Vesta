@@ -768,11 +768,9 @@ def _sources(root: Path) -> Iterable[Tuple[Path, str]]:
     if held and _time.time() - held[0] < _LIST_TTL:
         return held[1]
 
-    found = [
-        (path, str(path.relative_to(root)))
-        for path in sorted(root.rglob("*.py"))
-        if not any(p in NOT_THE_PROJECT for p in path.parts)
-    ]
+    from .home import walk
+
+    found = [(path, str(path.relative_to(root))) for path in walk(root, ".py")]
     _LISTED[str(root)] = (_time.time(), found)
     return found
 

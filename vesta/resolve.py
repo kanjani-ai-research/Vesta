@@ -392,7 +392,9 @@ class Session:
         self._tree_opened = True
 
         opened = 0
-        for path in sorted(self.root.rglob("*")):
+        from .home import walk
+
+        for path in walk(self.root):
             if path.suffix not in self.server.suffixes:
                 continue
             if any(part in _SKIP for part in path.parts):
@@ -618,8 +620,10 @@ def coverage(root: Path | str, ignore: Sequence[str] = (".venv", "node_modules",
     omits half their code.
     """
     found = Coverage()
-    for path in Path(root).rglob("*"):
-        if not path.is_file() or any(part in ignore for part in path.parts):
+    from .home import walk
+
+    for path in walk(Path(root)):
+        if any(part in ignore for part in path.parts):
             continue
         server = for_suffix(path.suffix)
         if server is None:

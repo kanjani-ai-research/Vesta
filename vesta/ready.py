@@ -49,7 +49,8 @@ STALE = 900.0
 
 NOTHING = "nothing"      # no graph, and none being built
 PREPARING = "preparing"  # a build is running now
-READY = "ready"          # a graph exists and can be answered from
+READY = "ready"          # a graph exists and matches the code
+MOVED_ON = "moved on"    # a graph exists, and the code has changed since
 FAILED = "failed"        # a build was tried and could not finish
 
 # How long a failure is remembered before another attempt is made. Long enough
@@ -72,6 +73,19 @@ class Readiness(BaseModel):
 
     @property
     def can_answer(self) -> bool:
+        """Whether there is a graph worth reading.
+
+        `MOVED_ON` counts. A graph whose tree has changed is out of date, not
+        useless — and every caller that reads one goes through `graph_for`,
+        which rebuilds when the fingerprint has moved. Refusing here would make
+        a single edit turn Vesta silent until something else rebuilt it, which
+        is worse than the brief rebuild the caller was going to pay for anyway.
+        """
+        return self.state in (READY, MOVED_ON)
+
+    @property
+    def is_current(self) -> bool:
+        """Whether the graph matches the code as it is now."""
         return self.state == READY
 
     def describe(self) -> str:
@@ -85,6 +99,11 @@ class Readiness(BaseModel):
             return "nothing to describe yet — this project has no definitions"
         if self.state == READY:
             return f"ready — {self.definitions} definition(s) resolved"
+        if self.state == MOVED_ON:
+            return (
+                f"ready — {self.definitions} definition(s) resolved; the code "
+                "has changed since, and the next question rebuilds"
+            )
         if self.state == PREPARING:
             waited = time.time() - self.since
             return f"preparing — started {waited:.0f}s ago, nothing to offer yet"
@@ -114,11 +133,28 @@ def readiness(project: Path | str) -> Readiness:
     if cached.is_file():
         try:
             payload = json.loads(cached.read_text(encoding="utf-8"))
-            return Readiness(
+            found = Readiness(
                 state=READY,
                 project=str(root),
                 definitions=len(payload.get("graph", {}).get("nodes", {})),
             )
+            # **Ready means current, not merely present.**
+            #
+            # This used to report READY whenever a graph file existed, however
+            # old — so a graph built before a morning's work still answered as
+            # though it described the code. Every caller then took that as
+            # permission to read it, and the wrong answer looked exactly like
+            # the right one.
+            #
+            # Checking was avoided because fingerprinting cost 3.6 seconds on
+            # an ordinary repository. It now costs 13 milliseconds, because the
+            # walk prunes excluded directories instead of visiting and
+            # discarding them, so there is no longer anything to trade.
+            from .held import _shape
+
+            if payload.get("shape") and payload["shape"] != _shape(root):
+                found.state = MOVED_ON
+            return found
         except (OSError, ValueError):
             pass
 

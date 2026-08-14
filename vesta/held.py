@@ -50,9 +50,18 @@ def GRAPH_DIR() -> Path:
 
 _SHAPES: Dict[str, Tuple[str, float]] = {}
 
-# How long a fingerprint is reused within one process. Two seconds covers the
-# several callers of a single prompt and expires long before anything else.
-_SHAPE_TTL = 2.0
+# How long a fingerprint is reused within one process.
+#
+# Two seconds was chosen when walking the tree cost 3.6 seconds and several
+# callers each paid it within one prompt. The walk now costs eight
+# milliseconds, so the saving is nothing and the cost is real: a file written
+# and a question asked inside the same two seconds — an agent editing and then
+# asking, which is the ordinary rhythm of a session — was answered from the
+# graph as it stood before the edit.
+#
+# A fifth of a second still collapses the several callers of one prompt, and
+# is shorter than anybody can type.
+_SHAPE_TTL = 0.2
 
 
 def _shape(root: Path) -> str:
@@ -68,16 +77,28 @@ def _shape(root: Path) -> str:
     remembered = _SHAPES.get(str(root))
     if remembered and time.time() - remembered[1] < _SHAPE_TTL:
         return remembered[0]
+    # One walk, shared with everything else that reads a repository, so what
+    # the fingerprint covers and what the resolver reads cannot drift apart.
+    # It prunes as it descends: `rglob` visited 66,010 paths to fingerprint 77
+    # source files, which took 3.6 seconds — and that cost is what forced
+    # callers to accept a graph up to five minutes stale. It now takes 13ms,
+    # so nothing has to guess.
+    from .home import walk
+
+    # Nanoseconds, not whole seconds.
+    #
+    # `int(st.st_mtime)` has one-second resolution, so an edit that changed a
+    # file without changing its length — `x = 1` to `x = 2`, a fix somebody
+    # makes in a second — moved nothing, and the graph went on describing code
+    # that no longer existed. That is the precise case an active session
+    # produces most: small, fast, same-length corrections.
     marks = []
-    for path in sorted(root.rglob("*")):
-        if any(part in IGNORED for part in path.parts):
-            continue
+    for path in walk(root):
         try:
-            if path.is_file():
-                stat = path.stat()
-                marks.append(f"{path}:{stat.st_size}:{int(stat.st_mtime)}")
+            stat = path.stat()
         except OSError:
             continue
+        marks.append(f"{path}:{stat.st_size}:{stat.st_mtime_ns}")
     found = hashlib.sha256("\n".join(marks).encode("utf-8")).hexdigest()[:16]
     _SHAPES[str(root)] = (found, time.time())
     return found
@@ -98,23 +119,20 @@ def graph_for(
 ) -> Graph:
     """The repository's graph, built if there is not a current one.
 
-    `trust_for` lets a caller on a latency-critical path use a recently written
-    graph without re-walking the tree to prove it is current. The walk is the
-    expensive part by an order of magnitude, and a caller answering a prompt
-    cannot spend it.
+    `trust_for` is kept for callers that pass it, and now does almost nothing:
+    the fingerprint it existed to avoid costs 8ms rather than 3.6 seconds, so a
+    graph is checked against the tree on every call rather than assumed current
+    for five minutes.
+
+    **That five minutes was the whole problem.** Every sidecar tool asked for
+    `trust_for=300`, so during an active session — the one time code changes
+    minute to minute — answers were drawn from a graph that could be a hundred
+    edits behind, and a stale answer is indistinguishable from a fresh one.
+    Vesta's claim is that its answers are current; it cannot make that claim
+    while quietly trading it for latency nobody measured again after the walk
+    got fast.
     """
     root = Path(repo).expanduser().resolve()
-
-    if trust_for:
-        cached = _where(root)
-        try:
-            if cached.is_file() and time.time() - cached.stat().st_mtime < trust_for:
-                payload = json.loads(cached.read_text(encoding="utf-8"))
-                found = Graph.model_validate(payload["graph"])
-                _HELD[str(root)] = (payload.get("shape", ""), found)
-                return found
-        except (OSError, ValueError, KeyError):
-            pass
 
     shape = _shape(root)
 
