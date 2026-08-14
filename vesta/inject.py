@@ -107,24 +107,27 @@ def context_for(prompt: str, project: Path | str, budget: int = BUDGET) -> str:
     # made the session worse whether or not it later helps. If nothing is
     # ready, start preparing and say nothing — the next prompt may be able to
     # answer, and this one was never owed an answer.
-    from .ready import prepare, readiness
+    from .ready import MOVED_ON, prepare, readiness, refresh
 
     state = readiness(root)
     if not state.can_answer:
         prepare(root)
         return ""
 
+    # The code has moved past the graph. Rebuild behind the prompt, and answer
+    # from what is here — a rebuild is all or nothing, and on a directory of
+    # thirteen projects that is 73 seconds to catch up with one edited file.
+    # Paying it inline took a hook past two minutes; a session that stops
+    # whenever somebody saves is not one anybody keeps installed.
+    if state.state == MOVED_ON:
+        refresh(root)
+
     try:
-        # Trust a recently written graph without re-walking the tree to check.
-        #
-        # The staleness fingerprint stats every file, which costs about one and
-        # three quarter seconds on an ordinary repository — an order of
-        # magnitude more than everything else here combined, on the one path
-        # that runs before every prompt. A graph written in the last few minutes
-        # is close enough: the cost of being briefly out of date is a stale line
-        # number in an injected note, and the cost of checking is a pause the
-        # user feels on every message.
-        graph = graph_for(root, trust_for=TRUST_FOR)
+        # Whatever is on disk, and never a build. The refresh above is
+        # already running; the worst this costs is a line number that moved,
+        # and the alternative is a prompt that waits a minute for a rebuild
+        # of twelve projects that did not change.
+        graph = graph_for(root, never_build=True)
     except Exception as exc:  # noqa: BLE001 - a hook must never break a session
         logger.info("no graph for %s: %s", root, exc)
         return ""

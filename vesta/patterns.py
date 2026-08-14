@@ -385,6 +385,13 @@ def _module_files(
     return exact or candidates
 
 
+# What each module supplies, keyed by the question asked. Every import line in
+# every file asks this, and the same handful of modules are asked about over
+# and over — so without it the check is quadratic in the size of the tree. On a
+# directory of thirteen projects that was 6.3 seconds inside a prompt.
+_SUPPLIES: Dict[Tuple[str, str, str, int], Set[str]] = {}
+
+
 def _named_in(
     root: Path, module: str, near: Optional[Path] = None, level: int = 1
 ) -> set:
@@ -397,14 +404,24 @@ def _named_in(
 
     `near` and `level` are where the import was written and how many dots it
     used, so that two modules sharing a name resolve to the right one.
+
+    Memoised, because every import line in every file asks this and the same
+    modules are asked about repeatedly — the check was quadratic in the size of
+    the tree, which showed as 6.3 seconds inside a prompt on a directory of
+    thirteen projects. Cleared with the file listing, so an edit is seen.
     """
     import ast
+
+    key = (str(root), module, str(near or ""), level)
+    if key in _SUPPLIES:
+        return _SUPPLIES[key]
 
     for path in _module_files(root, module, near=near, level=level):
         try:
             tree = ast.parse("\n".join(_lines(path)))
         except (SyntaxError, ValueError):
-            return set()  # unparseable: claim nothing rather than claim wrongly
+            _SUPPLIES[key] = set()
+            return _SUPPLIES[key]  # unparseable: claim nothing, not wrongly
 
         found = set()
         for node in tree.body:
@@ -422,8 +439,10 @@ def _named_in(
                 found.update(
                     alias.asname or alias.name.split(".")[0] for alias in node.names
                 )
+        _SUPPLIES[key] = found
         return found
-    return set()
+    _SUPPLIES[key] = set()
+    return _SUPPLIES[key]
 
 
 def calls_to_nothing(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
@@ -772,6 +791,9 @@ def _sources(root: Path) -> Iterable[Tuple[Path, str]]:
 
     found = [(path, str(path.relative_to(root))) for path in walk(root, ".py")]
     _LISTED[str(root)] = (_time.time(), found)
+    # What each module supplies is derived from these files, so it expires
+    # with them — otherwise an edit would be invisible to the import check.
+    _SUPPLIES.clear()
     return found
 
 

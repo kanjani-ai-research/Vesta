@@ -339,6 +339,45 @@ invisible.
 The cost of the guarantee, measured in a fresh process on an unchanged tree:
 **15ms** on this repository, **38ms** on a workspace of 2,768 definitions.
 
+## A graph per path, composed upward
+
+A directory holding several projects is not one project, and Vesta treated it
+as one. On a workspace of thirteen repositories that meant a single graph of
+6,309 definitions taking **73 seconds** to build — and touching one file in one
+of them made the whole thing stale, so the next question rebuilt twelve
+projects that had not changed. Measured inside a prompt, a hook took **over two
+minutes**.
+
+The shape that fixes it is the one the tree already has. Each project gets its
+own graph, keyed by its own path; a question about the directory above is
+answered by composing the graphs beneath it. A project is a directory with a
+`.git`, a manifest, or the conventional layout — looked for one or two levels
+down, because looking deeper finds every package inside every project and calls
+each one a project.
+
+**Composition is mechanical, not a reconciliation.** These graphs describe
+disjoint subtrees and cannot disagree, so joining them is: rebase every path
+onto the shared root, re-derive every node id from the rebased path, rewrite
+the edges to match. Ids are `sha256(path, line, name)`, so a node genuinely has
+a different id in its own graph than in a composed one — getting that wrong
+would silently break every reference, which is why it lives in one function
+with tests either side of it.
+
+Measured on the same workspace:
+
+    build, all twelve projects            89s   (once)
+    warm read, nothing changed           470ms
+    after editing one project              9s   (that project only)
+    a prompt naming a file                10ms  (was 5,117ms)
+    a prompt where defects apply           1ms  (was 15,439ms)
+
+**What composing cannot recover is a reference from one project into
+another.** Neither resolver was shown the other's files, so that edge is in
+neither graph. The composed graph counts it as a hole rather than letting an
+absence of references look like an absence of coupling — for a workspace of
+independent components that is usually the truth anyway, and where it is not,
+saying so is better than a silent omission.
+
 ## What was done before release
 
 Two things written up here were credibility problems rather than features, and

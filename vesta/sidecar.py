@@ -1011,7 +1011,10 @@ def _defects_in(paths: List[str], project: Optional[Path]) -> str:
         return ""
 
     with quiet_stdout():
-        graph = graph_for(project, trust_for=300)
+        # Reached from the prompt hook, so it must never build: see
+        # `graph_for(never_build=...)`. A rebuild is all or nothing and can be
+        # a minute on a directory of several projects.
+        graph = graph_for(project, never_build=True)
         # Only the finders that can produce something strong enough to raise.
         # A whole survey costs about a second on a ten-thousand-line workspace
         # and this runs on every prompt naming a file — spending that to

@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .graph import Graph, build
 from .home import NOT_THE_PROJECT as IGNORED
@@ -114,25 +114,82 @@ def _where(root: Path) -> Path:
 _HELD: Dict[str, Tuple[str, Graph]] = {}
 
 
+def _parts(root: Path) -> List[Path]:
+    """The projects inside this directory, if it holds several."""
+    from .compose import parts_of
+
+    try:
+        return parts_of(root)
+    except OSError as exc:  # noqa: BLE001 - a directory that cannot be read
+        logger.info("could not look inside %s: %s", root, exc)
+        return []
+
+
+def _composed_for(
+    root: Path, parts: List[Path], rebuild: bool, never_build: bool
+) -> Graph:
+    """One graph for a directory, from the graphs of the projects in it.
+
+    Each part is fetched the ordinary way, so each is independently current or
+    independently rebuilt. Nothing here decides staleness — that stays with the
+    graph it belongs to, which is the whole point: one project's edit is one
+    project's rebuild.
+    """
+    from .compose import composed
+
+    of: Dict[str, Graph] = {}
+    for part in parts:
+        try:
+            of[str(part)] = graph_for(
+                part, rebuild=rebuild, never_build=never_build
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad part is not the whole
+            logger.info("could not read the graph for %s: %s", part, exc)
+    return composed(root, parts, of)
+
+
 def graph_for(
-    repo: Path | str, rebuild: bool = False, trust_for: float = 0.0
+    repo: Path | str,
+    rebuild: bool = False,
+    trust_for: float = 0.0,
+    never_build: bool = False,
 ) -> Graph:
     """The repository's graph, built if there is not a current one.
 
-    `trust_for` is kept for callers that pass it, and now does almost nothing:
-    the fingerprint it existed to avoid costs 8ms rather than 3.6 seconds, so a
-    graph is checked against the tree on every call rather than assumed current
-    for five minutes.
+    `trust_for` no longer buys a stale answer. The fingerprint it existed to
+    avoid costs 8ms rather than 3.6 seconds, so the tree is checked on every
+    call — every sidecar tool asked for `trust_for=300`, and during an active
+    session that meant answers drawn from a graph a hundred edits behind, which
+    looks exactly like a fresh one.
 
-    **That five minutes was the whole problem.** Every sidecar tool asked for
-    `trust_for=300`, so during an active session — the one time code changes
-    minute to minute — answers were drawn from a graph that could be a hundred
-    edits behind, and a stale answer is indistinguishable from a fresh one.
-    Vesta's claim is that its answers are current; it cannot make that claim
-    while quietly trading it for latency nobody measured again after the walk
-    got fast.
+    `never_build` is for callers that must not wait: a hook answering a prompt.
+    It returns the graph on disk however stale, having started a rebuild
+    elsewhere. **The rebuild is all or nothing**, and on a directory of
+    thirteen projects that is 73 seconds to catch up with one edited file —
+    measured, inside a prompt, taking a hook past two minutes. A slightly old
+    answer that says so beats a session that stops whenever somebody saves.
     """
     root = Path(repo).expanduser().resolve()
+
+    # A directory of projects is answered by composing the graphs beneath it,
+    # so that editing one project invalidates one graph. Built as a single
+    # tree, a workspace of thirteen repositories was 73 seconds to rebuild
+    # because one file in one of them changed.
+    parts = _parts(root)
+    if parts:
+        return _composed_for(root, parts, rebuild=rebuild, never_build=never_build)
+
+    if never_build:
+        cached = _where(root)
+        try:
+            if cached.is_file():
+                payload = json.loads(cached.read_text(encoding="utf-8"))
+                found = Graph.model_validate(payload["graph"])
+                _HELD[str(root)] = (payload.get("shape", ""), found)
+                return found
+        except (OSError, ValueError, KeyError):
+            pass
+        return Graph(root=str(root))
 
     shape = _shape(root)
 

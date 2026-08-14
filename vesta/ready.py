@@ -182,6 +182,59 @@ def readiness(project: Path | str) -> Readiness:
     return Readiness(state=NOTHING, project=str(root))
 
 
+def _start_build(root: Path) -> None:
+    """Run the build in a detached process, so no prompt waits for it."""
+    try:
+        subprocess.Popen(
+            [sys.executable, "-m", "vesta.ready", "--build", str(root)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        logger.info("could not start preparation: %s", exc)
+        try:
+            _mark(root).unlink()
+        except OSError:
+            pass
+
+
+def refresh(project: Path | str) -> Readiness:
+    """Rebuild a graph the code has moved past, without waiting for it.
+
+    **The rebuild is all or nothing, and that is what makes this necessary.**
+    A directory holding thirteen projects builds one graph of 6,309
+    definitions in 73 seconds; touching a single file in one of them makes the
+    whole thing stale, and the next question would pay all 73 seconds inside a
+    prompt to rebuild twelve projects that did not change. Measured: a hook
+    took over two minutes.
+
+    So a hook that finds a stale graph starts a rebuild in the background and
+    answers from the graph it has. The answer is briefly out of date and says
+    so; the alternative is a session that stops for a minute every time
+    somebody saves a file, which is not a tool anybody keeps installed.
+    """
+    root = Path(project).expanduser().resolve()
+    if readiness(root).state != MOVED_ON:
+        return readiness(root)
+
+    mark = _mark(root)
+    try:
+        # The same mark a first build uses, so two rebuilds cannot race and a
+        # rebuild in progress is visible as `preparing`.
+        if mark.is_file():
+            held = json.loads(mark.read_text(encoding="utf-8"))
+            if not held.get("failed") and time.time() - held.get("since", 0) < STALE:
+                return readiness(root)
+        mark.write_text(json.dumps({"since": time.time()}), encoding="utf-8")
+    except (OSError, ValueError):
+        return readiness(root)
+
+    _start_build(root)
+    return readiness(root)
+
+
 def prepare(project: Path | str) -> Readiness:
     """Start building, without waiting for it.
 
