@@ -280,3 +280,127 @@ def test_an_unprepared_repository_is_never_surveyed_in_a_hook(tmp_path, monkeypa
     started = time.time()
     assert _something_already_wrong("edit keep.py", str(repo)) == ""
     assert time.time() - started < 2.0
+
+
+# ── Automation is offered to a new project and never to one midstream ───────
+
+
+def _dir(tmp_path, name, files=(), dirs=()):
+    root = tmp_path / name
+    root.mkdir(parents=True)
+    for d in dirs:
+        (root / d).mkdir(parents=True, exist_ok=True)
+    for f, body in files:
+        path = root / f
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    return root
+
+
+def test_an_empty_directory_is_a_new_project(tmp_path):
+    from vesta.inject import _nothing_built_here
+
+    assert _nothing_built_here(str(_dir(tmp_path, "empty")))
+
+
+def test_a_tree_of_empty_directories_is_still_new(tmp_path):
+    """Somebody who laid out src/, tests/ and docs/ has built nothing."""
+    from vesta.inject import _nothing_built_here
+
+    root = _dir(tmp_path, "laid-out", dirs=("src", "tests", "docs/api"))
+    assert _nothing_built_here(str(root))
+
+
+def test_notes_and_briefs_are_what_a_project_looks_like_before_it_is_one(tmp_path):
+    """Markdown, text, JSON, CSV and the formats a brief arrives in."""
+    from vesta.inject import _nothing_built_here
+
+    root = _dir(
+        tmp_path,
+        "briefed",
+        files=(
+            ("README.md", "# the idea"),
+            ("spec.txt", "what it must do"),
+            ("requirements.csv", "a,b"),
+            ("data.json", "{}"),
+            ("brief.pdf", "%PDF"),
+            ("notes.docx", "PK"),
+        ),
+    )
+    assert _nothing_built_here(str(root))
+
+
+def test_git_and_gitignore_do_not_make_it_a_started_project(tmp_path):
+    """`git init` and a .gitignore are what somebody does *before* writing."""
+    from vesta.inject import _nothing_built_here
+
+    root = _dir(
+        tmp_path,
+        "fresh-repo",
+        files=((".git/HEAD", "ref: refs/heads/main"), (".gitignore", "*.pyc")),
+    )
+    assert _nothing_built_here(str(root))
+
+
+def test_a_single_source_file_means_work_has_started(tmp_path):
+    from vesta.inject import _nothing_built_here
+
+    assert not _nothing_built_here(
+        str(_dir(tmp_path, "started", files=(("main.py", "x = 1"),)))
+    )
+    assert not _nothing_built_here(
+        str(_dir(tmp_path, "nested", files=(("src/app.ts", "let x"),)))
+    )
+
+
+def test_a_manifest_is_a_project_however_it_is_spelled(tmp_path):
+    """`.json` has to be allowed — a brief arrives as one — but package.json
+    is a dependency tree and the clearest evidence a project exists."""
+    from vesta.inject import _nothing_built_here
+
+    for name, body in (
+        ("package.json", "{}"),
+        ("pyproject.toml", "[project]"),
+        ("go.mod", "module x"),
+        ("Makefile", "all:"),
+        ("Dockerfile", "FROM scratch"),
+    ):
+        root = _dir(tmp_path, f"has-{name}", files=((name, body),))
+        assert not _nothing_built_here(str(root)), f"{name} should mean started"
+
+
+def test_automation_is_never_offered_in_a_repository_under_way(tmp_path):
+    """The rule this exists for.
+
+    Offering to agree a contract and run to completion inside a repository
+    somebody has worked in for months is an interruption proposing to take
+    over — and the offer alone is enough to make the tool feel dangerous.
+    """
+    from vesta.inject import _something_to_build
+
+    asking = (
+        "build me an expense tracker: record an expense, see what I spent, "
+        "set budgets, and export to CSV"
+    )
+    under_way = _dir(tmp_path, "midstream", files=(("app.py", "def main(): pass"),))
+    assert _something_to_build(asking, str(under_way)) == ""
+
+
+def test_automation_is_offered_where_nothing_has_been_built(tmp_path, monkeypatch):
+    from vesta.inject import _something_to_build
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    asking = (
+        "build me an expense tracker: record an expense, see what I spent, "
+        "set budgets, and export to CSV"
+    )
+    fresh = _dir(tmp_path, "fresh", files=(("brief.md", "an expense tracker"),))
+    assert _something_to_build(asking, str(fresh)) != ""
+
+
+def test_a_directory_that_cannot_be_read_is_not_treated_as_new(tmp_path):
+    """Silence is the safe answer: offering to take over on a directory
+    nothing could be learned about is the expensive mistake."""
+    from vesta.inject import _nothing_built_here
+
+    assert not _nothing_built_here(str(tmp_path / "does-not-exist"))

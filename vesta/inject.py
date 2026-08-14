@@ -423,6 +423,79 @@ def _launcher() -> str:
     return str(Path(__file__).resolve().parent.parent / "bin" / "vesta-run")
 
 
+# What a directory may hold and still be a place nothing has been built yet.
+#
+# Notes, specifications, a brief, a spreadsheet of requirements, a PDF somebody
+# was sent — all of these are what a project looks like *before* it is a
+# project. None of them is work an agent would be interrupting.
+BEFORE_ANYTHING = {
+    ".md", ".markdown", ".txt", ".rst",
+    ".json", ".csv", ".tsv",
+    ".docx", ".doc", ".pdf", ".rtf", ".odt",
+}
+
+# Files that are housekeeping rather than work. `git init` and a `.gitignore`
+# are what somebody does *before* writing anything, not evidence that they
+# have.
+HOUSEKEEPING = {".gitignore", ".gitattributes", ".DS_Store", ".editorconfig"}
+
+# JSON that is a project rather than a note.
+#
+# `.json` has to be allowed — a brief arrives as one often enough — but
+# `package.json` is somebody's dependency tree and `tsconfig.json` is a build.
+# A manifest is the clearest possible evidence that a project already exists,
+# so these are named rather than covered by the suffix.
+A_PROJECT_ALREADY = {
+    "package.json", "package-lock.json", "tsconfig.json", "jsconfig.json",
+    "composer.json", "deno.json", "angular.json", "manifest.json",
+    "pyproject.toml", "cargo.toml", "go.mod", "gemfile", "pom.xml",
+    "build.gradle", "cmakelists.txt", "makefile", "dockerfile",
+}
+
+
+def _nothing_built_here(project: str) -> bool:
+    """Whether this is a place where nothing has been built yet.
+
+    **Automation is offered to a new project and never to one midstream.**
+    Agreeing a contract and running to completion is right when there is
+    nothing here; in a repository somebody has been working in for months it
+    is an interruption that proposes to take over, and the offer alone is
+    enough to make the tool feel dangerous.
+
+    So the test is the directory, not the prompt. Empty counts, and so does a
+    tree of empty directories — somebody who has laid out `src/`, `tests/` and
+    `docs/` has still built nothing. Notes and specifications count too:
+    markdown, text, JSON, CSV, and the document formats a brief arrives in are
+    what a project looks like before it is one.
+
+    Anything else — a single `.py`, a `package.json`, a Makefile — means work
+    has started, and this stays silent.
+    """
+    from pathlib import Path as _Path
+
+    root = _Path(project).expanduser()
+    try:
+        if not root.is_dir():
+            return False
+        for path in root.rglob("*"):
+            # `.git` is a repository somebody initialised, not work they did.
+            if any(part == ".git" for part in path.parts):
+                continue
+            if not path.is_file():
+                continue
+            if path.name.lower() in A_PROJECT_ALREADY:
+                return False  # a manifest is a project, whatever its suffix
+            if path.name in HOUSEKEEPING:
+                continue
+            if path.suffix.lower() in BEFORE_ANYTHING:
+                continue
+            return False
+    except OSError as exc:  # noqa: BLE001 - a directory that cannot be read
+        logger.info("could not tell whether %s is empty: %s", project, exc)
+        return False
+    return True
+
+
 def _something_to_build(prompt: str, project: str) -> str:
     """Whether they are asking for something to be built with nothing agreed.
 
@@ -451,22 +524,13 @@ def _something_to_build(prompt: str, project: str) -> str:
     if not TO_BUILD.search(prompt) or ABOUT_WHAT_EXISTS.search(prompt):
         return ""
 
-    # A whole thing, not a piece of one. "Add a field to the form" is ordinary
-    # work in something that already exists; demanding a contract for it would
-    # make the tool insufferable. What marks a project is that there is nothing
-    # here yet, or that they described several things they want it to do.
-    from pathlib import Path as _Path
-
-    root = _Path(project).expanduser()
-    try:
-        existing = [
-            p for p in root.rglob("*.py")
-            if not any(part.startswith(".") for part in p.parts)
-        ]
-    except OSError:
-        existing = []
-
-    if existing and len(prompt.split()) < 25:
+    # A new project, and never one already under way. "Add a field to the
+    # form" is ordinary work in something that exists, and demanding a
+    # contract for it would make the tool insufferable — but the stronger
+    # reason is that offering to take over a repository somebody has been
+    # working in for months is alarming whatever the prompt said. Notes and
+    # specifications do not count as work; a single source file does.
+    if not _nothing_built_here(project):
         return ""
 
     # Only where a *whole* implementation is implied. Automation agrees a list
