@@ -178,3 +178,22 @@ def test_injection_stays_silent_for_a_failed_project(tmp_path: Path):
     ready._record_failure(root, "boom")
 
     assert context_for("what does thing do", root) == ""
+
+
+def test_the_state_directory_follows_the_store(tmp_path):
+    """Bound at import, this was evaluated before any fixture could move the
+    store — so every test recording a failure wrote into the user's real
+    `~/.vesta/prepared`. Fifty stale marks saying "boom" were found there.
+
+    `GRAPH_DIR` had already been fixed for exactly this, and the same rule
+    applies: a location that can move must be read, not remembered.
+    """
+    import vesta.home as home_module
+    import vesta.ready as ready
+
+    moved = tmp_path / "elsewhere"
+    home_module.keep_in(moved)
+    try:
+        assert ready.STATE().resolve() == (moved / "prepared").resolve()
+    finally:
+        home_module.keep_in(None)

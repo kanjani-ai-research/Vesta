@@ -40,7 +40,15 @@ from .home import home
 logger = logging.getLogger("vesta.ready")
 
 # Where a preparation records that it is running or has finished.
-STATE = home() / "prepared"
+#
+# A function, not a constant. Bound at import this was evaluated before any
+# test fixture could move the store, so every test that recorded a failure
+# wrote it into the user's real `~/.vesta/prepared` — fifty stale marks saying
+# "boom" and "pyright is not installed" were found there, left by the suite.
+# `GRAPH_DIR` had already been fixed for exactly this and the same reasoning
+# applies: a location that can move must be read, not remembered.
+def STATE() -> Path:
+    return home() / "prepared"
 
 # How long a claimed preparation is believed. A process that died mid-build
 # leaves its mark behind, and without this every later session would decline to
@@ -120,8 +128,9 @@ def _mark(root: Path) -> Path:
     import hashlib
 
     root = Path(root).expanduser().resolve()
-    STATE.mkdir(parents=True, exist_ok=True)
-    return STATE / f"{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
+    where = STATE()
+    where.mkdir(parents=True, exist_ok=True)
+    return where / f"{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
 
 
 def _readiness_of_parts(root: Path, parts: list) -> Readiness:
