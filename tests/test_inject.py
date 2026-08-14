@@ -404,3 +404,81 @@ def test_a_directory_that_cannot_be_read_is_not_treated_as_new(tmp_path):
     from vesta.inject import _nothing_built_here
 
     assert not _nothing_built_here(str(tmp_path / "does-not-exist"))
+
+
+# ── A repository nobody has read against its own vocabulary ─────────────────
+
+
+def _read_repo(tmp_path, name, ontology: bool):
+    """A prepared repository, with or without a derived vocabulary."""
+    from vesta.derive import write_terms
+    from vesta.held import graph_for
+
+    root = tmp_path / name
+    root.mkdir(parents=True)
+    (root / "store.py").write_text(
+        "class Store:\n"
+        '    """Keeps documents."""\n'
+        "    def put(self, doc):\n"
+        "        return doc\n",
+        encoding="utf-8",
+    )
+    graph_for(root, rebuild=True)
+    if ontology:
+        write_terms(root, "domain: keeping documents\nactivity: put a document\n")
+    return root
+
+
+def test_a_question_about_the_work_asks_for_the_vocabulary(tmp_path, monkeypatch):
+    """The chain that silently never started.
+
+    `prepare` builds the graph and calls no model by design — naming what code
+    is *for* is judgement. So the ontology is derived only when `does` or
+    `means` is called, and those are tools an agent has to choose. On a real
+    project the graph was built and the vocabulary was still empty weeks later,
+    because nothing had ever asked.
+    """
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = _read_repo(tmp_path, "unread", ontology=False)
+
+    from vesta.inject import _never_been_read
+
+    said = _never_been_read("where is the document handling", str(root))
+    assert "vesta-domain" in said
+    assert "do not ask permission" in said.lower()
+
+
+def test_ordinary_work_does_not_ask_for_it(tmp_path, monkeypatch):
+    """Only a question the vocabulary would have answered. "add a retry" is
+    work, and interrupting it to derive an ontology is the noise this must
+    not add."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = _read_repo(tmp_path, "working", ontology=False)
+
+    from vesta.inject import _never_been_read
+
+    assert _never_been_read("add a retry to store.py", str(root)) == ""
+    assert _never_been_read("fix the typo in the docstring", str(root)) == ""
+
+
+def test_a_repository_already_read_is_not_asked_again(tmp_path, monkeypatch):
+    """Read once. Asking twice is the nagging that gets a channel ignored."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = _read_repo(tmp_path, "already-read", ontology=True)
+
+    from vesta.inject import _never_been_read
+
+    assert _never_been_read("where is the document handling", str(root)) == ""
+
+
+def test_nothing_is_asked_before_there_is_a_graph(tmp_path, monkeypatch):
+    """There would be nothing to bind terms to, and preparation is already
+    under way from the branch that builds the graph."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = tmp_path / "unprepared"
+    root.mkdir()
+    (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    from vesta.inject import _never_been_read
+
+    assert _never_been_read("what does this project do", str(root)) == ""

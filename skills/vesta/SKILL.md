@@ -88,6 +88,12 @@ cannot say what it does or who for — gets "sure" and nothing else.
 
 ## When a tool says it has nothing
 
+> Most of this now also arrives through the prompt hook, which does not wait
+> for this skill to load. A skill loads when its description matches, and
+> ordinary work — "add a retry here" — matches nothing, so the habits that
+> matter most cannot depend on it. This section remains the explanation; the
+> hook is what makes it happen.
+
 **Run the subagent it names, yourself, without asking.** The user installed a
 plugin and carried on working; they do not know these agents exist, and telling
 them to run one is telling them to do the tool's job. It costs one subagent run
