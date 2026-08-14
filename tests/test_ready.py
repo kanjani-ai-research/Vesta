@@ -197,3 +197,75 @@ def test_the_state_directory_follows_the_store(tmp_path):
         assert ready.STATE().resolve() == (moved / "prepared").resolve()
     finally:
         home_module.keep_in(None)
+
+
+def test_a_build_that_resolved_nothing_is_not_cached(tmp_path, monkeypatch):
+    """A broken environment must not be remembered as an empty repository.
+
+    A detached build inherits `sys.executable` but not the user's PATH, so
+    `pyright-langserver` in `~/.n/bin` was unreachable. The graph came back
+    with 0 definitions and 79 holes saying "no server for this language", was
+    written to disk, and the project then reported itself ready with nothing
+    in it — answering every later question from nothing, confidently.
+    """
+    import pytest
+
+    from vesta.graph import Graph, Hole
+    from vesta.held import GRAPH_DIR, graph_for
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "a.py").write_text("def one(): pass\n", encoding="utf-8")
+
+    def _nothing(where):
+        empty = Graph(root=str(where))
+        empty.holes.append(
+            Hole(path="a.py", what="a.py", why="no server for this language")
+        )
+        return empty
+
+    monkeypatch.setattr("vesta.held.build", _nothing)
+
+    with pytest.raises(RuntimeError, match="resolved nothing"):
+        graph_for(root)
+
+    assert not list(GRAPH_DIR().glob("*.json")), "an empty graph was cached"
+
+
+def test_an_empty_repository_is_still_cached(tmp_path, monkeypatch):
+    """A project with nothing in it is not a broken environment. The holes are
+    what tell the two apart."""
+    from vesta.held import graph_for
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = tmp_path / "empty"
+    root.mkdir()
+    (root / "README.md").write_text("# nothing here\n", encoding="utf-8")
+
+    graph = graph_for(root)
+    assert len(graph.nodes) == 0  # and no exception
+
+
+def test_a_detached_build_can_find_a_language_server(tmp_path, monkeypatch):
+    """A hook runs in a minimal shell and `Popen` inherits it. The places a
+    language server is installed are few and worth naming."""
+    import vesta.ready as ready
+
+    seen = {}
+
+    def _fake(cmd, **kw):
+        seen.update(kw)
+
+        class _P:
+            pass
+
+        return _P()
+
+    monkeypatch.setattr(ready.subprocess, "Popen", _fake)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+
+    ready._start_build(tmp_path)
+
+    assert "env" in seen, "the build was given no environment"
+    assert seen["env"]["PATH"] != "/usr/bin:/bin", "PATH was not widened"

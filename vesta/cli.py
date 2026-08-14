@@ -880,7 +880,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(name)s: %(message)s",
     )
-    return int(args.run(args) or 0)
+    try:
+        return int(args.run(args) or 0)
+    except RuntimeError as exc:
+        # A sentence, never a stack. Somebody with no language server installed
+        # has a fixable problem, and a traceback tells them nothing about it —
+        # a graph that resolved nothing now raises rather than caching itself,
+        # and this is where that becomes something a person can read.
+        #
+        # Zero, not one. A slash command that exits non-zero is rendered by the
+        # host as the plugin having failed, which is a worse description of
+        # "you have no Python language server" than the sentence just printed.
+        _say(str(exc))
+        return 0
 
 
 if __name__ == "__main__":

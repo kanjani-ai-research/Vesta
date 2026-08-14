@@ -235,7 +235,29 @@ def readiness(project: Path | str) -> Readiness:
 
 
 def _start_build(root: Path) -> None:
-    """Run the build in a detached process, so no prompt waits for it."""
+    """Run the build in a detached process, so no prompt waits for it.
+
+    Given a PATH wide enough to find a language server. A hook runs in a
+    minimal shell and `Popen` inherits it, so a build started from one could
+    not see `pyright-langserver` in `~/.n/bin` — it resolved nothing, cached an
+    empty graph, and the project reported itself ready with nothing in it. The
+    places a language server is installed are few and worth naming.
+    """
+    where = os.environ.copy()
+    reachable = [where.get("PATH", "")]
+    for extra in (
+        Path.home() / ".n" / "bin",          # n, for node-installed servers
+        Path.home() / ".local" / "bin",      # pipx, pip --user
+        Path.home() / ".cargo" / "bin",      # rust-analyzer
+        Path.home() / "go" / "bin",          # gopls
+        Path.home() / ".bun" / "bin",
+        Path("/opt/homebrew/bin"),
+        Path("/usr/local/bin"),
+    ):
+        if extra.is_dir() and str(extra) not in reachable[0]:
+            reachable.append(str(extra))
+    where["PATH"] = ":".join(p for p in reachable if p)
+
     try:
         subprocess.Popen(
             [sys.executable, "-m", "vesta.ready", "--build", str(root)],
@@ -243,6 +265,7 @@ def _start_build(root: Path) -> None:
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             start_new_session=True,
+            env=where,
         )
     except OSError as exc:
         logger.info("could not start preparation: %s", exc)
@@ -330,21 +353,9 @@ def prepare(project: Path | str) -> Readiness:
     except OSError:
         return current
 
-    try:
-        subprocess.Popen(
-            [sys.executable, "-m", "vesta.ready", "--build", str(root)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except OSError as exc:
-        logger.info("could not start preparation: %s", exc)
-        try:
-            mark.unlink()
-        except OSError:
-            pass
-        return current
+    # One place starts a build, so the PATH it is given cannot differ between
+    # a first preparation and a refresh.
+    _start_build(root)
 
     # Report the mark's own time, not now: two sessions starting together must
     # agree about when preparation began, or the second reads as a new one.

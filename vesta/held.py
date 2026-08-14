@@ -212,6 +212,24 @@ def graph_for(
     found = build(root)
     logger.info("built the graph for %s in %.0fs", root, time.time() - started)
 
+    # A build that resolved nothing, where there was plainly something to
+    # resolve, is a broken environment rather than an empty repository — and
+    # caching it means every question afterwards is answered from nothing,
+    # confidently.
+    #
+    # Found live: a detached build inherits `sys.executable` but not the user's
+    # PATH, so `pyright-langserver` in `~/.n/bin` was unreachable. The graph
+    # came back with 0 definitions and 79 holes all saying "no server for this
+    # language", was written to disk, and the project reported itself ready
+    # with nothing in it for twelve minutes.
+    #
+    # The holes are the evidence and were already there; nothing acted on them.
+    if not found.nodes and found.holes:
+        raise RuntimeError(
+            f"resolved nothing in {root} — {found.holes[0].why}. "
+            "The graph is not cached, so this is retried rather than remembered."
+        )
+
     # Also as rows, one store per repository. A question touches a fraction of
     # a graph and parsing the whole document to answer it costs nine seconds at
     # forty thousand definitions — where an indexed lookup costs a fifth of a

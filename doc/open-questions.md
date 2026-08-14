@@ -371,6 +371,25 @@ Measured on the same workspace:
     a prompt naming a file                10ms  (was 5,117ms)
     a prompt where defects apply           1ms  (was 15,439ms)
 
+**Two things surfaced only by running it on a real workspace.**
+
+*An empty graph was cached as though it were an empty repository.* A detached
+build inherits `sys.executable` but not the user's PATH, so
+`pyright-langserver` — installed under `~/.n/bin` — was unreachable from a
+hook's minimal shell. The build returned 0 definitions and 79 holes, every one
+saying "no server for this language", and that was written to disk. The project
+then reported itself **ready with nothing in it**, answering every later
+question from nothing. The holes were the evidence and nothing acted on them;
+now a build that resolved nothing where there was something to resolve refuses
+to cache, and a detached build is given a PATH wide enough to find a server.
+
+*The test suite was writing into the user's real store.* `STATE = home() /
+"prepared"` was bound at import, before any fixture could move the store, so
+every test recording a failure left a mark in `~/.vesta/prepared` — fifty of
+them, saying "boom" and "pyright is not installed". `GRAPH_DIR` had already
+been fixed for exactly this, with a docstring explaining why; the same rule
+had simply not been applied to its neighbour.
+
 **What composing cannot recover is a reference from one project into
 another.** Neither resolver was shown the other's files, so that edge is in
 neither graph. The composed graph counts it as a hole rather than letting an

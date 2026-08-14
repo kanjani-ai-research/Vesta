@@ -438,3 +438,27 @@ def test_the_guide_says_where_the_terminal_form_works():
     said = guide().lower()
     assert "slash command" in said
     assert "terminal" in said
+
+
+def test_a_broken_environment_is_a_sentence_not_a_stack():
+    """A graph that resolved nothing now raises rather than caching itself.
+
+    That is right, and it must not reach the user as a traceback: somebody with
+    no language server installed has a fixable problem, and a stack tells them
+    nothing about it. Zero, not one, because a slash command exiting non-zero
+    is rendered as the plugin having failed — a worse description of "you have
+    no Python language server" than the sentence itself.
+    """
+    done = subprocess.run(
+        [str(RUNNER), "shape"],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin"},
+        cwd=str(HERE),
+        timeout=180,
+    )
+    said = done.stdout + done.stderr
+    assert "Traceback" not in said
+    assert done.returncode == 0
+    if "resolved nothing" in said:
+        assert "no server for this language" in said
