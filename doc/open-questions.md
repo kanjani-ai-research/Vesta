@@ -365,11 +365,19 @@ with tests either side of it.
 
 Measured on the same workspace:
 
-    build, all twelve projects            89s   (once)
+    build, all twelve projects           148s   (once)
     warm read, nothing changed           470ms
     after editing one project              9s   (that project only)
-    a prompt naming a file                10ms  (was 5,117ms)
-    a prompt where defects apply           1ms  (was 15,439ms)
+    the whole prompt hook                 6.6s  (was 10.7s)
+    a prompt naming nothing               1.1s
+
+**And a question about one file surveys only that file's project.** Composition
+made the graph cheap but left every *finder* reading the whole workspace: a
+prompt naming `vesta/cli.py` cost 22 seconds because the defect survey walked
+all twelve repositories, and the rule check another 3.8. Where the named files
+all sit inside one part, that part is the subject — 22s became 3.4s and 3.8s
+became 0.6s. Files spanning two projects keep the whole workspace, because then
+it really is the subject.
 
 **Two things surfaced only by running it on a real workspace.**
 

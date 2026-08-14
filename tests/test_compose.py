@@ -247,3 +247,36 @@ def test_refreshing_a_workspace_rebuilds_only_what_moved(tmp_path, monkeypatch):
 
     assert readiness(alpha).state == MOVED_ON
     assert readiness(beta).state == READY, "an untouched project went stale"
+
+
+def test_a_question_about_one_file_surveys_only_its_project(tmp_path, monkeypatch):
+    """A workspace of twelve repositories surveyed all of them to answer about
+    one file — 22 seconds inside a prompt. The finders read every source file
+    in the tree, so the cost is the whole workspace however narrow the
+    question, and narrowing it is free."""
+    from vesta.sidecar import _narrowed_to
+
+    space = tmp_path / "space"
+    _project(space, "alpha", {"a.py": "x = 1\n"})
+    _project(space, "beta", {"b.py": "y = 1\n"})
+
+    assert _narrowed_to(space, {"alpha/a.py"}).name == "alpha"
+    assert _narrowed_to(space, {"beta/b.py"}).name == "beta"
+
+
+def test_files_spanning_two_projects_keep_the_whole_workspace(tmp_path):
+    """Then the workspace really is the subject."""
+    from vesta.sidecar import _narrowed_to
+
+    space = tmp_path / "space"
+    _project(space, "alpha", {"a.py": "x = 1\n"})
+    _project(space, "beta", {"b.py": "y = 1\n"})
+
+    assert _narrowed_to(space, {"alpha/a.py", "beta/b.py"}) == space
+
+
+def test_a_single_project_is_never_narrowed(tmp_path):
+    from vesta.sidecar import _narrowed_to
+
+    solo = _project(tmp_path, "solo", {"a.py": "x = 1\n"})
+    assert _narrowed_to(solo, {"a.py"}) == solo

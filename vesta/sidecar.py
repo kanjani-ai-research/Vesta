@@ -26,7 +26,7 @@ import contextlib
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Set
 
 from .authority import settle
 from .dynamic import missed_by, scan
@@ -906,6 +906,11 @@ def _bears_on(paths: List[str], project: Optional[Path]) -> str:
     if project is None:
         return ""
 
+    # Narrowed to the project the files are in, for the same reason as
+    # `_defects_in`: checking a rule reads the tree, and a workspace of twelve
+    # repositories cost seconds to answer about one file in one of them.
+    project = _narrowed_to(project, {p.lstrip("./") for p in paths})
+
     with quiet_stdout():
         found = recall_rules(project) or from_sessions(project)
         found = confirming.apply(found, project)
@@ -984,6 +989,33 @@ RAISEABLE = (
 )
 
 
+def _narrowed_to(project: Path, paths: Set[str]) -> Path:
+    """The project inside a workspace that the named files belong to.
+
+    A directory of several repositories is answered by composing them, and
+    every finder reads every file — so a question about one file cost the whole
+    workspace. Where the named files all sit inside one part, that part is the
+    subject and the rest is not.
+
+    Falls back to the directory itself when the files span more than one, or
+    when it holds no separate projects at all, because then the whole thing
+    really is the subject.
+    """
+    from .compose import parts_of
+
+    parts = parts_of(project)
+    if not parts:
+        return project
+
+    holding = {
+        part
+        for part in parts
+        for name in paths
+        if name.startswith(part.name + "/") or (part / name).exists()
+    }
+    return holding.pop() if len(holding) == 1 else project
+
+
 def _defects_in(paths: List[str], project: Optional[Path]) -> str:
     """Defects in the files somebody is about to change, and nothing else.
 
@@ -1007,6 +1039,24 @@ def _defects_in(paths: List[str], project: Optional[Path]) -> str:
         return ""
 
     wanted = {p.lstrip("./") for p in paths}
+
+    # Survey only the project the named files are in.
+    #
+    # A workspace of twelve repositories surveyed all of them to answer about
+    # one file — 22 seconds inside a prompt, measured. The finders read every
+    # source file in the tree, so the cost is the whole workspace however
+    # narrow the question, and narrowing the question is free.
+    narrowed = _narrowed_to(project, wanted)
+    if narrowed != project:
+        # Paths were given relative to the workspace; the part's own graph
+        # knows them relative to itself. Both spellings are kept, since a
+        # prompt may have named either.
+        wanted |= {
+            name[len(narrowed.name) + 1:]
+            for name in wanted
+            if name.startswith(narrowed.name + "/")
+        }
+        project = narrowed
     if not wanted:
         return ""
 
