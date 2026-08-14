@@ -482,3 +482,65 @@ def test_nothing_is_asked_before_there_is_a_graph(tmp_path, monkeypatch):
     from vesta.inject import _never_been_read
 
     assert _never_been_read("what does this project do", str(root)) == ""
+
+
+# ── Ordinary English is not a definition ────────────────────────────────────
+
+
+def test_a_test_fixture_is_not_what_somebody_meant(tmp_path, monkeypatch):
+    """"what does this project do" matched two pytest fixtures called
+    `project`. A definition under test is support for the code rather than the
+    code, and nobody asking about their project means a fixture."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    from vesta.held import graph_for
+    from vesta.inject import _named
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "app.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    (root / "tests" / "test_it.py").write_text(
+        "import pytest\n\n\n@pytest.fixture\ndef project():\n    return 1\n",
+        encoding="utf-8",
+    )
+    graph = graph_for(root, rebuild=True)
+
+    assert _named("what does this project do", graph) == []
+
+
+def test_a_nested_definition_reached_by_a_bare_word_is_not_meant(tmp_path, monkeypatch):
+    """`build_server.does` is defined inside another function and registered
+    by a decorator, so nothing calls it by name. Somebody writing "does" in a
+    sentence did not mean it."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    from vesta.held import graph_for
+    from vesta.inject import _named
+
+    root = tmp_path / "nested"
+    root.mkdir()
+    (root / "server.py").write_text(
+        "def build_server():\n"
+        "    def does(phrase):\n"
+        "        return phrase\n"
+        "    return does\n",
+        encoding="utf-8",
+    )
+    graph = graph_for(root, rebuild=True)
+
+    assert _named("what does this project do", graph) == []
+    # Spelled out in full, it is meant.
+    assert _named("what about build_server.does", graph)
+
+
+def test_a_top_level_definition_nothing_refers_to_is_still_offered(tmp_path, monkeypatch):
+    """An unreferenced definition is exactly where a wrong change hides, so
+    what earlier sessions learned about one is worth having."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    from vesta.held import graph_for
+    from vesta.inject import _named
+
+    root = tmp_path / "lonely"
+    root.mkdir()
+    (root / "a.py").write_text("def admit(entry):\n    return entry\n", encoding="utf-8")
+    graph = graph_for(root, rebuild=True)
+
+    assert _named("what does admit do", graph)

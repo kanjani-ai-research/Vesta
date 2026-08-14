@@ -38,7 +38,7 @@ from .dynamic import scan
 from .graph import Graph
 from .harvest import anchor, from_sessions
 from .held import graph_for
-from .propagate import from_definitions
+from .propagate import from_definitions, is_test
 
 logger = logging.getLogger("vesta.inject")
 
@@ -89,8 +89,47 @@ def _named(prompt: str, graph: Graph) -> List[str]:
     for node in graph.nodes.values():
         if node.name in TOO_COMMON:
             continue
-        if node.name in words or node.qualified in words:
-            found.append(node.id)
+        if node.name not in words and node.qualified not in words:
+            continue
+
+        # A fixture is not what somebody meant.
+        #
+        # "what does this project do" matched two pytest fixtures called
+        # `project`, and "fix the retry" matched `anchor.fix` — each pulled in
+        # by an ordinary English word that happens to be an identifier in a
+        # test. `TOO_COMMON` is the hand-kept guard against that and it will
+        # always be one word short, the same failure as an exclusion list that
+        # said `.venv` and not `venv`.
+        #
+        # Tests are the reliable half of the signal: a definition under test
+        # is support for the code rather than the code, and nobody asking
+        # about their project means a fixture. The rest of `TOO_COMMON` still
+        # earns its keep for names that are common in the source itself.
+        #
+        # Deliberately *not* "nothing refers to it": an unreferenced
+        # definition is exactly where a wrong change hides, so what earlier
+        # sessions learned about one is worth having.
+        if is_test(node) or "/tests/" in node.path or node.path.startswith("tests/"):
+            continue
+
+        # Something nested, reached by a bare word, that nothing refers to.
+        #
+        # "what does this project do" matched `build_server.does` — a function
+        # defined inside another and registered by a decorator, so nothing
+        # calls it by name. Somebody writing "does" in a sentence did not mean
+        # it; somebody writing `build_server.does` did, and that still passes
+        # because the qualified name was spelled out.
+        #
+        # Not a wider rule than that. A top-level definition nothing refers to
+        # is exactly where a wrong change hides, and what earlier sessions
+        # learned about one is worth having.
+        if (
+            node.container
+            and node.qualified not in words
+            and not graph.referenced_by(node.id)
+        ):
+            continue
+        found.append(node.id)
     return found
 
 

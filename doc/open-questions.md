@@ -433,9 +433,35 @@ session* — and the note carries the hint (`/vesta:defects` lists the rest) so
 that a user who wants the full picture does not have to discover it, and one
 who does not never hears about it twice.
 
+**And an ordinary English word is not a definition.** Running a realistic
+session through the live hook showed the other half of the noise: *"what does
+this project do"* injected two pytest fixtures called `project`, and *"fix the
+retry"* matched `anchor.fix`. `TOO_COMMON` is the hand-kept list guarding
+against that, and it will always be one word short — the same failure as an
+exclusion list that said `.venv` and not `venv`.
+
+Two structural rules replace guessing at the list. A definition **under test**
+is support for the code rather than the code, and nobody asking about their
+project means a fixture. A **nested** definition reached by a bare word that
+nothing refers to — `build_server.does`, registered by a decorator — is not
+what somebody writing "does" in a sentence meant. Neither rule touches a
+top-level definition nothing refers to, because that is exactly where a wrong
+change hides and what earlier sessions learned about it is worth having.
+
 Over a realistic eight-prompt session on this repository, with one file named
-three times: **two interruptions**, each the first time a file with real
-defects came up.
+three times, through the live hook:
+
+    silent   what does this project do
+    SPEAKS   fix the retry in vesta/held.py     ← two swallowed failures
+    silent   now add a test
+    silent   also touch vesta/held.py again     ← already said
+    SPEAKS   how does graph_for work
+    SPEAKS   what about Graph.referenced_by
+    silent   run the suite
+    silent   thanks
+
+Three interruptions, each earned: a file with real defects, and two
+definitions genuinely named.
 
 ## What was done before release
 
