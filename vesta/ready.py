@@ -124,10 +124,53 @@ def _mark(root: Path) -> Path:
     return STATE / f"{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
 
 
+def _readiness_of_parts(root: Path, parts: list) -> Readiness:
+    """How ready a directory of projects is: as ready as its least ready part.
+
+    Definitions are summed, because that is what a composed graph holds. The
+    state is the weakest, so a workspace with one project still building says
+    `preparing` rather than claiming a completeness it does not have.
+    """
+    states = []
+    total = 0
+    since = 0.0
+    why = ""
+    for part in parts:
+        found = readiness(part)
+        states.append(found.state)
+        total += found.definitions
+        since = max(since, found.since)
+        why = why or found.why
+
+    # Worst first: nothing to answer from beats a partial answer that looks
+    # whole, and a failure somebody could fix beats either.
+    for state in (FAILED, NOTHING, PREPARING, MOVED_ON):
+        if state in states:
+            return Readiness(
+                state=state,
+                project=str(root),
+                definitions=total,
+                since=since,
+                why=why,
+            )
+    return Readiness(state=READY, project=str(root), definitions=total)
+
+
 def readiness(project: Path | str) -> Readiness:
     """What Vesta can do for this project right now, without doing any of it."""
     root = Path(project).expanduser().resolve()
     from .held import _where
+
+    # A directory of projects has no graph of its own — it is composed from the
+    # graphs beneath it — so its readiness is theirs. Reported as the weakest
+    # of the parts, because a workspace where one project is still building
+    # cannot answer completely about itself, and saying "ready" would promise
+    # more than it holds.
+    from .compose import parts_of
+
+    parts = parts_of(root)
+    if parts:
+        return _readiness_of_parts(root, parts)
 
     cached = _where(root)
     if cached.is_file():
@@ -216,6 +259,18 @@ def refresh(project: Path | str) -> Readiness:
     somebody saves a file, which is not a tool anybody keeps installed.
     """
     root = Path(project).expanduser().resolve()
+
+    # Only the parts that actually moved. This is what makes an edit cheap on
+    # a workspace: eleven graphs are untouched and the twelfth rebuilds.
+    from .compose import parts_of
+
+    parts = parts_of(root)
+    if parts:
+        for part in parts:
+            if readiness(part).state == MOVED_ON:
+                refresh(part)
+        return readiness(root)
+
     if readiness(root).state != MOVED_ON:
         return readiness(root)
 
@@ -243,6 +298,19 @@ def prepare(project: Path | str) -> Readiness:
     the prompt is none.
     """
     root = Path(project).expanduser().resolve()
+
+    # A directory of projects has nothing of its own to build. Preparing it is
+    # preparing each part, and each carries its own mark — so one project's
+    # build finishing makes that project answerable without waiting for the
+    # rest, which is the whole reason the graphs are separate.
+    from .compose import parts_of
+
+    parts = parts_of(root)
+    if parts:
+        for part in parts:
+            prepare(part)
+        return readiness(root)
+
     current = readiness(root)
     if current.state != NOTHING:
         return current

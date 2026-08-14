@@ -201,3 +201,49 @@ def test_editing_one_project_leaves_the_others_alone(tmp_path, monkeypatch):
     whole = graph_for(tmp_path / "space")
     assert any(n.path.startswith("alpha/") for n in whole.nodes.values())
     assert any(n.path.startswith("beta/") for n in whole.nodes.values())
+
+
+def test_a_directory_of_projects_is_as_ready_as_its_least_ready_part(tmp_path, monkeypatch):
+    """Saying "ready" when one project is still building promises more than
+    the composed graph holds."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    from vesta.held import graph_for
+    from vesta.ready import MOVED_ON, NOTHING, READY, readiness
+
+    space = tmp_path / "space"
+    alpha = _project(space, "alpha", {"a.py": "def one(): pass\n"})
+    _project(space, "beta", {"b.py": "def two(): pass\n"})
+
+    # Neither built yet.
+    assert readiness(space).state == NOTHING
+
+    graph_for(space)
+    assert readiness(space).state == READY
+    assert readiness(space).definitions == 2
+
+    # One moves; the whole reports it, and the count still covers both.
+    (alpha / "a.py").write_text("def one(): return 1\n", encoding="utf-8")
+    import time as _time
+
+    _time.sleep(0.25)
+    assert readiness(space).state == MOVED_ON
+
+
+def test_refreshing_a_workspace_rebuilds_only_what_moved(tmp_path, monkeypatch):
+    """Eleven graphs untouched and the twelfth rebuilt is the whole point."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    from vesta.held import graph_for
+    from vesta.ready import MOVED_ON, READY, readiness
+
+    space = tmp_path / "space"
+    alpha = _project(space, "alpha", {"a.py": "def one(): pass\n"})
+    beta = _project(space, "beta", {"b.py": "def two(): pass\n"})
+    graph_for(space)
+
+    (alpha / "a.py").write_text("def one(): return 1\n", encoding="utf-8")
+    import time as _time
+
+    _time.sleep(0.25)
+
+    assert readiness(alpha).state == MOVED_ON
+    assert readiness(beta).state == READY, "an untouched project went stale"
