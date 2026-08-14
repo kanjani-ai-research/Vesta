@@ -1,6 +1,6 @@
 # Vesta
 
-    /plugin marketplace add https://gitlab.com/causum/vesta
+    /plugin marketplace add https://gitlab.com/causum/vesta.git
     /plugin install vesta@causum
 
 Answers structural questions about a repository from a resolved graph of what
