@@ -403,3 +403,38 @@ def test_no_project_setting_runs_a_bare_interpreter():
         assert not command.strip().startswith(("python ", "python3 ")), (
             f"a project hook runs a bare interpreter: {command!r}"
         )
+
+
+def test_the_guide_shows_commands_a_reader_can_actually_type():
+    """`vesta` is not on PATH, and the guide is read inside a session.
+
+    A plugin is installed by the framework, not by pip, so `vesta shape` fails
+    with "command not found" for everyone reading this through `/vesta:help` —
+    which renders the guide verbatim and is most people's first contact.
+    Twenty-seven entries were spelled that way, so the first thing a new user
+    was taught was twenty-seven things that do not work for them.
+    """
+    from vesta.guide import as_typed, commands, guide
+
+    here = Path(__file__).resolve().parent.parent / "commands"
+    have = {path.stem for path in here.glob("*.md")}
+
+    for command in commands():
+        shown = as_typed(command)
+        assert shown.startswith("/vesta:"), f"{command!r} renders as {shown!r}"
+        name = shown.split(":", 1)[1].split()[0]
+        assert name in have, f"the guide shows `{shown}`, which is not a command"
+
+    # And nothing in the body still tells somebody to type the bare form.
+    body = guide()
+    assert "\n  vesta " not in body
+
+
+def test_the_guide_says_where_the_terminal_form_works():
+    """The bare spelling is real for anybody who installed the package. Saying
+    so once is the difference between a rule and a mystery."""
+    from vesta.guide import guide
+
+    said = guide().lower()
+    assert "slash command" in said
+    assert "terminal" in said

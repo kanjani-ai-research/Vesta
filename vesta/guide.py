@@ -160,7 +160,12 @@ whole project and is never entered on your behalf."""
 # tool that reads their code.
 STANDING = """Vesta runs on your agent's own inference. It holds no API key and
 makes no network calls of its own. Everything it derives is kept under
-~/.vesta and can be deleted; nothing leaves your machine."""
+~/.vesta and can be deleted; nothing leaves your machine.
+
+Everything above is a slash command, because that is what works where you are
+reading this. From a terminal outside a session the same things are spelled
+`vesta does ...`, if you have Vesta installed as a package rather than only as
+a plugin."""
 
 
 # Terminals are narrower than source files. A guide that runs off the right of
@@ -179,8 +184,38 @@ def _wrapped(text: str, indent: str = "  ") -> List[str]:
     )
 
 
+# Where a subcommand and its slash command are not spelled the same. Only one
+# so far — `vesta guide` is reached as `/vesta:help`, because "help" is what
+# somebody types when they want help and "guide" is what the file is called.
+RENAMED = {"guide": "help"}
+
+
+def as_typed(command: str) -> str:
+    """A command spelled the way the reader can actually type it.
+
+    **`vesta` is not on PATH.** A plugin is installed by the framework, not by
+    pip, so `vesta shape` fails with "command not found" for everyone reading
+    this inside a session — which is nearly everyone, since `/vesta:help`
+    renders the guide verbatim and is most people's first contact.
+
+    Twenty-seven entries were spelled that way and one, the tutorial, was not.
+    So the first thing a new user was taught was twenty-seven things that do
+    not work for them.
+
+    The sections stay canonical — a subcommand is what it is, and the test
+    that every shown command exists checks against that — and the spelling is
+    a rendering decision made here.
+    """
+    if command.startswith("/") or not command.startswith("vesta "):
+        return command
+    rest = command[len("vesta "):]
+    verb, _, arguments = rest.partition(" ")
+    verb = RENAMED.get(verb, verb)
+    return f"/vesta:{verb}{(' ' + arguments) if arguments else ''}"
+
+
 def _snippet(command: str, what: str) -> str:
-    return f"  {command}\n      {what}"
+    return f"  {as_typed(command)}\n      {what}"
 
 
 def guide(topic: str = "") -> str:
@@ -223,7 +258,14 @@ def guide(topic: str = "") -> str:
         lines.append("")
 
     if not wanted:
-        lines.extend(_wrapped(STANDING, ""))
+        # Paragraph by paragraph, as PURPOSE is: wrapping the whole thing at
+        # once runs "nothing leaves your machine" into "everything above is a
+        # slash command", which are two unrelated things a reader needs to
+        # take separately.
+        for number, paragraph in enumerate(STANDING.split("\n\n")):
+            if number:
+                lines.append("")
+            lines.extend(_wrapped(paragraph, ""))
     return "\n".join(lines).rstrip() + "\n"
 
 
