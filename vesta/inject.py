@@ -323,7 +323,11 @@ def _never_been_read(prompt: str, project: str) -> str:
         logger.info("could not tell whether this has been read: %s", exc)
         return ""
 
-    return (
+    from .once import say_once
+
+    return say_once(
+        project,
+        "no vocabulary yet",
         "This repository's graph is built but nothing has named what its code "
         "is *for*, so Vesta cannot answer in the vocabulary of the work — only "
         "in the vocabulary of the syntax.\n\n"
@@ -374,9 +378,20 @@ def _something_already_wrong(prompt: str, project: str) -> str:
         if not readiness(project).can_answer:
             return ""
 
+        from .once import say_once
         from .sidecar import _defects_in
 
-        return _defects_in(paths[:6], Path(project))
+        # Once per session, per set of files. The defects in a file do not
+        # change between one prompt and the next, so somebody editing that file
+        # was told about the same two swallowed failures on every message —
+        # which teaches them to skim past the channel, and then the finding
+        # that mattered goes past unread too.
+        named = sorted(paths[:6])
+        return say_once(
+            project,
+            "defects in " + ", ".join(named),
+            _defects_in(named, Path(project)),
+        )
     except Exception as exc:  # noqa: BLE001 - never break the session
         logger.info("could not check what is wrong here: %s", exc)
         return ""
@@ -395,9 +410,18 @@ def _a_rule_in_doubt(prompt: str, project: str) -> str:
         return ""
 
     try:
+        from .once import say_once
         from .sidecar import _bears_on
 
-        return _bears_on(paths[:6], Path(project))
+        # Once per session per set of files, for the same reason as defects: a
+        # rule in doubt is still in doubt on the next prompt, and saying so
+        # again adds nothing but noise.
+        named = sorted(paths[:6])
+        return say_once(
+            project,
+            "rules bearing on " + ", ".join(named),
+            _bears_on(named, Path(project)),
+        )
     except Exception as exc:  # noqa: BLE001 - never break the session
         logger.info("could not check what bears on this: %s", exc)
         return ""

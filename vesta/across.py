@@ -170,7 +170,39 @@ def resolve(
     if len(matching) == 1:
         return Reference(project=matching[0])
 
-    # Several. The one most recently referred to is the one meant.
+    # Several. A neighbour wins first.
+    #
+    # Somebody working in a directory of projects who names one of them means
+    # *that* one — the sibling beside the work, not a repository of the same
+    # name somewhere else on the machine. Two projects called `athena` made the
+    # question ambiguous when one of them was in the very workspace being
+    # asked from, which is the answer nobody would have hesitated over.
+    #
+    # This is the crossing a composed graph cannot make for itself: each part
+    # is resolved on its own, so an import from one into another makes no edge.
+    # What recovers it is asking the other project — and asking is only easy if
+    # naming a sibling is unambiguous.
+    # Both readings of "beside": a project inside the directory being worked
+    # in, and a project sharing that directory's parent — somebody may be
+    # working in the workspace or in one of its parts, and means the same
+    # neighbour either way.
+    #
+    # The parent reading applies only where the root is *not itself* one of the
+    # candidates. Given two roots that are each a project of the same name,
+    # every candidate is its own sibling and this would pick whichever was
+    # listed first — silently overruling recency, which is the better signal
+    # when somebody has named both.
+    for root in roots or []:
+        root = Path(root).expanduser().resolve()
+        looking = [root]
+        if not any(Path(p.path) == root for p in matching):
+            looking.append(root.parent)
+        for where in looking:
+            beside = [p for p in matching if Path(p.path).parent == where]
+            if len(beside) == 1:
+                return Reference(project=beside[0])
+
+    # Then the one most recently referred to.
     when = recent or _mentions()
     ranked = sorted(matching, key=lambda p: -when.get(p.path, 0.0))
     if when.get(ranked[0].path, 0.0) > 0:

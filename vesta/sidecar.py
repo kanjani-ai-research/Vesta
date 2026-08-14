@@ -1111,6 +1111,13 @@ def _defects_in(paths: List[str], project: Optional[Path]) -> str:
         "not fix them unasked and do not stop what you were asked to do. If "
         "the user is not interested, say nothing further about them."
     )
+    # Where somebody can go if they *are* interested. Said as part of the one
+    # mention rather than as its own line on a later prompt: a user who wants
+    # the full picture should not have to discover that `/vesta:defects`
+    # exists, and a user who does not should never hear about it twice.
+    lines.append(
+        "If they want the rest, `/vesta:defects` lists everything found here."
+    )
     return "\n".join(lines)
 
 

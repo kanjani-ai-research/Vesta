@@ -176,16 +176,30 @@ def composed(root: Path | str, parts: Sequence[Path], of: Dict[str, Graph]) -> G
         whole.built_in += moved.built_in
 
     # References that cross from one project into another exist in neither
-    # graph, because neither resolver was shown the other's files. Said plainly
-    # rather than left to look like an absence of references.
+    # graph, because neither resolver was shown the other's files.
+    #
+    # **This is a missing edge, not a missing answer**, and the difference is
+    # worth stating precisely. Every definition in every part is present and
+    # resolves normally — asking about `Document` in a composed workspace finds
+    # it in `metis` with all thirty-one of its references. What is absent is
+    # the single edge saying `mercury` reaches into `metis`, and that is
+    # recovered by asking the other project rather than by merging it.
+    #
+    # Which is the right shape anyway. Two independently derived ontologies
+    # would have to be reconciled to merge them — a problem nobody asked to
+    # solve — where consulting each and saying which answered is what the
+    # question actually wants. A hole that reads like a dead end when a query
+    # exists is worse than no hole at all.
     if len(parts) > 1:
         whole.holes.append(
             Hole(
                 path=".",
                 what=f"references between the {len(parts)} projects here",
                 why=(
-                    "each project was resolved on its own, so a reference from "
-                    "one into another is not in either graph"
+                    "each project was resolved on its own, so an import from "
+                    "one into another makes no edge. Every definition is still "
+                    "here and answers normally; ask the other project directly "
+                    "— `elsewhere <work> --in <project>` — to cross between them"
                 ),
             )
         )

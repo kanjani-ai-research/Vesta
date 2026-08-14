@@ -405,6 +405,38 @@ absence of references look like an absence of coupling — for a workspace of
 independent components that is usually the truth anyway, and where it is not,
 saying so is better than a silent omission.
 
+## Companion mode says a thing once
+
+The standard, stated by the user: *it just works, reliably, without me needing
+to do anything.* Everything behind the scenes unless they are actually
+adjudicating something — and then a hint about how, once, not a reminder every
+prompt.
+
+Measured against that, one thing was plainly wrong. The defects in a file do
+not change between one prompt and the next, so somebody editing that file was
+told about the same two swallowed failures on **every message**. The second
+telling is worth nothing and the tenth is worth less than nothing: it teaches
+somebody to skim past the channel, and then the finding that mattered goes past
+unread too.
+
+Anything raised unasked is now raised **once per session, per subject**:
+
+- the same file again — silent
+- a different file — speaks, because that is a new fact rather than a repeat
+- a new session — speaks, because that is a new working context and a defect
+  nobody acted on last week is worth mentioning again today
+
+Keyed by the substance rather than by a timer. A timer either repeats inside a
+session or goes quiet across two, and neither is what anybody means by "do not
+tell me twice". What is remembered is *this defect, in this file, in this
+session* — and the note carries the hint (`/vesta:defects` lists the rest) so
+that a user who wants the full picture does not have to discover it, and one
+who does not never hears about it twice.
+
+Over a realistic eight-prompt session on this repository, with one file named
+three times: **two interruptions**, each the first time a file with real
+defects came up.
+
 ## What was done before release
 
 Two things written up here were credibility problems rather than features, and

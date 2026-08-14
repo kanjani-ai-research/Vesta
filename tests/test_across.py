@@ -142,3 +142,77 @@ def test_the_session_supersedes_what_was_prepared(tmp_path):
     root = _graphed(tmp_path / "current")
     entries = {p.path: p for p in known(roots=[root])}
     assert entries[str(root.resolve())].prepared is True
+
+
+def test_a_sibling_beats_a_stranger_of_the_same_name(tmp_path, monkeypatch):
+    """Somebody working in a directory of projects who names one means *that*
+    one — the sibling beside the work, not a repository of the same name
+    somewhere else on the machine.
+
+    Two projects called `athena` made the question ambiguous when one was in
+    the very workspace being asked from, which is the answer nobody would have
+    hesitated over. It matters because this is the crossing a composed graph
+    cannot make for itself: each part is resolved on its own, so an import from
+    one into another makes no edge, and what recovers it is asking the other
+    project — which is only easy if naming a sibling is unambiguous.
+    """
+    from vesta.across import Project, resolve
+
+    here = tmp_path / "workspace"
+    (here / "athena").mkdir(parents=True)
+    (tmp_path / "elsewhere" / "athena").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "vesta.across.known",
+        lambda roots=None: [
+            Project(path=str(here / "athena"), name="athena"),
+            Project(path=str(tmp_path / "elsewhere" / "athena"), name="athena"),
+        ],
+    )
+
+    found = resolve("athena", roots=[here])
+    assert found.found
+    assert found.project.path == str(here / "athena")
+
+
+def test_a_sibling_is_found_from_inside_another_part(tmp_path, monkeypatch):
+    """Working in one project and naming its neighbour is the same question."""
+    from vesta.across import Project, resolve
+
+    here = tmp_path / "workspace"
+    (here / "athena").mkdir(parents=True)
+    (here / "mercury").mkdir(parents=True)
+    (tmp_path / "elsewhere" / "athena").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "vesta.across.known",
+        lambda roots=None: [
+            Project(path=str(here / "athena"), name="athena"),
+            Project(path=str(tmp_path / "elsewhere" / "athena"), name="athena"),
+        ],
+    )
+
+    found = resolve("athena", roots=[here / "mercury"])
+    assert found.found
+    assert found.project.path == str(here / "athena")
+
+
+def test_two_strangers_are_still_ambiguous(tmp_path, monkeypatch):
+    """Neither is beside the work, so there is nothing to prefer and asking is
+    better than guessing."""
+    from vesta.across import Project, resolve
+
+    (tmp_path / "one" / "athena").mkdir(parents=True)
+    (tmp_path / "two" / "athena").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "vesta.across.known",
+        lambda roots=None: [
+            Project(path=str(tmp_path / "one" / "athena"), name="athena"),
+            Project(path=str(tmp_path / "two" / "athena"), name="athena"),
+        ],
+    )
+
+    found = resolve("athena", roots=[tmp_path / "somewhere-else"], recent={})
+    assert not found.found
+    assert len(found.ambiguous) == 2
