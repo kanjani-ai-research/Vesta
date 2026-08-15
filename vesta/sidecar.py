@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Literal, Optional, Set
 from .authority import settle
 from .dynamic import missed_by, scan
 from .enforce import against
-from .harvest import anchor, from_sessions, keep, recall_notes
+from .harvest import anchor, from_sessions
 from . import confirm as confirming
 from .across import known as known_projects
 from .across import loaded, refer, release, resolve
@@ -44,7 +44,7 @@ from .traverse import where as where_in
 from .learned import everything as learned_patterns
 from .patterns import CLEAR, LIKELY, WORTH_A_LOOK, Site, survey
 from .propagate import from_files, is_test
-from .home import home, repository_name
+from .home import home
 
 logger = logging.getLogger("vesta.sidecar")
 

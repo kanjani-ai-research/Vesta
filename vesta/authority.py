@@ -101,14 +101,6 @@ def bounded_region(graph: Graph, node: Node, root: Path) -> Tuple[str, str]:
     return region_of(node, root, max(3, min(span, 400)))
 
 
-def stamp(graph: Graph, node_id: str, root: Path | str) -> Tuple[str, str]:
-    """What to record with a claim, so it can be checked later."""
-    node = graph.nodes.get(node_id)
-    if node is None:
-        return "", ""
-    return bounded_region(graph, node, Path(root))
-
-
 def check(
     graph: Graph, node_id: str, root: Path | str, region: str, was: str
 ) -> Standing:

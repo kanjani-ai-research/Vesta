@@ -291,19 +291,6 @@ class Found(BaseModel):
         )
 
 
-class Worth(BaseModel):
-    """Whether an utterance is worth judging properly."""
-
-    worth_judging: bool = Field(
-        description=(
-            "True if this might state how work should be done in this "
-            "repository — a preference, a constraint, a correction, a naming "
-            "convention, anything a future change could contradict. Err "
-            "towards true: this only decides what gets read more carefully."
-        )
-    )
-
-
 
 
 def _names_in(text: str) -> List[str]:
@@ -627,16 +614,6 @@ def _normalise(text: str) -> str:
     """
     words = [w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 3]
     return " ".join(sorted(set(words))[:8])
-
-
-def keep(found: Found, repo: Path | str) -> Path:
-    import hashlib
-
-    root = Path(repo).expanduser().resolve()
-    RULES.mkdir(parents=True, exist_ok=True)
-    where = RULES / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
-    where.write_text(found.model_dump_json(), encoding="utf-8")
-    return where
 
 
 # ── Judging, by a model rather than by patterns ──────────────────────────

@@ -485,28 +485,3 @@ def _place(graph: Graph, cited: str, line: int) -> Optional[str]:
 
     node = graph.at(candidates.pop(), max(0, line - 1))
     return node.id if node else None
-
-
-def keep(harvest: Harvest, repo: Path | str) -> Path:
-    """Write what was harvested, so it survives the session that produced it."""
-    root = Path(repo).expanduser().resolve()
-    NOTES.mkdir(parents=True, exist_ok=True)
-    import hashlib
-
-    where = NOTES / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
-    where.write_text(harvest.model_dump_json(), encoding="utf-8")
-    return where
-
-
-def recall_notes(repo: Path | str) -> Harvest:
-    """What has been harvested for this repository so far."""
-    root = Path(repo).expanduser().resolve()
-    import hashlib
-
-    where = NOTES / f"{root.name}-{hashlib.sha256(str(root).encode()).hexdigest()[:12]}.json"
-    if not where.is_file():
-        return Harvest()
-    try:
-        return Harvest.model_validate_json(where.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return Harvest()

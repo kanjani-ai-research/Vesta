@@ -544,3 +544,37 @@ def test_a_top_level_definition_nothing_refers_to_is_still_offered(tmp_path, mon
     graph = graph_for(root, rebuild=True)
 
     assert _named("what does admit do", graph)
+
+
+def test_a_common_word_is_reachable_when_it_is_spelled_out(tmp_path, monkeypatch):
+    """`TOO_COMMON` was a flat ban on 78 words that are both English and
+    identifiers, and in this repository they hid **34 real definitions** —
+    `known` with five references, `check` with five. Asking "what does `known`
+    do" got nothing, permanently, in every project.
+
+    Spelling it out is the escape. A dotted spelling is one word to the
+    tokeniser, so the last segment names the definition and the rest says
+    which one.
+    """
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    from vesta.held import graph_for
+    from vesta.inject import _named
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "across.py").write_text(
+        "def known():\n    return 1\n\ndef caller():\n    return known()\n",
+        encoding="utf-8",
+    )
+    graph = graph_for(root, rebuild=True)
+
+    # The bare English word says nothing.
+    assert _named("what is known about this", graph) == []
+
+    # Spelled out with its module, it is meant.
+    assert _named("what does across.known do", graph)
+
+    # Naming the file is a different question and a different path — `_named`
+    # matches identifiers, not paths, and asserting otherwise would pin a
+    # behaviour this does not have.
+    assert _named("look at across.py", graph) == []

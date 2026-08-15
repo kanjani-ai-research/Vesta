@@ -294,6 +294,48 @@ def _decorated(root: Path) -> Set[Tuple[str, str]]:
     return found
 
 
+def _used_in_module_data(root: Path) -> Set[str]:
+    """Names constructed in a table, registry or constant at import time.
+
+    **The graph cannot see these, and the reason is deliberate.** A reference
+    is attributed to the definition that contains it, and a reference at module
+    level is inside no definition — so `_containing` drops it, which is right
+    for imports (otherwise every import in a file is attributed to every
+    definition in it) and wrong for a construction.
+
+    Found on this repository: `Chapter` is built six times inside a
+    module-level list and reported as referred to by nothing, while `Topic` in
+    the same file resolves nineteen references because it is constructed inside
+    a call. Reproduced in five lines — a class used in a function resolves, the
+    same class used in a list does not.
+
+    So the syntax is read where the graph is blind. Only assignments at module
+    level, and only the names actually called in them: a registry, a table of
+    handlers, a list of chapters.
+    """
+    import ast
+
+    found: Set[str] = set()
+    for path, _ in _sources(root):
+        try:
+            tree = ast.parse("\n".join(_lines(path)))
+        except (SyntaxError, ValueError):
+            continue
+        for node in tree.body:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Call):
+                    if isinstance(inner.func, ast.Name):
+                        found.add(inner.func.id)
+                    elif isinstance(inner.func, ast.Attribute):
+                        found.add(inner.func.attr)
+                elif isinstance(inner, ast.Name):
+                    # `VIEWS = {"outline": outline_view}` — named, not called.
+                    found.add(inner.id)
+    return found
+
+
 def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[Found]:
     """Code nothing refers to, which nothing will notice breaking.
 
@@ -308,6 +350,7 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
     """
     reachable_by_name = {entry.name for entry in blind.found}
     registered = _decorated(root)
+    at_module_level = _used_in_module_data(root)
     by_file: Dict[str, List[Site]] = {}
     for node in graph.nodes.values():
         if graph.referenced_by(node.id):
@@ -320,6 +363,8 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
             continue  # something reaches it by name; the graph just cannot see
         if (node.path, node.name) in registered:
             continue  # a decorator registered it; that *is* the reference
+        if node.name in at_module_level:
+            continue  # built into a table or registry at import time
         if node.container:
             continue  # a method may be reached through its class
         by_file.setdefault(node.path, []).append(

@@ -85,12 +85,46 @@ def _named(prompt: str, graph: Graph) -> List[str]:
     and trains an agent to ignore the whole channel.
     """
     words = set(re.findall(r"[A-Za-z_][\w.]*", prompt))
+
+    # A dotted spelling is one word to the tokeniser, so `across.known` matches
+    # neither the bare name nor a qualified name that has no container. The
+    # last segment is what names the definition; the rest says which one.
+    tails = {w.rsplit(".", 1)[-1] for w in words if "." in w}
+
     found: List[str] = []
     for node in graph.nodes.values():
+        if (
+            node.name not in words
+            and node.qualified not in words
+            and node.name not in tails
+        ):
+            continue
+
+        # A common word names a definition only when it is spelled out.
+        #
+        # `TOO_COMMON` was a flat ban: 78 words that are both English and
+        # identifiers, and in this repository they hid **34 real definitions**
+        # — `known` with five references, `check` with five. Asking "what does
+        # `known` do" got nothing, permanently, in every project.
+        #
+        # Spelling it out is the escape. `Graph.check` carries its container;
+        # a module-level `known` has none, so `across.known` and `across.py`
+        # are what distinguish somebody meaning the definition from somebody
+        # writing an English word.
+        # A dot is what makes it spelled out. For a module-level function
+        # `qualified` is just the name again, so testing it alone lets every
+        # bare English word through — the same trap that made an earlier guard
+        # here do nothing at all.
         if node.name in TOO_COMMON:
-            continue
-        if node.name not in words and node.qualified not in words:
-            continue
+            module = Path(node.path).stem
+            spelled = (
+                ("." in node.qualified and node.qualified in words)
+                or f"{module}.{node.name}" in prompt
+                or node.path in prompt
+                or f"{module}.py" in prompt
+            )
+            if not spelled:
+                continue
 
         # A fixture is not what somebody meant.
         #

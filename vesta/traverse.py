@@ -314,24 +314,6 @@ def neighbours(graph: Graph, mapped: Map, node_id: str, limit: int = 10) -> List
 # ── Attaching by reading, not by matching ────────────────────────────────
 
 
-class Reading(BaseModel):
-    """What a definition is about, as something that read it decided."""
-
-    does: str = Field(
-        default="",
-        description="What this definition does, in one plain sentence.",
-    )
-    terms: List[str] = Field(
-        default_factory=list,
-        description=(
-            "Labels from the offered vocabulary that name what this does. Only "
-            "ones that genuinely apply — most definitions are about one thing "
-            "or two, and a definition attached to eight terms has been attached "
-            "to none of them."
-        ),
-    )
-
-
 
 
 def _body_of(node: Node, root: Path, lines: int = 26) -> str:

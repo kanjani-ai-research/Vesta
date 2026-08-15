@@ -75,31 +75,6 @@ NOT_THE_PROJECT = (
 )
 
 
-def worth_walking(path: Path, root: Optional[Path] = None) -> bool:
-    """Whether a path is part of the project and safe to read.
-
-    **Nothing hidden, ever.** A dotfile or dot-directory is somebody's private
-    business — credentials in `.env`, tokens in `.aws`, a shell history, an
-    editor's state — and a tool that reads a repository to answer questions
-    about its code has no reason to look inside one. This is cheaper than a
-    list of names and cannot fall out of date.
-
-    A repository whose own path contains a dotted component is still walked:
-    the test is applied to the parts *below* the root, not to where the root
-    happens to live. Somebody working in `~/.local/src/thing` has not asked for
-    their project to be invisible.
-    """
-    parts = path.parts
-    if root is not None:
-        try:
-            parts = path.relative_to(root).parts
-        except ValueError:
-            pass
-    return not any(
-        part.startswith(".") or part in NOT_THE_PROJECT for part in parts
-    )
-
-
 def walk(root: Path, suffix: str = "") -> "list":
     """Every file under `root` that is part of the project.
 
@@ -168,12 +143,6 @@ def keep_in(where: Optional[Path]) -> None:
     else:
         os.environ.pop(WHERE, None)
 
-# Who derived a body of knowledge, carried in its name. A knowledge base this
-# machine built and one obtained from a publisher are different evidence about
-# the same subject, and a reader must be able to tell which answered.
-LOCAL = "local"
-PUBLISHED = "pub"
-
 
 def _slug(text: str) -> str:
     kept = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
@@ -193,41 +162,6 @@ def repository(start: Optional[Path | str] = None) -> Path:
     """
     where = Path(start).expanduser().resolve() if start else Path.cwd().resolve()
     return where if where.is_dir() else where.parent
-
-
-def repository_name(start: Optional[Path | str] = None) -> str:
-    """A short, stable name for a repository.
-
-    The directory name carries meaning to a person; the hash of the full path
-    keeps two checkouts of the same project apart. Both, because a name nobody
-    recognises is unusable and a name that collides is wrong.
-    """
-    root = repository(start)
-    fingerprint = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:8]
-    return f"{_slug(root.name)}-{fingerprint}"
-
-
-def corpus_id(
-    repo: Optional[Path | str] = None, origin: str = LOCAL, publisher: str = ""
-) -> str:
-    """The id of what is known about a repository.
-
-    **One repository, one body of knowledge.** Keying by task would give a
-    project a scatter of single-purpose records that never accumulate — what was
-    learned for one piece of work would be invisible to the next, which is the
-    opposite of the point. Two repositories must not share one either: what is
-    known about a compiler is not evidence about a payments service.
-    """
-    subject = repository_name(repo)
-    if origin == PUBLISHED:
-        return f"theory.{PUBLISHED}.{_slug(publisher) if publisher else 'unattributed'}.{subject}"
-    return f"theory.{LOCAL}.{subject}"
-
-
-def origin_of(identifier: str) -> str:
-    """Where a body of knowledge came from, read back from its id."""
-    parts = identifier.split(".")
-    return parts[1] if len(parts) > 2 and parts[0] == "theory" else LOCAL
 
 
 def kept_at(repo: Path | str, kind: str) -> Path:

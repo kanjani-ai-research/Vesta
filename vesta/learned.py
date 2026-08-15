@@ -192,20 +192,6 @@ class Learned(BaseModel):
         return f"{said}, {len(self.dropped)} dropped" if self.dropped else said
 
 
-
-
-class Noticed(BaseModel):
-    """Whether an exchange pointed at a findable defect."""
-
-    is_defect: bool = Field(
-        description="True only if this points at a property of code worth finding elsewhere"
-    )
-    pattern: Optional[Pattern] = Field(
-        default=None, description="The finder, when is_defect is true"
-    )
-    why_not: str = Field(default="", description="What this was instead")
-
-
 def _exchanges(paths: Sequence[Path]) -> List[Tuple[str, str, float]]:
     """Moments a user answered agent work, which is where defects get named.
 
@@ -252,32 +238,6 @@ def _exchanges(paths: Sequence[Path]) -> List[Tuple[str, str, float]]:
             if role == "user" and was == "assistant" and 30 < len(said) < 900:
                 found.append((did, said, when))
     return found
-
-
-def weigh(learned: Learned, transcripts: Sequence[Path]) -> Learned:
-    """Count how a project's patterns have fared when they were shown.
-
-    Reads the same exchanges the patterns came from, looking for what a user
-    said after a finding was surfaced. Crude by necessity — it cannot know
-    which finding a remark was about — so a pattern is only dropped on repeated
-    dismissal, and assent merely protects.
-    """
-    from .rules import _turns
-
-    said: List[str] = []
-    for path in transcripts:
-        said.extend(text for text, _ in _turns(path))
-
-    for pattern in learned.patterns:
-        name = pattern.name.lower()
-        for text in said:
-            if name not in text.lower():
-                continue
-            if DISMISSED.search(text):
-                pattern.dismissed += 1
-            elif ACCEPTED.search(text):
-                pattern.accepted += 1
-    return learned
 
 
 def everything(repo: Path | str) -> List[Pattern]:

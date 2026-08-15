@@ -30,14 +30,6 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from pydantic import BaseModel, Field
 
-# What counts as a test file. Deliberately narrow: a file matching this is
-# treated as evidence of what a change affected, and a loose pattern would
-# admit fixtures and helpers as though they were assertions.
-TEST_FILE = re.compile(r"(^|/)tests?/.*test_.*\.py$|(^|/)test_[^/]*\.py$")
-
-# Source that is not a test. Everything the change could be *to*.
-SOURCE_FILE = re.compile(r"\.py$")
-
 
 class Change(BaseModel):
     """One commit, as an experiment that already ran."""
@@ -165,25 +157,6 @@ class Result(BaseModel):
 # ── Reading history ──────────────────────────────────────────────────────
 
 
-def history(repo: Path | str, limit: int = 100) -> List[Change]:
-    """Every commit that changed both source and tests, newest first."""
-    found: List[Change] = []
-    for commit, subject in _commits(repo, limit):
-        files = _files_in(repo, commit)
-        changed = [f for f in files if SOURCE_FILE.search(f) and not TEST_FILE.search(f)]
-        tests = [f for f in files if TEST_FILE.search(f)]
-        found.append(
-            Change(
-                commit=commit,
-                subject=subject,
-                repo=Path(repo).name,
-                changed=sorted(changed),
-                touched_tests=sorted(tests),
-            )
-        )
-    return found
-
-
 def usable(changes: Sequence[Change]) -> List[Change]:
     return [c for c in changes if c.is_usable]
 
@@ -217,20 +190,6 @@ def _git(repo: Path | str, *args: str) -> str:
 
 
 # ── Baselines ────────────────────────────────────────────────────────────
-
-
-def everything(repo: Path | str) -> Set[str]:
-    """Run the whole suite. Complete recall, no precision.
-
-    What a developer does with no better information, and the number any
-    prediction has to beat on precision while matching on recall.
-    """
-    root = Path(repo)
-    return {
-        str(p.relative_to(root))
-        for p in root.rglob("*.py")
-        if TEST_FILE.search(str(p.relative_to(root))) and ".venv" not in p.parts
-    }
 
 
 def same_file(changed: Sequence[str]) -> Set[str]:
