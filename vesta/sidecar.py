@@ -418,14 +418,27 @@ def _uses(name: str, project: Optional[Path]) -> str:
         callers = graph.referenced_by(node.id)
         uses = graph.depends_on(node.id)
         lines.append(f"  referred to by {len(callers)}, refers to {len(uses)}")
-        for edge in callers[:12]:
-            other = graph.nodes.get(edge.source)
-            if other:
-                lines.append(f"    ← {other.qualified}  {other.path}:{other.line + 1}")
-        for edge in uses[:12]:
-            other = graph.nodes.get(edge.target)
-            if other:
-                lines.append(f"    → {other.qualified}  {other.path}:{other.line + 1}")
+
+        # One line per definition, not per edge.
+        #
+        # A caller that references something twice produced two identical
+        # lines, so twelve lines could describe six callers and a reader had no
+        # way to tell that from twelve. The counts above are edges, which is
+        # the right unit for "how much would a change here reach"; the list is
+        # places, which is the right unit for "where do I look".
+        for where, side in ((callers, "source"), (uses, "target")):
+            arrow = "←" if side == "source" else "→"
+            seen: Set[str] = set()
+            for edge in where:
+                other = graph.nodes.get(getattr(edge, side))
+                if other is None or other.id in seen:
+                    continue
+                seen.add(other.id)
+                lines.append(
+                    f"    {arrow} {other.qualified}  {other.path}:{other.line + 1}"
+                )
+                if len(seen) >= 12:
+                    break
     if len(wanted) > 8:
         lines.append(f"\n… and {len(wanted) - 8} more definition(s) with that name")
     return "\n".join(lines)

@@ -274,6 +274,7 @@ def main() -> int:
         _a_rule_in_doubt(prompt, project),
         _something_already_wrong(prompt, project),
         _never_been_read(prompt, project),
+        _the_graph_can_answer_this(prompt, project),
     ):
         if offer:
             parts.append(offer)
@@ -378,6 +379,153 @@ def _never_been_read(prompt: str, project: str) -> str:
         "inference you are already spending.\n\n"
         "Then answer what they actually asked."
     )
+
+
+# A prompt about code somebody has not named. These are the ones the graph
+# answers best and the ones injection misses entirely: naming a definition
+# requires knowing what it is called, and not knowing is the whole reason to
+# ask.
+ABOUT_THE_CODE = re.compile(
+    r"\b("
+    r"where (?:is|are|do|does|should)\b|"
+    r"which (?:file|module|part|function|class)\b|"
+    r"how (?:do|does|is|are)\b.{0,40}\b(?:work|handled|done|implemented)\b|"
+    r"refactor\b|rename\b|move\b|extract\b|"
+    r"add\b.{0,30}\bto the\b|"
+    r"change\b.{0,30}\bso that\b|"
+    r"what (?:breaks|happens|else)\b|"
+    r"anything else\b|everywhere\b|all the places\b"
+    r")",
+    re.I,
+)
+
+
+def _the_graph_can_answer_this(prompt: str, project: str) -> str:
+    """Tell the agent the graph is there, when the prompt is one it answers.
+
+    **Injection alone reaches too few prompts.** It fires only when a prompt
+    names a definition Vesta already holds — deliberately, because a wrong
+    guess costs the same as a right one. But naming a definition requires
+    knowing what it is called, and not knowing is the whole reason to ask. Of
+    three realistic prompts — "add retry logic to the store", "refactor the
+    graph loading", "where do we resolve references" — only the last named
+    anything, and the first two are exactly the work the graph would improve.
+
+    So where injection has nothing to say and the prompt is plainly about the
+    code, the agent is told the tools exist and what each is for. It costs a
+    few lines on a prompt where an agent was about to grep, and grepping is
+    what it saves.
+
+    Said once per session. An agent that has been told does not need telling
+    again, and a hook repeating itself is one the reader learns to skip.
+    """
+    if not ABOUT_THE_CODE.search(prompt):
+        return ""
+
+    try:
+        from .once import say_once
+        from .ready import readiness
+
+        if not readiness(project).can_answer:
+            return ""
+    except Exception as exc:  # noqa: BLE001 - never break a prompt
+        logger.info("could not tell whether the graph is ready: %s", exc)
+        return ""
+
+    return say_once(project, "the graph can answer this", _what_is_here(project))
+
+
+def _what_is_here(project: str) -> str:
+    """What this project can actually be asked, and why those answers differ.
+
+    **Three things, not one.** A graph of what refers to what; a vocabulary of
+    what the work is called; and the attachments binding one to the other. The
+    tools are the crossings between them, and describing only the graph
+    undersells every tool that needs the other two — `does` and `means` are
+    not graph queries at all, they are traversals from a word to the code and
+    back.
+
+    **The vocabulary is never omitted, even when it is empty.** A first
+    version dropped it — and `does` and `means` with it — wherever no ontology
+    had been derived yet, on the reasoning that promising a tool which returns
+    nothing teaches an agent to stop believing the rest. The effect was worse
+    than the problem: Vesta introduced itself as a call graph, the agent never
+    learned the crossing existed, nothing ever ran the domain agent, and the
+    ontology stayed empty forever. Hiding the half that is missing is what
+    guarantees it stays missing.
+
+    So all three are always described, and a missing vocabulary is stated as a
+    thing to derive rather than a thing that does not exist.
+    """
+    from .domain import recall as recall_ontology
+    from .traverse import recall as recall_map
+
+    ontology = recall_ontology(project)
+    mapped = recall_map(project)
+    terms = len(ontology.terms) if ontology else 0
+    bound = len(mapped.attachments) if mapped else 0
+
+    lines = [
+        "This project holds three things Vesta derived from it, and the tools "
+        "below are the crossings between them:",
+        "",
+        "  · a **graph** of what refers to what, resolved rather than matched "
+        "— four methods sharing a name stay four methods",
+    ]
+
+    if terms:
+        lines.append(
+            f"  · a **vocabulary** of {terms} term(s) naming what this code is "
+            "*for*, learned from the code itself"
+        )
+        lines.append(
+            f"  · **{bound} attachment(s)** binding those words to "
+            "definitions, so a question asked in one vocabulary is answered "
+            "in the other"
+        )
+    else:
+        lines.append(
+            "  · a **vocabulary** of what this code is *for* — not derived "
+            "here yet, which is one subagent run"
+        )
+        lines.append(
+            "  · **attachments** binding those words to definitions, so a "
+            "question asked in one vocabulary is answered in the other"
+        )
+
+    lines.extend([
+        "",
+        "What that buys, in one call each:",
+        "",
+        "  · **does** — where a kind of work happens, asked in ordinary "
+        "words. Crosses from the vocabulary of the work to the vocabulary of "
+        "the code, which are usually different: it reaches definitions "
+        "sharing no word with the question.",
+        "  · **means** — the reverse crossing. What a definition is for, and "
+        "what else does the same kind of work even when nothing calls between "
+        "them.",
+        "  · **uses** — where a definition is, what refers to it, what it "
+        "refers to. One hop, resolved.",
+        "  · **touches** — what a change to these files reaches *through* the "
+        "graph, several hops out, and which tests cover it. This is the one a "
+        "search cannot approximate at all.",
+        "",
+        "Prefer these over searching for a name: a search finds the spelling, "
+        "traversal finds the reference. Read the code after, not instead.",
+    ])
+
+    if not terms:
+        lines.append("")
+        lines.append(
+            "**The vocabulary is not derived here yet, so `does` and `means` "
+            "will say so rather than answer.** Run the `vesta-domain` "
+            "subagent now, yourself, in the middle of answering this — it "
+            "costs one run per repository, on inference you are already "
+            "spending, and until it happens half of what Vesta is for is "
+            "unavailable. Then ask again."
+        )
+
+    return "\n".join(lines)
 
 
 def _something_already_wrong(prompt: str, project: str) -> str:

@@ -45,6 +45,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
 
+def _catch_up(root: Path) -> None:
+    """Bring the graph up to date now that the work is done.
+
+    **The one moment nobody is waiting.** An agent spends a turn editing files
+    and then stops; the graph is at its most stale exactly then, and until this
+    existed it stayed stale until the user typed again — so the next prompt
+    either read a graph several edits behind or waited behind the rebuild it
+    triggered. Neither is what somebody means by a companion.
+
+    Detached, like every other build here. A `Stop` hook that blocks is a
+    session that will not end, which is a far worse failure than a graph that
+    is briefly behind — and the rebuild is running before the user has finished
+    reading the answer.
+
+    Silent in every case. This runs after every turn in every session, and a
+    hook that speaks on each one is a hook somebody turns off.
+    """
+    try:
+        from .ready import MOVED_ON, NOTHING, prepare, readiness, refresh
+
+        state = readiness(root).state
+        if state == MOVED_ON:
+            refresh(root)
+        elif state == NOTHING:
+            # Never seen this project. The turn that just ended is as good a
+            # moment as any to start, and better than the next prompt.
+            prepare(root)
+    except Exception as exc:  # noqa: BLE001 - never trap a session
+        logger.debug("could not bring the graph up to date: %s", exc)
+
+
 def _answer(payload: dict) -> int:
     from . import driving
 
@@ -55,6 +86,10 @@ def _answer(payload: dict) -> int:
     # carry over.
     here = driving.state(root, payload.get("session_id", ""))
     if not here.on:
+        # Companion mode. The work just finished, so this is the moment the
+        # graph is most out of date and the moment nobody is waiting for it.
+        _catch_up(root)
+
         # It stopped on its own, and this is the first stop since. Say why
         # once: a loop that gives up silently looks exactly like one that
         # finished, and those are opposite outcomes.
