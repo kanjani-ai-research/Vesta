@@ -519,3 +519,19 @@ def test_the_readme_describes_what_this_is_now():
         assert (HERE / "commands" / f"{name}.md").is_file(), (
             f"the README shows /vesta:{name}, which is not a command"
         )
+
+
+def test_the_version_is_semantic_and_has_a_changelog():
+    """A version with no record of what changed is a number.
+
+    `claude plugin tag` builds a `{name}--v{version}` tag from `plugin.json`
+    and refuses when the marketplace entry disagrees, so the version is the
+    thing users actually receive an update against.
+    """
+    import re
+
+    version = _manifest()["version"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), version
+
+    changelog = (HERE / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"## {version}" in changelog, f"{version} is not in the changelog"
