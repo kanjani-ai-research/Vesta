@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from vesta import confirm
+from vesta.confirm import Verdict
 from vesta.rules import Found, Rule
 
 
@@ -161,6 +162,19 @@ def test_answering_the_same_way_twice_is_not_a_change(tmp_path):
     confirm.record(tmp_path, "a rule", confirm.IS_A_RULE)
     confirm.record(tmp_path, "a rule", confirm.IS_A_RULE)
     assert confirm.recall(tmp_path).verdicts[0].was == ""
+
+
+def test_a_long_verdict_is_cut_at_a_word_not_mid_word():
+    """A bare slice cut "unless" down to "unl" with nothing marking that
+    anything was removed — a summary that reads as complete when it is not."""
+    long_text = "there should be one env file for the whole project unless the deploy target needs its own"
+    verdict = Verdict(text=long_text, verdict=confirm.IS_A_RULE)
+
+    found = verdict.describe()
+
+    assert found.endswith("…")
+    shown = found.split(": ", 1)[1][:-1].strip()
+    assert long_text.startswith(shown)
 
 
 def test_reopening_puts_a_candidate_back_in_question(tmp_path):

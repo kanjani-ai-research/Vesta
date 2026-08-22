@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "vesta",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Answers structural questions about a repository from a resolved graph of what refers to what, and surfaces what it already knows at the moment you are about to change something. Install it and work normally \u2014 there is nothing to run.",
   "author": {
     "name": "Causum"

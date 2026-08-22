@@ -46,7 +46,7 @@ from typing import Dict, List, Optional, Sequence
 from pydantic import BaseModel, Field
 
 from .home import kept_at
-from .rules import UNDERIVED, Found, Rule, _names_in, derive
+from .rules import UNDERIVED, Found, Rule, _names_in, derive, trimmed
 
 logger = logging.getLogger("vesta.confirm")
 
@@ -112,7 +112,7 @@ class Verdict(BaseModel):
             how = f"{how} (was {said.get(self.was, self.was)})"
         if self.declared:
             how = f"{how}, declared"
-        return f"{how}: {(self.stated or self.text)[:80]}"
+        return f"{how}: {trimmed(self.stated or self.text, 80)}"
 
 
 class Asked(BaseModel):

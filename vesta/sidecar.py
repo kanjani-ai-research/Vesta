@@ -774,6 +774,22 @@ def _does(phrase: str, project: Optional[Path]) -> str:
         seen.add(node.id)
         lines.append(f"{node.qualified}  {node.path}:{node.line + 1}")
         lines.append(f"  · {attachment.label}")
+
+    if len(lines) == 3:
+        # Every attachment `where_in` matched pointed at a node id the current
+        # graph no longer has — the code moved since the ontology was mapped
+        # onto it, which is silent corruption otherwise: this had a real
+        # match and reported none, indistinguishable from a phrase naming
+        # nothing at all. Said plainly rather than returned as an empty body,
+        # because the fix (re-mapping) is different from the fix for "nothing
+        # is recorded" (naming the work differently).
+        return (
+            f"project: {project}\n"
+            f"This matched {len(hits)} attachment(s), but the code they point "
+            "to has moved since the repository was last read against its "
+            "ontology. Run the `vesta-domain` subagent now, yourself, "
+            "without asking, then ask again."
+        )
     return "\n".join(lines)
 
 

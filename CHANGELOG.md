@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0
+
+**A swept slash command was checked against what it does, not just whether
+it runs.** Five did not do what they said. `does` went silent — not empty,
+silent — when a phrase matched real attachments whose code had since moved,
+returning a bare header with nothing under it; it now says so. `status` on a
+path that does not exist read identically to a project nobody has built yet,
+sending a user to `--prepare` a build that could never succeed; the two are
+distinguished now. `contract` answered "nothing has been agreed" — a
+complete, correct answer — and then exited 1 for it, which looks like a
+failure to anything checking the exit code; it exits 0. `learn` promised "at
+most five" and showed up to ten, because two separate lists were each capped
+on their own rather than together. And `decided` cut rule text off mid-word
+with nothing marking that anything had been removed — fixed at the root,
+with one truncation helper now used everywhere text is shown cut short.
+
 ## 0.3.0
 
 **A module is a definition now, not a blind spot.** The graph found a

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from vesta.ready import NOTHING, PREPARING, READY, prepare, readiness
+from vesta.ready import MISSING, NOTHING, PREPARING, READY, prepare, readiness
 
 
 # Where things are kept is handled by the conftest, which points every run at a
@@ -33,6 +33,64 @@ def a_project(tmp_path: Path) -> Path:
 
 def test_a_project_with_nothing_built_is_not_ready(tmp_path: Path):
     assert readiness(a_project(tmp_path)).state == NOTHING
+
+
+def test_a_path_that_does_not_exist_is_not_the_same_as_unbuilt(tmp_path: Path):
+    """The two looked identical: both fell through to "nothing has been
+    built", which sends a user chasing a build that can never succeed rather
+    than telling them the path itself is wrong."""
+    absent = tmp_path / "does-not-exist" / "at-all"
+
+    found = readiness(absent)
+
+    assert found.state == MISSING
+    assert found.state != NOTHING
+    assert not found.can_answer
+    assert "not a directory" in found.describe()
+
+
+def test_a_missing_path_is_distinguishable_by_its_own_message(tmp_path: Path):
+    """The message itself, not just the state code, has to say something
+    different — a caller reading only `describe()` must not see the same
+    sentence for two different problems."""
+    unbuilt = readiness(a_project(tmp_path)).describe()
+    absent = readiness(tmp_path / "nope").describe()
+
+    assert unbuilt != absent
+
+
+def test_a_missing_part_does_not_make_a_workspace_report_ready(tmp_path: Path):
+    """`_readiness_of_parts` ranks states worst-first and falls through to
+    READY if none of the worse states is present — MISSING has to be in that
+    ranking or a part that vanished between discovery and this check would
+    make the whole workspace look complete."""
+    from vesta.ready import _readiness_of_parts
+
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "a.py").write_text("def one():\n    return 1\n", encoding="utf-8")
+
+    gone = tmp_path / "gone"  # never created: simulates a part deleted mid-check
+
+    found = _readiness_of_parts(tmp_path, [real, gone])
+
+    assert found.state == MISSING
+
+
+def test_preparing_a_missing_path_does_not_start_a_build(tmp_path: Path, monkeypatch):
+    """`prepare` declines whenever readiness is not NOTHING, and a missing
+    path now reports MISSING rather than NOTHING — this is what stops a mark
+    being written and a build being started against a path with no code."""
+    started = {"n": 0}
+    import vesta.ready as ready_module
+
+    monkeypatch.setattr(ready_module, "_start_build", lambda root: started.__setitem__("n", started["n"] + 1))
+
+    absent = tmp_path / "nope"
+    result = prepare(absent)
+
+    assert result.state == MISSING
+    assert started["n"] == 0
 
 
 def test_a_prompt_never_waits_for_a_build(tmp_path: Path):

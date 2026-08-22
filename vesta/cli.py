@@ -150,6 +150,11 @@ def _status(args: argparse.Namespace) -> int:
         _say(f"  {harvest.describe()}")
         if graph.holes:
             _say(f"  {len(graph.holes)} file(s) the resolver could not read")
+    elif state.state == "missing":
+        # Nothing to prepare here regardless of --prepare: a path that is not
+        # a directory has no code to build a graph from, and starting a build
+        # against it would only produce a second, misleading failure.
+        pass
     elif state.state == "failed":
         # Say what to do about it. A user told only that something failed has
         # to guess whether it is theirs to fix.
@@ -214,18 +219,18 @@ def _rules(args: argparse.Namespace) -> int:
         _say("")
         _say(f"recorded in the last day ({len(lately)}):")
         for verdict in lately[:6]:
-            _say(f"  {verdict.describe()[:100]}")
+            _say(f"  {verdict.describe()}")
         _say("")
         _say("  Wrong about one? `vesta learn <handle> lapsed`")
 
     if not args.check:
         for rule in found.standing[: args.show]:
-            _say(f"  {rule.describe()[:110]}")
+            _say(f"  {rule.describe()}")
         if found.gaps:
             _say("")
             _say(f"{len(found.gaps)} rule(s) nothing can check yet:")
             for gap in found.gaps[:5]:
-                _say(f"  {gap.describe()[:110]}")
+                _say(f"  {gap.describe()}")
         return 0
 
     verdict = against(found, graph_for(where), where)
@@ -233,10 +238,10 @@ def _rules(args: argparse.Namespace) -> int:
     _say(verdict.describe())
     for finding in verdict.broken:
         _say("")
-        _say(f"✗ {finding.rule[:100]}")
-        _say(f"   you said: {finding.said[:90]}")
+        _say(f"✗ {trimmed(finding.rule, 100)}")
+        _say(f"   you said: {trimmed(finding.said, 90)}")
         for site in finding.sites[: args.show]:
-            _say(f"      {site.describe()[:96]}")
+            _say(f"      {trimmed(site.describe(), 96)}")
 
     # Why a rule could not be checked, which was computed and thrown away. A
     # user who is told "not checked" and not told why has been given a number
@@ -246,8 +251,8 @@ def _rules(args: argparse.Namespace) -> int:
         _say("")
         _say(f"{len(verdict.undecided)} rule(s) nothing could check:")
         for finding in verdict.undecided[: args.show]:
-            _say(f"  ? {finding.rule[:88]}")
-            _say(f"      {finding.undecided[:88]}")
+            _say(f"  ? {trimmed(finding.rule, 88)}")
+            _say(f"      {trimmed(finding.undecided, 88)}")
     return 0
 
 
@@ -395,7 +400,7 @@ def _learn(args: argparse.Namespace) -> int:
     session the `learn` tool asks directly. Same store, two doors.
     """
     from . import confirm
-    from .rules import from_sessions
+    from .rules import from_sessions, trimmed
 
     where = Path(args.root).expanduser().resolve()
 
@@ -406,10 +411,10 @@ def _learn(args: argparse.Namespace) -> int:
         text = confirm.find(where, args.which, _recovered(where))
         if args.verdict == "reopen":
             confirm.reopen(where, text)
-            _say(f"back in question: {text[:70]}")
+            _say(f"back in question: {trimmed(text, 70)}")
             return 0
         confirm.record(where, text, args.verdict, args.stated or "")
-        _say(f"{args.verdict}: {text[:70]}")
+        _say(f"{args.verdict}: {trimmed(text, 70)}")
         _say(confirm.recall(where).describe())
         return 0
 
@@ -430,18 +435,27 @@ def _learn(args: argparse.Namespace) -> int:
         return 0
 
     found = from_sessions(where)
-    waiting = confirm.worth_asking(found, where, limit=args.show)
     asked = confirm.recall(where)
     _say(asked.describe())
 
-    # What the user saw and did not settle. Reported before anything new,
-    # because a question already put to somebody is owed an answer before
-    # another one is asked.
+    # One combined budget, not one per list. `args.show` is "ask about at
+    # most this many" for the whole invocation — a cap applied separately to
+    # each of two lists let 4 previously-shown plus 5 freshly-found reach a
+    # user who was told "at most five".
+    #
+    # What the user saw and did not settle goes first and is never trimmed by
+    # this budget: a question already put to somebody is owed an answer
+    # before another one is asked, so it can only reduce how many *new*
+    # candidates fill the rest of the budget, never how many old ones are
+    # shown.
+    remaining = max(args.show - len(asked.waiting), 0)
+    waiting = confirm.worth_asking(found, where, limit=remaining)
+
     if asked.waiting:
         _say("")
         _say(f"{len(asked.waiting)} waiting on you:")
         for verdict in asked.waiting[: args.show]:
-            _say(f"  {confirm.handle(verdict.text)}  {verdict.text[:92]}")
+            _say(f"  {confirm.handle(verdict.text)}  {trimmed(verdict.text, 92)}")
         if len(asked.waiting) > args.show:
             _say(f"  … and {len(asked.waiting) - args.show} more")
         _say("")
@@ -468,7 +482,7 @@ def _learn(args: argparse.Namespace) -> int:
     _say(f"{len(waiting)} candidate(s) worth settling:")
     for rule in waiting:
         _say("")
-        _say(f"  {confirm.handle(rule.text)}  {rule.text[:140]}")
+        _say(f"  {confirm.handle(rule.text)}  {trimmed(rule.text, 140)}")
     _say("")
     _say("Say which each is, by its handle:")
     _say(f"  vesta learn {confirm.handle(waiting[0].text)} rule     binding here")
@@ -576,8 +590,12 @@ def _contract(args: argparse.Namespace) -> int:
 
     agreed = agreed_with.recall(where)
     if agreed is None:
+        # A status query, not a failed action: `vesta status` on an unbuilt
+        # project answers the same way and exits 0, and this should too — a
+        # script that checks `vesta contract` to decide whether to draft one
+        # should not see this legitimate, well-formed answer as an error.
         _say("Nothing has been agreed for this project yet.")
-        return 1
+        return 0
     _say(agreed.describe())
     for behaviour in agreed.behaviours:
         _say(f"  {behaviour.describe()}")

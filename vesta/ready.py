@@ -61,6 +61,7 @@ PREPARING = "preparing"  # a build is running now
 READY = "ready"          # a graph exists and matches the code
 MOVED_ON = "moved on"    # a graph exists, and the code has changed since
 FAILED = "failed"        # a build was tried and could not finish
+MISSING = "missing"      # the path itself is not a directory
 
 # How long a failure is remembered before another attempt is made. Long enough
 # that a broken environment is not retried on every prompt; short enough that
@@ -116,6 +117,8 @@ class Readiness(BaseModel):
         if self.state == PREPARING:
             waited = time.time() - self.since
             return f"preparing — started {waited:.0f}s ago, nothing to offer yet"
+        if self.state == MISSING:
+            return f"{self.project} is not a directory — nothing to build here"
         return "not prepared — nothing has been built for this project"
 
 
@@ -153,8 +156,13 @@ def _readiness_of_parts(root: Path, parts: list) -> Readiness:
         why = why or found.why
 
     # Worst first: nothing to answer from beats a partial answer that looks
-    # whole, and a failure somebody could fix beats either.
-    for state in (FAILED, NOTHING, PREPARING, MOVED_ON):
+    # whole, and a failure somebody could fix beats either. MISSING should
+    # not arise here — `parts` are directories `parts_of` found by walking
+    # the disk, so a part is not absent the moment this asks about it — but a
+    # part deleted between discovery and this check must not fall through to
+    # the READY default, which would claim a completeness the workspace does
+    # not have.
+    for state in (FAILED, MISSING, NOTHING, PREPARING, MOVED_ON):
         if state in states:
             return Readiness(
                 state=state,
@@ -169,6 +177,15 @@ def _readiness_of_parts(root: Path, parts: list) -> Readiness:
 def readiness(project: Path | str) -> Readiness:
     """What Vesta can do for this project right now, without doing any of it."""
     root = Path(project).expanduser().resolve()
+
+    # A path that is not a directory at all is a different fact than one
+    # that simply has not been built yet, and the two looked identical: both
+    # fell through every cache and mark lookup below to the same "nothing has
+    # been built" answer, which sends a user chasing a build that can never
+    # succeed rather than telling them the path itself is the problem.
+    if not root.is_dir():
+        return Readiness(state=MISSING, project=str(root))
+
     from .held import _where
 
     # A directory of projects has no graph of its own — it is composed from the

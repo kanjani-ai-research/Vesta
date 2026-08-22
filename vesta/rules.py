@@ -45,6 +45,32 @@ logger = logging.getLogger("vesta.rules")
 # Where derived rules are kept, per repository.
 RULES = home() / "rules"
 
+
+def trimmed(text: str, limit: int) -> str:
+    """A display string cut to a length, marked when it was cut.
+
+    A bare `text[:limit]` severs mid-word and reads as complete — "deps
+    should" looked like the whole rule until the file it came from was read
+    directly, and it was actually "deps should — needs no known check", cut
+    partway through a sentence with nothing to say so. Cutting back to the
+    last space and appending an ellipsis is the difference between a summary
+    and a corruption of the text.
+    """
+    if len(text) <= limit:
+        return text
+    marker = "…"
+    room = limit - len(marker)
+    if room <= 0:
+        return marker
+    cut = text[:room]
+    boundary = cut.rfind(" ")
+    # Only back off to the last space when it does not throw away most of the
+    # budget — a single implausibly long word should still be cut at the
+    # limit rather than collapse to just the marker.
+    if boundary > room * 0.4:
+        cut = cut[:boundary]
+    return cut.rstrip() + marker
+
 # How a user states a constraint rather than asks for something. Deliberately
 # generous: a missed correction is a rule nobody gets, and a false one is
 # filtered by whether anything observable follows from it.
@@ -189,7 +215,7 @@ class Said(BaseModel):
     names: List[str] = Field(default_factory=list)
 
     def describe(self) -> str:
-        return f"{self.text[:120]}"
+        return trimmed(self.text, 120)
 
 
 class Rule(BaseModel):
@@ -250,7 +276,7 @@ class Rule(BaseModel):
     def describe(self) -> str:
         mark = "standing" if self.is_standing else "candidate"
         where = self.check if self.is_derivable else "no check yet"
-        return f"[{mark}, {where}] {self.text[:100]}"
+        return f"[{mark}, {where}] {trimmed(self.text, 100)}"
 
 
 class Gap(BaseModel):
@@ -267,7 +293,7 @@ class Gap(BaseModel):
     names: List[str] = Field(default_factory=list)
 
     def describe(self) -> str:
-        return f"{self.text[:90]} — needs {self.missing}"
+        return f"{trimmed(self.text, 90)} — needs {self.missing}"
 
 
 class Found(BaseModel):
