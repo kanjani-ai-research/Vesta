@@ -129,6 +129,92 @@ def test_a_line_resolves_to_the_definition_containing_it(graph: Graph, tree: Pat
     assert found.name == "middle"
 
 
+IMPORT_TREE = {
+    "core.py": (
+        "def base(x):\n"
+        "    return x + 1\n"
+    ),
+    "bare.py": (
+        "import core\n"
+        "\n"
+        "\n"
+        "def top(x):\n"
+        "    return core.base(x)\n"
+    ),
+    "symbol.py": (
+        "from core import base\n"
+        "\n"
+        "\n"
+        "def top(x):\n"
+        "    return base(x)\n"
+    ),
+}
+
+
+@pytest.fixture(scope="module")
+def import_tree(tmp_path_factory) -> Path:
+    root = tmp_path_factory.mktemp("imports")
+    for name, text in IMPORT_TREE.items():
+        (root / name).write_text(text, encoding="utf-8")
+    return root
+
+
+@pytest.fixture(scope="module")
+def import_graph(import_tree: Path) -> Graph:
+    return build(import_tree)
+
+
+@needs_server
+def test_every_file_has_a_module_node(import_graph: Graph):
+    modules = {n.name for n in import_graph.nodes.values() if n.is_module}
+
+    assert modules == {"core", "bare", "symbol"}
+
+
+@needs_server
+def test_a_bare_import_reaches_the_imported_module(import_graph: Graph):
+    """A bare `import foo` binds a name no `documentSymbol` ever reports and no
+    definition is *of* — the exact case that used to vanish rather than
+    becoming an edge."""
+    core = next(n for n in import_graph.nodes.values() if n.is_module and n.name == "core")
+    bare = next(n for n in import_graph.nodes.values() if n.is_module and n.name == "bare")
+
+    sources = {e.source for e in import_graph.referenced_by(core.id)}
+    assert bare.id in sources
+
+
+@needs_server
+def test_a_symbol_import_reaches_the_symbol_not_the_module(import_graph: Graph):
+    """`from core import base` binds `base`, not `core` — the edge lands on
+    the function, and the module is not credited with a reference it was
+    never asked about."""
+    core = next(n for n in import_graph.nodes.values() if n.is_module and n.name == "core")
+    base = node_named(import_graph, "base")
+    symbol = next(n for n in import_graph.nodes.values() if n.is_module and n.name == "symbol")
+
+    sources_of_base = {e.source for e in import_graph.referenced_by(base.id)}
+    sources_of_core = {e.source for e in import_graph.referenced_by(core.id)}
+
+    assert symbol.id in sources_of_base
+    assert symbol.id not in sources_of_core
+
+
+@needs_server
+def test_module_and_symbol_imports_are_distinguishable(import_graph: Graph):
+    """The bug this fixes, stated directly: given only the edges out of
+    `bare.py` and `symbol.py`, a caller can tell which one imported the whole
+    module and which one imported a name out of it."""
+    bare = next(n for n in import_graph.nodes.values() if n.is_module and n.name == "bare")
+    symbol = next(n for n in import_graph.nodes.values() if n.is_module and n.name == "symbol")
+
+    bare_targets = [import_graph.nodes[e.target] for e in import_graph.depends_on(bare.id)]
+    symbol_targets = [import_graph.nodes[e.target] for e in import_graph.depends_on(symbol.id)]
+
+    assert any(t.is_module and t.name == "core" for t in bare_targets)
+    assert not any(t.is_module for t in symbol_targets)
+    assert any(t.name == "base" and not t.is_module for t in symbol_targets)
+
+
 def test_a_file_with_no_server_becomes_a_hole(tmp_path: Path):
     (tmp_path / "thing.zzz").write_text("nothing resolves this", encoding="utf-8")
     built = build(tmp_path)

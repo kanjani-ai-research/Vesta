@@ -353,6 +353,8 @@ def unreachable_definitions(graph: Graph, root: Path, blind: Blindspot) -> List[
     at_module_level = _used_in_module_data(root)
     by_file: Dict[str, List[Site]] = {}
     for node in graph.nodes.values():
+        if node.is_module:
+            continue  # stands for the file, not for something written in it
         if graph.referenced_by(node.id):
             continue
         if is_test(node) or "test" in node.path:

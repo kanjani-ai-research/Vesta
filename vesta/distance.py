@@ -246,7 +246,10 @@ def measure(repo: Path | str, at: Optional[float] = None) -> Reading:
             # before and after an edit, and a remembered graph makes the edit
             # invisible. A measurement that cannot see change measures nothing.
             graph = graph_for(root, rebuild=True)
-            reading.definitions = len(graph.nodes)
+            # Not every node: one per file is the file's own module node,
+            # standing for it rather than for something written in it, and
+            # every ratio below this is a ratio per thing somebody wrote.
+            reading.definitions = sum(1 for n in graph.nodes.values() if not n.is_module)
             reading.unresolved = len(graph.holes)
         except Exception as exc:  # noqa: BLE001 - a hole is not a zero
             logger.info("no graph for %s: %s", root, exc)

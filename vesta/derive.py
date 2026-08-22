@@ -106,6 +106,8 @@ def _node_at(graph: Graph, where: str, line: int) -> Optional[Node]:
     """
     wanted = where.lstrip("./")
     for node in graph.nodes.values():
+        if node.is_module:
+            continue  # an agent citing a line never means the file itself
         if node.path != wanted and not node.path.endswith("/" + wanted):
             continue
         if abs((node.line + 1) - line) <= 2:
@@ -202,7 +204,7 @@ def definitions_worth_reading(repo: Path | str, limit: int = 80) -> List[str]:
     wanted = [
         node
         for node in graph.nodes.values()
-        if not node.name.startswith("_") and "test" not in node.path
+        if not node.is_module and not node.name.startswith("_") and "test" not in node.path
     ]
     wanted.sort(key=lambda n: -len(graph.referenced_by(n.id)))
     return [

@@ -186,6 +186,121 @@ class Symbol(BaseModel):
         return f"{self.container + '.' if self.container else ''}{self.name}"
 
 
+# The file itself, as a definition a module-level import can point at. LSP's
+# own SymbolKind — not invented — because a server that ever does report a
+# module (some do, for other requests) means the same thing by it.
+MODULE = 2
+
+
+class Import(BaseModel):
+    """Where a name is bound by an import, before it is resolved.
+
+    Only a position: what the name resolves *to*, and whether that is a
+    module or a symbol within one, is for `definition` to say — the same way
+    every other edge in this graph is decided. Finding this position is the
+    one thing no LSP request will do: `documentSymbol` never reports an
+    import, and every reference-shaped request needs a position already in
+    hand. So it is read from the syntax, and only far enough to say where a
+    name sits; resolving it, and classifying what it resolves to, is left to
+    the server and to the definitions it already knows about.
+    """
+
+    bound: str = Field(description="The name in scope after the import, e.g. `baz` in `import foo as baz`")
+    at: Location = Field(description="Where the *original* name is written — what a server can resolve")
+
+
+def imports_in(path: Path) -> List[Import]:
+    """Every name an import statement binds in this file, with its position.
+
+    Language-specific by necessity — see `Import` — and deliberately the only
+    place in this module that reads syntax rather than asks a server. Absent
+    for a language with no entry here; a caller sees that as it sees a missing
+    server, as a hole rather than a silent zero.
+    """
+    finder = _IMPORT_FINDERS.get(path.suffix)
+    if finder is None:
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    return finder(path, text)
+
+
+def _python_imports(path: Path, text: str) -> List[Import]:
+    """`import foo`, `import foo.bar`, `from foo import bar`, `from . import x`.
+
+    One position per bound name — the name as it is *written*, not as it is
+    used, because that is the position a server can resolve. `import foo.bar`
+    points at `foo`, not `foo.bar`: `foo.bar.thing()` looks it up through the
+    module `foo`, and asking the server about `bar` in the import line finds
+    nothing there, since `bar` alone is never the name a lookup starts from.
+
+    A bare `from . import sibling` has no module name to point at, but
+    `sibling` itself is one — a server resolves it to the sibling module
+    directly, the same request that resolves `from .sibling import helper`
+    down to `helper`. So every alias gets a position, module-only imports
+    included; nothing here decides which of them turn out to name a module.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return []
+
+    lines = text.splitlines()
+    found: List[Import] = []
+
+    def _column(line: int, name: str, after: int = 0) -> int:
+        if 0 <= line < len(lines):
+            at = lines[line].find(name, after)
+            if at >= 0:
+                return at
+        return after
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                line = node.lineno - 1
+                found.append(
+                    Import(
+                        bound=alias.asname or top,
+                        at=Location(path=str(path), line=line, character=_column(line, top)),
+                    )
+                )
+        elif isinstance(node, ast.ImportFrom):
+            line = node.lineno - 1
+            after = _column(line, node.module) + len(node.module) if node.module else 0
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                # `from foo import bar` binds `bar` at its own position —
+                # `foo` earlier on the same line is a different name and
+                # would resolve to the module, not the symbol pulled from it.
+                name_col = _column(line, alias.name, after=after)
+                found.append(
+                    Import(
+                        bound=alias.asname or alias.name,
+                        at=Location(path=str(path), line=line, character=name_col),
+                    )
+                )
+    return found
+
+
+# One row per language with a finder. Python only, for now — every other
+# supported language still resolves its own definitions and references in
+# full, but an `import`/`use`/`#include`/`require` in one of them produces no
+# edge yet, silently: there is no scanner to find where it sits. Not reported
+# as a `Coverage` hole on purpose, so as not to bury the more serious "no
+# server for this language" gap under one entry per file for every language
+# still missing a row here. Adding one is the same shape as `_python_imports`.
+_IMPORT_FINDERS = {
+    ".py": _python_imports,
+}
+
+
 class Coverage(BaseModel):
     """Which languages were resolved and which were not.
 

@@ -175,6 +175,8 @@ def scan(
     by_name: Dict[str, List[str]] = {}
     if graph is not None:
         for node in graph.nodes.values():
+            if node.is_module:
+                continue  # a file, not something a dynamic lookup names
             by_name.setdefault(node.name, []).append(
                 f"{node.qualified} ({node.path}:{node.line + 1})"
             )

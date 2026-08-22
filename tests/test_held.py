@@ -10,7 +10,14 @@ from pathlib import Path
 
 import pytest
 
+from vesta.graph import Graph
 from vesta.held import forget, graph_for
+
+
+def _defined_in(graph: Graph) -> int:
+    """Definitions, not files. Each file also holds a module node standing
+    for the file itself, which these tests are not asking about."""
+    return sum(1 for n in graph.nodes.values() if not n.is_module)
 
 
 @pytest.fixture
@@ -219,11 +226,11 @@ def test_a_graph_is_never_served_stale(tmp_path, monkeypatch):
     root = tmp_path / "live"
     root.mkdir()
     (root / "a.py").write_text("def one():\n    return 1\n", encoding="utf-8")
-    assert len(graph_for(root).nodes) == 1
+    assert _defined_in(graph_for(root)) == 1
 
     (root / "b.py").write_text("def two():\n    return 2\n", encoding="utf-8")
     # Even with the old trust window, the answer must be current.
-    assert len(graph_for(root, trust_for=300).nodes) == 2
+    assert _defined_in(graph_for(root, trust_for=300)) == 2
 
 
 def test_an_edit_of_the_same_length_moves_the_fingerprint(tmp_path):
@@ -263,8 +270,8 @@ def test_a_fingerprint_is_not_reused_across_an_edit(tmp_path, monkeypatch):
     root = tmp_path / "rhythm"
     root.mkdir()
     (root / "a.py").write_text("def one():\n    return 1\n", encoding="utf-8")
-    assert len(graph_for(root).nodes) == 1
+    assert _defined_in(graph_for(root)) == 1
 
     (root / "b.py").write_text("def two():\n    return 2\n", encoding="utf-8")
     time.sleep(_SHAPE_TTL + 0.05)
-    assert len(graph_for(root, trust_for=300).nodes) == 2
+    assert _defined_in(graph_for(root, trust_for=300)) == 2

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+**A module is a definition now, not a blind spot.** The graph found a
+definition's references by asking a language server about the definition —
+which finds every `from x import y`, because `y` is a real definition with a
+real position, but leaves a bare `import x` with nowhere to land: no request
+in the protocol ever reports an import statement, so there was no position to
+resolve and the reference simply vanished. Every file now gets its own module
+node, and its imports are resolved the same way every other edge in the graph
+is — through the server, not by matching names — so `import x` and `from x
+import y` both produce an edge, and produce a *different* one: the first
+reaches the module, the second reaches the symbol inside it. Python only, for
+now; the other six languages still resolve everything else in full.
+
 ## 0.2.0
 
 **Vesta is used rather than offered.** A `PreToolUse` hook refuses a search the

@@ -36,6 +36,7 @@ from typing import Dict, Optional
 from pydantic import BaseModel
 
 from .home import home
+from .resolve import MODULE
 
 logger = logging.getLogger("vesta.ready")
 
@@ -188,7 +189,15 @@ def readiness(project: Path | str) -> Readiness:
             found = Readiness(
                 state=READY,
                 project=str(root),
-                definitions=len(payload.get("graph", {}).get("nodes", {})),
+                # Not every node: one per file is the file's own module node,
+                # standing for it rather than for something written in it, and
+                # a project reporting "N definitions" does not mean the count
+                # of its files.
+                definitions=sum(
+                    1
+                    for n in payload.get("graph", {}).get("nodes", {}).values()
+                    if n.get("kind") != MODULE
+                ),
             )
             # **Ready means current, not merely present.**
             #

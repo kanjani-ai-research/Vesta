@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from vesta.resolve import (
+    MODULE,
     Coverage,
     Location,
     Session,
@@ -20,6 +21,7 @@ from vesta.resolve import (
     available,
     coverage,
     for_suffix,
+    imports_in,
 )
 
 CLANGD = for_suffix(".c")
@@ -157,3 +159,87 @@ def test_an_absent_server_does_not_start(tmp_path):
                     languages=["x"], suffixes=[".x"])
 
     assert not Session(absent, tmp_path).start()
+
+
+# ── Import positions ─────────────────────────────────────────────────────
+#
+# No server involved: finding *where* an import binds a name is syntax, not
+# resolution — documentSymbol never reports an import at all, so there is no
+# position for a server to be asked about until this supplies one. What a
+# position resolves to is a different, already-tested question.
+
+
+def test_a_bare_import_is_found_at_the_module_name(tmp_path):
+    (tmp_path / "x.py").write_text("import core\n", encoding="utf-8")
+    found = imports_in(tmp_path / "x.py")
+
+    assert [(i.bound, i.at.line, i.at.character) for i in found] == [("core", 0, 7)]
+
+
+def test_a_dotted_import_points_at_its_top_level_name(tmp_path):
+    """`import foo.bar` binds `foo`, not `foo.bar` — a lookup at `bar` alone
+    finds nothing, since `bar` is never a name in scope by itself."""
+    (tmp_path / "x.py").write_text("import os.path\n", encoding="utf-8")
+    found = imports_in(tmp_path / "x.py")
+
+    assert [(i.bound, i.at.character) for i in found] == [("os", 7)]
+
+
+def test_a_symbol_import_is_found_at_the_symbol_name(tmp_path):
+    (tmp_path / "x.py").write_text("from core import base\n", encoding="utf-8")
+    found = imports_in(tmp_path / "x.py")
+
+    assert [(i.bound, i.at.line, i.at.character) for i in found] == [("base", 0, 17)]
+
+
+def test_an_aliased_import_is_bound_under_the_alias_but_points_at_the_original(tmp_path):
+    (tmp_path / "x.py").write_text("from foo import bar as baz\n", encoding="utf-8")
+    found = imports_in(tmp_path / "x.py")
+
+    assert len(found) == 1
+    assert found[0].bound == "baz"
+    line = "from foo import bar as baz"
+    assert line[found[0].at.character : found[0].at.character + 3] == "bar"
+
+
+def test_a_bare_relative_import_still_has_a_position(tmp_path):
+    """`from . import sibling` has no module name to point at, but `sibling`
+    is itself a name a server can resolve — dropping it because the import
+    has no module would lose it entirely rather than resolving it."""
+    (tmp_path / "x.py").write_text("from . import sibling\n", encoding="utf-8")
+    found = imports_in(tmp_path / "x.py")
+
+    assert [i.bound for i in found] == ["sibling"]
+
+
+def test_a_star_import_binds_no_name_a_position_can_be_found_for(tmp_path):
+    (tmp_path / "x.py").write_text("from os import *\n", encoding="utf-8")
+
+    assert imports_in(tmp_path / "x.py") == []
+
+
+def test_several_imports_on_one_line_each_get_their_own_position(tmp_path):
+    (tmp_path / "x.py").write_text("import a, b\n", encoding="utf-8")
+    found = imports_in(tmp_path / "x.py")
+
+    assert [(i.bound, i.at.character) for i in found] == [("a", 7), ("b", 10)]
+
+
+def test_unparseable_syntax_reports_no_imports_rather_than_raising(tmp_path):
+    (tmp_path / "x.py").write_text("def broken(:\n", encoding="utf-8")
+
+    assert imports_in(tmp_path / "x.py") == []
+
+
+def test_a_language_with_no_import_finder_reports_none(tmp_path):
+    """Silence here means the same thing it means for a missing server: a gap
+    to be seen, not a claim that the language has no imports."""
+    (tmp_path / "x.rs").write_text("use core::fmt;\n", encoding="utf-8")
+
+    assert imports_in(tmp_path / "x.rs") == []
+
+
+def test_module_is_lsps_own_kind_not_invented():
+    """2 is `SymbolKind.Module` in the protocol itself, chosen so a server that
+    ever does report a module means the same thing by it as this does."""
+    assert MODULE == 2

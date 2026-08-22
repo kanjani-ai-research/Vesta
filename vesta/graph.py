@@ -33,6 +33,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from pydantic import BaseModel, Field
 
 from .resolve import (
+    MODULE,
     Coverage,
     Location,
     Server,
@@ -40,6 +41,7 @@ from .resolve import (
     Symbol,
     coverage,
     for_suffix,
+    imports_in,
 )
 
 logger = logging.getLogger("vesta.graph")
@@ -70,6 +72,17 @@ class Node(BaseModel):
     @property
     def qualified(self) -> str:
         return f"{self.container}.{self.name}" if self.container else self.name
+
+    @property
+    def is_module(self) -> bool:
+        """Whether this stands for a file itself rather than something in it.
+
+        A caller counting or matching *definitions* — a function was named
+        for something, a rule fired on a class — almost never means this one
+        too, since it is not a thing anybody wrote inside the file. It exists
+        so a module-level import has somewhere to point.
+        """
+        return self.kind == MODULE
 
     def describe(self) -> str:
         return f"{self.qualified} ({self.path}:{self.line + 1})"
@@ -237,10 +250,31 @@ def _resolve_with(
         session.open_tree()
 
         # First pass: every definition, so a reference has something to land
-        # on. A reference resolved before its target is known would be dropped.
-        at_line: Dict[Tuple[str, int], str] = {}
+        # on. A reference resolved before its target is known would be
+        # dropped. Every file gets its own module node too, at line 0, so a
+        # reference at module level — an import, a module-level constant —
+        # has somewhere to land besides nowhere; without it, `_containing`
+        # found no enclosing definition and the reference was simply dropped.
+        #
+        # Keyed by column as well as line, not just line: a server resolving
+        # `import core` points at `core.py:0:0`, and where the first
+        # definition in that file also starts on line 0 — the common case —
+        # `(path, line)` alone cannot tell "the module" from "the first
+        # definition in it". The column can: a definition's name never starts
+        # at the very first character of the line a server reports it on
+        # (there is always a keyword, an indent, something before it), so
+        # `:0:0` is the module and nothing else.
+        at_position: Dict[Tuple[str, int, int], str] = {}
+        module_node: Dict[str, str] = {}
         for path in paths:
             relative = str(path.relative_to(root))
+            whole = _node_id(relative, 0, relative)
+            graph.nodes[whole] = Node(
+                id=whole, name=Path(relative).stem, path=relative, line=0, kind=MODULE,
+            )
+            module_node[relative] = whole
+            at_position[(relative, 0, 0)] = whole
+
             for symbol in session.symbols(path):
                 if not symbol.is_definition:
                     continue
@@ -253,15 +287,19 @@ def _resolve_with(
                     kind=symbol.kind,
                     container=symbol.container,
                 )
-                at_line[(relative, symbol.at.line)] = identity
+                at_position.setdefault(
+                    (relative, symbol.at.line, symbol.at.character), identity
+                )
 
         # Second pass: who refers to each definition. The reference is
         # attributed to the definition that *contains* it, not to the file, so
-        # a change to one method does not appear to affect its neighbours.
+        # a change to one method does not appear to affect its neighbours —
+        # and now falls back to the file's module node rather than nowhere,
+        # for a reference that sits at module level.
         done = 0
         for path in paths:
             relative = str(path.relative_to(root))
-            for node in [n for n in graph.nodes.values() if n.path == relative]:
+            for node in [n for n in graph.nodes.values() if n.path == relative and not n.is_module]:
                 references = session.references(path, node.line, _column_of(path, node))
                 for location in references:
                     source = _containing(graph, root, location)
@@ -277,6 +315,40 @@ def _resolve_with(
                 done += 1
                 if on_progress and done % 50 == 0:
                     on_progress(done, len(graph.nodes))
+
+        # Third pass: every import, resolved the same way everything else in
+        # this graph is — through the server, not by matching names. This is
+        # the one kind of reference `documentSymbol` never reports, so there
+        # is nothing in the first two passes to have found it: a bare `import
+        # foo` binds a name that no definition anywhere is *of*, and asking
+        # `references` on `foo` would first need a position for `foo`, which
+        # is exactly what neither pass has. `imports_in` supplies that
+        # position from syntax; what it resolves to is decided here, by
+        # asking the server and looking at what came back — a location on
+        # some file's own line 0 is that file's module node, and a location
+        # matching a definition already in this graph is that definition,
+        # which is the difference between a module import and a symbol one.
+        for path in paths:
+            relative = str(path.relative_to(root))
+            for binding in imports_in(path):
+                source = _containing(
+                    graph, root, Location(path=str(path), line=binding.at.line)
+                )
+                if source is None:
+                    continue
+                for target in session.definition(path, binding.at.line, binding.at.character):
+                    target_relative = _relative(root, target.path)
+                    if target_relative not in module_node:
+                        continue  # outside this tree: stdlib, a dependency — not this project
+                    resolved = at_position.get(
+                        (target_relative, target.line, target.character),
+                        module_node[target_relative],
+                    )
+                    if resolved == source:
+                        continue
+                    graph.edges.append(
+                        Edge(source=source, target=resolved, at=f"{relative}:{binding.at.line}")
+                    )
     finally:
         session.stop()
 
@@ -301,11 +373,14 @@ def _column_of(path: Path, node: Node) -> int:
 
 
 def _containing(graph: Graph, root: Path, location: Location) -> Optional[str]:
-    """The definition a reference sits inside.
+    """The definition a reference sits inside — the file's own module node,
+    if nothing narrower does.
 
-    A reference at module level belongs to no definition and is dropped: it is
-    real, and propagating from it would attribute every import in a file to
-    every definition in that file.
+    A reference at module level belongs to no function or class, but it does
+    belong to the file: propagating from it should reach whoever imports that
+    file, not attribute the reference to every definition the file happens to
+    contain. Falling back to the module node is what tells the two apart —
+    the earlier alternative, dropping the reference outright, could not.
     """
     relative = _relative(root, location.path)
     node = graph.at(relative, location.line)
