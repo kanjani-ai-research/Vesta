@@ -55,6 +55,12 @@ def _graph(args: argparse.Namespace) -> int:
 
 
 def _touches(args: argparse.Namespace) -> int:
+    if not args.paths:
+        # A slash command with nothing typed after it reaches here with an
+        # empty list rather than argparse's own usage/error block — a plain
+        # sentence, not what looks like a broken tool.
+        _say("Which file? `vesta touches <file> [file...]`")
+        return 0
     graph = build(args.root)
     found = from_files(graph, args.paths, hops=args.hops)
 
@@ -374,6 +380,12 @@ def _asked(args: argparse.Namespace) -> int:
     one they will believe.
     """
     from . import sidecar
+
+    if args.command == "bears" and not args.paths:
+        # A slash command with nothing typed after it reaches here with an
+        # empty list rather than argparse's own usage/error block.
+        _say("Which files? `vesta bears <file> [file...]`")
+        return 0
 
     where = Path(args.root).expanduser().resolve()
     answering = {
@@ -815,7 +827,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     graph.set_defaults(run=_graph)
 
     touches = sub.add_parser("touches", help="what a change to these files affects")
-    touches.add_argument("paths", nargs="+")
+    touches.add_argument("paths", nargs="*")
     touches.add_argument("--root", default=".")
     touches.add_argument("--hops", type=int, default=3)
     touches.set_defaults(run=_touches)
@@ -914,7 +926,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bears = sub.add_parser(
         "bears", help="whether a rule you set is in doubt for these files"
     )
-    bears.add_argument("paths", nargs="+")
+    bears.add_argument("paths", nargs="*")
     bears.add_argument("--root", default=".")
     bears.set_defaults(run=_asked)
 

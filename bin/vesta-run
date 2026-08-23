@@ -5,17 +5,35 @@
 # What it must never produce is a Python traceback or a shell error: the user
 # asked what their repository does and got a stack, which reads as a broken
 # tool rather than a missing install.
+#
+# **Three names are not `vesta.cli` subcommands.** `pyproject.toml` declares
+# `vesta-domain`, `vesta-rules` and `vesta-defects` as their own console
+# scripts, each its own module's `main()` — the seam the domain/rules/defects
+# subagents write down what they decided through. Those scripts exist on PATH
+# after a real `pip install`, but a plugin install never puts anything on
+# PATH, and an agent following its own instructions (`$V vesta-domain
+# --repo ... --write`) would otherwise reach `vesta.cli`, which has no
+# subcommand by that name and fails with "invalid choice". Recognising the
+# name here and routing it to its real module is what the agents' own
+# examples assume already works.
 set -u
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
 
-if command -v vesta >/dev/null 2>&1; then
+module="vesta.cli"
+case "${1:-}" in
+    vesta-domain) module="vesta.derive"; shift ;;
+    vesta-rules) module="vesta.rules"; shift ;;
+    vesta-defects) module="vesta.learned"; shift ;;
+esac
+
+if [ "$module" = "vesta.cli" ] && command -v vesta >/dev/null 2>&1; then
     exec vesta "$@"
 fi
 
 python=$("$here/vesta-python" 2>/dev/null) || python=""
 if [ -n "$python" ]; then
-    exec "$python" -m vesta.cli "$@"
+    exec "$python" -m "$module" "$@"
 fi
 
 # Nothing reached, and building one did not work either. The likeliest reason

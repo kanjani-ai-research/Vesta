@@ -11,6 +11,6 @@ transcript, and only they know which is which.
 If the `learn` MCP tool is available, call it now — it asks them directly,
 one candidate at a time, and records each answer. Otherwise show the candidates
 above and ask which are standing rules, then record each answer with
-`${CLAUDE_PLUGIN_ROOT}/bin/vesta-run learn --text '<candidate>' --verdict rule|note|lapsed`.
+`${CLAUDE_PLUGIN_ROOT}/bin/vesta-run learn --text '<candidate>' rule|note|lapsed`.
 
 Ask about at most five. Do not guess a verdict on their behalf.
