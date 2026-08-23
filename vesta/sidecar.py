@@ -1003,18 +1003,29 @@ def _bears_on(paths: List[str], project: Optional[Path]) -> str:
         if not found.standing:
             return ""
 
+        graph = graph_for(project, trust_for=300)
+
+        # A rule whose own words were never resolved against this graph —
+        # word-overlap attachment, not another model call — so `_covers` can
+        # also catch a rule that names no file but genuinely concerns a
+        # definition in one. Most rules already carry `bears_on` from a prior
+        # `vesta-rules` pass; this only fills in what is missing.
+        if any(not r.bears_on for r in found.standing):
+            from .rules import attach_rules
+
+            found = attach_rules(found, graph)
+
         # Only the rules that are about these files, and only then is anything
         # checked. Checking all eleven standing rules costs eleven seconds on
         # this repository to answer a question nobody asked — and this runs
         # before an edit, so a tool that pauses work to say nothing gets
         # turned off.
-        covers = [r for r in found.standing if bearing._covers(r, paths)]
+        covers = [r for r in found.standing if bearing._covers(r, paths, graph)]
         if not covers:
             return ""
 
         from .rules import Found
 
-        graph = graph_for(project, trust_for=300)
         verdict = against(Found(rules=covers), graph, project)
 
     raised = bearing.worth_raising(verdict.findings, covers, paths, repo=project)

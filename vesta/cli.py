@@ -293,12 +293,22 @@ def _procedure(args: argparse.Namespace) -> int:
 
     if args.action == "add":
         import json
-        import sys
 
+        # A slash command's `$ARGUMENTS` is a shell word, not stdin — there is
+        # no way for a user's typed text to reach a subprocess's stdin through
+        # `!\`...\``, the same reason `vesta learn --declare "$ARGUMENTS"`
+        # takes the rule as an argument rather than piping it. `--json` is
+        # that path here; stdin stays as a fallback for direct, non-slash use.
+        if args.json is not None:
+            raw = args.json
+        else:
+            import sys
+
+            raw = sys.stdin.read()
         try:
-            payload = json.loads(sys.stdin.read())
+            payload = json.loads(raw)
         except ValueError as exc:
-            raise RuntimeError(f"not valid JSON on stdin: {exc}") from exc
+            raise RuntimeError(f"not valid JSON: {exc}") from exc
         try:
             added = procedure.Procedure.model_validate(payload)
         except ValueError as exc:
@@ -830,6 +840,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     proc = sub.add_parser("procedure", help="author and check control-flow templates")
     proc.add_argument("root", nargs="?", default=".")
     proc.add_argument("action", choices=["list", "add", "validate"])
+    proc.add_argument(
+        "--json", default=None,
+        help="the procedure as JSON, for `add` — falls back to stdin if omitted",
+    )
     proc.set_defaults(run=_procedure)
 
     patterns = sub.add_parser("defects", help="things worth fixing, found unasked")

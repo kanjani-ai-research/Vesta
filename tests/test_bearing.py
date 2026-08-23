@@ -158,6 +158,28 @@ def test_a_declared_rule_bears_on_the_files_it_names(tmp_path):
     assert _covers(rule, ["services/api/.env"])
 
 
+def test_a_rule_with_no_named_file_still_covers_via_bears_on():
+    """A rule whose words overlap a definition, but which names no file
+    textually, would otherwise never be raised when that file is touched —
+    which is most of the value `bears_on` adds over `names`."""
+    from vesta.graph import Graph, Node
+    from vesta.bearing import _covers
+
+    rule = Rule(
+        text="resolve symbol references carefully",
+        names=[],
+        bears_on=["n1"],
+        check="underived",
+        how="",
+    )
+    graph = Graph(
+        nodes={"n1": Node(id="n1", name="_resolve_with", path="graph.py", line=10, kind=12)},
+        edges=[],
+    )
+    assert not _covers(rule, ["graph.py"])  # without a graph, names alone miss it
+    assert _covers(rule, ["graph.py"], graph)
+
+
 def test_a_rule_without_a_check_is_never_put_to_anybody(tmp_path):
     """The honest limit of this feature.
 

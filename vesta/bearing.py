@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 
 from .confirm import ABSTAINED, IS_A_RULE, handle, recall
 from .enforce import Finding
+from .graph import Graph
 from .rules import Rule
 
 logger = logging.getLogger("vesta.bearing")
@@ -114,13 +115,19 @@ class Bearing(BaseModel):
         )
 
 
-def _covers(rule: Rule, paths: Sequence[str]) -> bool:
+def _covers(rule: Rule, paths: Sequence[str], graph: Optional[Graph] = None) -> bool:
     """Whether a rule is about any of these files.
 
-    Matched on what the rule names — the identifiers and file names its author
-    used — rather than on where a check found sites. A rule nobody has written
-    a check for still governs the files it names, and pretending otherwise
-    would raise only the rules that were easy to check.
+    Matched first on what the rule names — the identifiers and file names its
+    author used — rather than on where a check found sites. A rule nobody has
+    written a check for still governs the files it names, and pretending
+    otherwise would raise only the rules that were easy to check.
+
+    Where a graph is given, also matched on `bears_on` — code the rule's own
+    words were resolved against, by attachment rather than by a mention in the
+    utterance. A rule whose text never named a file but genuinely concerns a
+    definition in it — "resolve symbol references carefully" and `graph.py` —
+    would otherwise never be raised, because nothing it says is a filename.
     """
     wanted = {Path(p).name.lower() for p in paths}
     wanted |= {Path(p).stem.lower() for p in paths}
@@ -134,6 +141,15 @@ def _covers(rule: Rule, paths: Sequence[str]) -> bool:
         # `.env` names a file the paths may spell out in full.
         if low.startswith(".") and any(low in p.lower() for p in paths):
             return True
+
+    if graph is not None:
+        for node_id in rule.bears_on:
+            node = graph.nodes.get(node_id)
+            if node is None:
+                continue
+            if Path(node.path).name.lower() in wanted:
+                return True
+
     return False
 
 
