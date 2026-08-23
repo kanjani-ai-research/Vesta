@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .home import home
 
@@ -205,6 +205,15 @@ BEHAVIOUR = "behaviour"    # a property of what the artifact does when run
 ARTEFACT = "artefact"      # a property of a file, commit, or other product
 UNDERIVED = "underived"    # a real constraint with no check yet — a gap
 
+# How long a rule holds, when something has said so outright rather than
+# leaving it to be inferred from repetition or how long ago it was said.
+# Empty means unset — old rules, and rules nothing has judged, fall back to
+# `is_standing`'s existing heuristic.
+HORIZON_EPISODIC = "episodic"  # scoped to the work at hand, not worth keeping
+HORIZON_STANDING = "standing"  # holds until superseded or contradicted
+HORIZON_DURABLE = "durable"    # declared as a permanent decision
+HORIZONS = ("", HORIZON_EPISODIC, HORIZON_STANDING, HORIZON_DURABLE)
+
 
 class Said(BaseModel):
     """Something a user said that constrains rather than requests."""
@@ -250,10 +259,50 @@ class Rule(BaseModel):
     within: str = ""
     holds_when: str = ""
     how_many: int = 0
+    # A stable pointer another rule's `supersedes` can point at. Set from
+    # `stable_id` at construction — not user-facing, and never reassigned, so
+    # a rule recovered twice from the same words agrees with itself.
+    id: str = ""
+    # How long this holds, stated outright rather than inferred. Empty for a
+    # rule nothing has said this about — see HORIZON_* above.
+    horizon: str = ""
+    # The `id` of a rule this one overrides. A later correction narrowing or
+    # replacing an earlier one is not a second, contradictory entry; it is a
+    # rule that says so.
+    supersedes: str = ""
+    # Code definitions or ontology terms this rule concerns, resolved by
+    # attachment against the graph — distinct from `names`, which is whatever
+    # `ABOUT` matched textually in what the user said. `names` is evidence
+    # about the utterance; `bears_on` is evidence about the code. A rule
+    # naming ".env" textually and a rule whose words actually overlap a
+    # definition called `load_config` are different claims, and conflating
+    # them would let a textual mention stand in for a resolved one.
+    bears_on: List[str] = Field(default_factory=list)
+
+    @field_validator("horizon")
+    @classmethod
+    def _horizon_is_a_known_one(cls, value: str) -> str:
+        if value not in HORIZONS:
+            raise ValueError(f"not a known horizon: {value!r}")
+        return value
 
     @property
     def times(self) -> int:
         return len(self.said)
+
+    @property
+    def stable_id(self) -> str:
+        """This rule's own identity, for another rule's `supersedes` to name.
+
+        Derived from `_normalise(text)` rather than assigned, so a rule
+        recovered twice — once from a live session, once from a later
+        re-harvest of the same transcript — agrees with itself without a
+        second notion of identity alongside the dedup key `from_sessions`
+        already uses.
+        """
+        import hashlib
+
+        return hashlib.sha256(_normalise(self.text).encode("utf-8")).hexdigest()[:12]
 
     @property
     def is_standing(self) -> bool:
@@ -264,7 +313,14 @@ class Rule(BaseModel):
         read the utterance and written down what would violate it has better
         evidence than a coincidence of restatement. Repetition still counts,
         for rules nothing has judged yet.
+
+        Where `horizon` is stated outright, it decides the question directly
+        rather than being weighed against the heuristic below — a judgement
+        that read the utterance is stronger evidence than a coincidence of
+        timing, the same argument this property already made for `stated`.
         """
+        if self.horizon:
+            return self.horizon in (HORIZON_STANDING, HORIZON_DURABLE)
         if self.stated:
             return True
         return self.times > 1 or (self.last - self.first) > 3600
@@ -308,7 +364,18 @@ class Found(BaseModel):
 
     @property
     def standing(self) -> List[Rule]:
-        return [r for r in self.rules if r.is_standing]
+        """Rules that still hold — excluding any a later rule has superseded.
+
+        A rule pointed at by another's `supersedes` is not a second,
+        contradictory entry to weigh against the first; it has been replaced,
+        and reporting both would hand a reader two rules where the user only
+        ever meant to leave one standing.
+        """
+        superseded = {r.supersedes for r in self.rules if r.supersedes}
+        return [
+            r for r in self.rules
+            if r.is_standing and r.stable_id not in superseded
+        ]
 
     def describe(self) -> str:
         return (
@@ -616,6 +683,7 @@ def from_sessions(
                 rule = Rule(
                     text=said, check=kind, how=how, names=names, first=stamp
                 )
+                rule.id = rule.stable_id
                 by_text[key] = rule
                 found.rules.append(rule)
             rule.said.append(Said(text=said, session=path.stem, at=stamp, names=names))
@@ -629,6 +697,32 @@ def from_sessions(
             )
 
     found.rules.sort(key=lambda r: (-r.times, -r.last))
+    return found
+
+
+def attach_rules(found: Found, graph: "Graph") -> Found:
+    """Resolve what each rule's own words actually overlap in this codebase.
+
+    `names` is whatever `ABOUT` matched textually in the utterance — a regex
+    over what the user typed. This is a different question: which
+    definitions does the *rule itself* concern, judged the same way
+    `traverse.attach()` already judges whether a definition is about an
+    ontology term. Reusing that seam rather than writing new matching logic
+    means a rule and a procedure step are attached to code identically.
+    """
+    from .traverse import Term, attach
+
+    terms = [
+        Term(id=rule.stable_id, kind="rule", label=rule.text)
+        for rule in found.rules
+    ]
+    mapped = attach(graph, terms)
+    by_rule: Dict[str, List[str]] = {}
+    for attachment in mapped.attachments:
+        by_rule.setdefault(attachment.term, []).append(attachment.node)
+
+    for rule in found.rules:
+        rule.bears_on = by_rule.get(rule.stable_id, [])
     return found
 
 
@@ -771,6 +865,18 @@ class Judgement(BaseModel):
     )
     why_not: str = Field(
         default="", description="When is_rule is false, what this actually is."
+    )
+    horizon: str = Field(
+        default="",
+        description=(
+            "How long this holds, only when the user's own words say so "
+            "outright rather than leaving it to be inferred: 'episodic' for "
+            "something scoped to the work at hand and not worth recording as "
+            "a rule at all, 'standing' for a constraint that holds until "
+            "contradicted, 'durable' for one stated as a permanent decision. "
+            "Leave empty when unclear — a rule left unstated on this is "
+            "judged by how often and how long ago it was said instead."
+        ),
     )
 
 
@@ -919,17 +1025,17 @@ def read_judged(text: str, turns: Optional[Sequence[str]] = None) -> List[Rule]:
             logger.info("refused a rule nobody said: %r", said[:80])
             refused += 1
             continue
-        found.append(
-            Rule(
-                text=said.strip(),
-                stated=stated.strip(),
-                check=kind.lower(),
-                how="",
-                said=[Said(text=said.strip(), at=time.time())],
-                first=time.time(),
-                last=time.time(),
-            )
+        rule = Rule(
+            text=said.strip(),
+            stated=stated.strip(),
+            check=kind.lower(),
+            how="",
+            said=[Said(text=said.strip(), at=time.time())],
+            first=time.time(),
+            last=time.time(),
         )
+        rule.id = rule.stable_id
+        found.append(rule)
 
     if refused:
         logger.warning(

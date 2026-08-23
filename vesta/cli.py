@@ -26,6 +26,7 @@ from typing import List, Optional, Sequence
 from .graph import build
 from .propagate import from_files
 from .home import _slug
+from .rules import trimmed
 
 
 def _say(text: str = "") -> None:
@@ -253,6 +254,84 @@ def _rules(args: argparse.Namespace) -> int:
         for finding in verdict.undecided[: args.show]:
             _say(f"  ? {trimmed(finding.rule, 88)}")
             _say(f"      {trimmed(finding.undecided, 88)}")
+
+    # A sound exclusion or a gap, kept apart from "not checked" prose. Only
+    # shown when asked: this is the same information `verdict.undecided`
+    # already carries in words, made inspectable rather than replacing it.
+    if args.witness:
+        from .enforce import against_with_witness
+
+        refined = against_with_witness(found, graph_for(where), where)
+        _say("")
+        _say(f"witness: {refined.describe()}")
+        for entry in refined.pruned[: args.show]:
+            _say(f"  {entry.describe()}")
+        for entry in refined.gaps[: args.show]:
+            _say(f"  {entry.describe()}")
+    return 0
+
+
+def _procedure(args: argparse.Namespace) -> int:
+    """Author, list, and validate control-flow templates for this repository.
+
+    Reads and writes what `procedure.py` keeps; nothing here judges. A
+    template with a branch that does not say what triggers it is refused at
+    construction — this surfaces that refusal as a plain sentence, the same
+    way any other `RuntimeError` is caught by `main()`, rather than a
+    traceback.
+    """
+    from . import procedure
+
+    where = Path(args.root).expanduser().resolve()
+
+    if args.action == "list":
+        kept = procedure.recall(where)
+        _say(kept.describe())
+        for one in kept.procedures:
+            _say(f"  {one.describe()}")
+        return 0
+
+    if args.action == "add":
+        import json
+        import sys
+
+        try:
+            payload = json.loads(sys.stdin.read())
+        except ValueError as exc:
+            raise RuntimeError(f"not valid JSON on stdin: {exc}") from exc
+        try:
+            added = procedure.Procedure.model_validate(payload)
+        except ValueError as exc:
+            # pydantic's own str(exc) is a multi-line block meant for a
+            # developer reading a stack trace; the errors themselves are the
+            # only part worth a user's attention here.
+            errors = getattr(exc, "errors", lambda: [])()
+            if errors:
+                reasons = "; ".join(e.get("msg", "") for e in errors)
+                raise RuntimeError(f"not a valid procedure: {reasons}") from exc
+            raise RuntimeError(f"not a valid procedure: {exc}") from exc
+
+        kept = procedure.recall(where)
+        kept.procedures = [p for p in kept.procedures if p.id != added.id] + [added]
+        procedure.keep(kept, where)
+        _say(f"kept: {added.describe()}")
+        return 0
+
+    if args.action == "validate":
+        # Re-parses stored JSON through the model, which re-runs Then's
+        # validator — a file written before the outcome vocabulary changed
+        # fails loudly here rather than at first real use.
+        path = procedure._where(where)
+        if not path.is_file():
+            _say("nothing recorded yet.")
+            return 0
+        try:
+            procedure.Procedures.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise RuntimeError(f"stored procedures no longer validate: {exc}") from exc
+        _say("valid.")
+        return 0
+
     return 0
 
 
@@ -400,7 +479,7 @@ def _learn(args: argparse.Namespace) -> int:
     session the `learn` tool asks directly. Same store, two doors.
     """
     from . import confirm
-    from .rules import from_sessions, trimmed
+    from .rules import from_sessions
 
     where = Path(args.root).expanduser().resolve()
 
@@ -742,7 +821,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rules.add_argument("root", nargs="?", default=".")
     rules.add_argument("--check", action="store_true", help="check the code against them")
     rules.add_argument("--show", type=int, default=6)
+    rules.add_argument(
+        "--witness", action="store_true",
+        help="with --check, keep why each rule was soundly excluded or left a gap",
+    )
     rules.set_defaults(run=_rules)
+
+    proc = sub.add_parser("procedure", help="author and check control-flow templates")
+    proc.add_argument("root", nargs="?", default=".")
+    proc.add_argument("action", choices=["list", "add", "validate"])
+    proc.set_defaults(run=_procedure)
 
     patterns = sub.add_parser("defects", help="things worth fixing, found unasked")
     patterns.add_argument("root", nargs="?", default=".")

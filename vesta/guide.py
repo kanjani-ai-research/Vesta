@@ -107,6 +107,17 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ],
     ),
     (
+        "Is there a right order for this kind of work?",
+        "A procedure is a control-flow template someone wrote down — steps, "
+        "and what follows each. A branch that does not say what triggers it "
+        "is refused when it is written, not accepted and left ambiguous.",
+        [
+            ("vesta procedure list", "the procedures recorded for this repository"),
+            ("vesta procedure add", "record one, reading it as JSON from stdin"),
+            ("vesta procedure validate", "check what is recorded still parses"),
+        ],
+    ),
+    (
         "What was agreed, and is it built yet?",
         "Automated mode only. The behaviours are agreed before any code "
         "exists and do not move: while driving, a request that changes one is "

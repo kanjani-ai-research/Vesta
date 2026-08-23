@@ -46,7 +46,7 @@ from typing import Dict, List, Optional, Sequence
 from pydantic import BaseModel, Field
 
 from .home import kept_at
-from .rules import UNDERIVED, Found, Rule, _names_in, derive, trimmed
+from .rules import HORIZON_DURABLE, UNDERIVED, Found, Rule, _names_in, derive, trimmed
 
 logger = logging.getLogger("vesta.confirm")
 
@@ -401,20 +401,24 @@ def apply(found: Found, repo: Path | str) -> Found:
             continue
         said = verdict.stated or verdict.text
         kind, how = derive(said)
-        standing.append(
-            Rule(
-                text=verdict.text,
-                stated=said,
-                check=kind,
-                how=how,
-                # What the rule is about. Without this a declared rule bears on
-                # nothing — it can never be raised when work touches what it
-                # governs, which is most of the value of having stated it.
-                names=_names_in(said),
-                first=verdict.at,
-                last=verdict.at,
-            )
+        declared_rule = Rule(
+            text=verdict.text,
+            stated=said,
+            check=kind,
+            how=how,
+            # What the rule is about. Without this a declared rule bears on
+            # nothing — it can never be raised when work touches what it
+            # governs, which is most of the value of having stated it.
+            names=_names_in(said),
+            first=verdict.at,
+            last=verdict.at,
+            # Declared outright, not recovered from a coincidence of
+            # repetition — the same distinction `stated` already draws, made
+            # explicit rather than left to `is_standing`'s fallback.
+            horizon=HORIZON_DURABLE,
         )
+        declared_rule.id = declared_rule.stable_id
+        standing.append(declared_rule)
 
     found.rules = standing
     found.gaps = [r for r in found.gaps if _key(r.text) in {_key(x.text) for x in standing}]

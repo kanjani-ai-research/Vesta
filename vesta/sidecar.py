@@ -646,6 +646,63 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
     return "\n".join(lines)
 
 
+def _procedure_query(project: Optional[Path], phrase: str) -> str:
+    """What a recorded procedure says about a step, and where the code
+    satisfies it.
+
+    Matched the same way `does`/`where` cross from a question's words to the
+    code's: a procedure's steps are converted to the same `Term` shape an
+    ontology's are, and `traverse.attach()` runs unchanged against whichever
+    step's words come closest to the phrase.
+    """
+    if project is None:
+        return "Could not tell which project this is."
+
+    waiting = _not_ready(project)
+    if waiting:
+        return waiting
+
+    from . import procedure as procedures
+    from .traverse import _bag, attach
+
+    with quiet_stdout():
+        kept = procedures.recall(project)
+        if not kept.procedures:
+            return (
+                f"project: {project}\n"
+                "No procedures recorded for this repository yet. "
+                "`vesta procedure add`, reading a template as JSON from stdin."
+            )
+
+        wanted = _bag(phrase)
+        best = None
+        best_overlap = 0
+        for one in kept.procedures:
+            overlap = len(wanted & _bag(one.label))
+            for step in one.steps:
+                overlap = max(overlap, len(wanted & _bag(step.label)))
+            if overlap > best_overlap or best is None:
+                best_overlap, best = overlap, one
+
+        graph = graph_for(project, trust_for=300)
+        mapped = attach(graph, procedures.as_terms(best))
+
+    lines = [f"project: {project}", best.describe(), ""]
+    for step in best.steps:
+        attachments = mapped.for_term(step.id)
+        lines.append(f"  {step.label} ({step.kind})")
+        if attachments:
+            for a in attachments[:3]:
+                node = graph.nodes.get(a.node)
+                if node:
+                    lines.append(f"      satisfied by {node.describe()}")
+        for then in best.after(step.id):
+            when = f" when {then.when}" if then.when else ""
+            target = then.target or "(ends here)"
+            lines.append(f"      → {then.outcome}{when} → {target}")
+    return "\n".join(lines)
+
+
 def _matching(graph, name: str) -> list:
     """Definitions a user meant by a name.
 
@@ -1679,6 +1736,30 @@ def build_server():
         started = _t.monotonic()
         answer = await anyio.to_thread.run_sync(_decided, project, check, limit)
         _record("decided", project, _t.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def procedure(phrase: str, context: Context = None) -> str:
+        """What a recorded procedure says about a step, and where the code
+        satisfies it.
+
+        Procedures are control-flow templates this project's user wrote down
+        — ordered steps and what follows each, with a closed set of outcomes
+        (continues, branches, exits, fails, retries, defers). Distinct from
+        the ontology's flat vocabulary: a procedure has sequence. Use to
+        check whether a change follows an agreed order, or to find which
+        definitions implement a given step.
+
+        Args:
+            phrase: What to ask about, in the project's own words.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_procedure_query, project, phrase)
+        _record("procedure", project, _t.monotonic() - started, len(answer))
         return answer
 
     return server

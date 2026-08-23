@@ -33,6 +33,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from pydantic import BaseModel, Field
 
+from . import space
 from .graph import Graph, Node
 from .rules import ARTEFACT, BEHAVIOUR, TRAVERSAL, UNDERIVED, Found, Rule
 
@@ -369,3 +370,48 @@ def against(
         verdict.findings.append(finding)
 
     return verdict
+
+
+NEITHER = "neither honoured nor broken"
+
+
+def _subject_missing(graph: Graph, root: Path) -> space.Member:
+    """A member: sound-prune a rule whose subject exists nowhere in this
+    repository.
+
+    Lifts the judgement `run_check` already makes inline for
+    `COUNT_AT_LEAST` with nothing found into something a caller can act on
+    before a check even runs — the repository will not stop being empty of
+    the rule's subject between one call and the next, so nothing here should
+    reopen it this pass.
+    """
+
+    def check(rule: Rule) -> space.Outcome:
+        derived = _check_on(rule)
+        if derived is None:
+            return space.gap(
+                "no check was written for this rule"
+                if rule.check != UNDERIVED
+                else "nothing here can check a rule of this kind"
+            )
+        sites, why = run_check(derived, graph, root)
+        if why and NEITHER in why:
+            return space.sound_prune(why)
+        if why and not sites:
+            return space.demote(why)
+        return space.survive()
+
+    return check
+
+
+def against_with_witness(found: Found, graph: Graph, root: Path | str) -> space.Result:
+    """Like `against`, but keeping why every rule was or was not checked,
+    not only its sites.
+
+    `against` itself is unchanged and remains the plain path; this is
+    additive, for a caller that wants to see a sound exclusion or an
+    unchecked gap as something distinct from "held" rather than reading
+    `Finding.undecided`'s prose to tell them apart.
+    """
+    root = Path(root).expanduser().resolve()
+    return space.refine(found.standing, [_subject_missing(graph, root)])
