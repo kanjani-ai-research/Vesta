@@ -95,7 +95,10 @@ than silently half-resolved.
 Vesta is a Claude Code plugin; most of it — the hooks, the slash commands, the
 subagents — has no equivalent anywhere else. Its MCP server is portable on
 its own, and `doc/other-editors.md` has the config for Cursor, Kiro,
-Antigravity, and Codex.
+Antigravity, Codex, GitHub Copilot, and Windsurf — plus what to put in each
+one's own always-loaded instruction file so the tools get used unasked, and
+how to curate rules and vocabulary from a plain terminal where there's no
+Claude Code session to do it in.
 
 ## What has and has not been measured
 
