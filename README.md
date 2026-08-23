@@ -92,6 +92,11 @@ you to install anything into yours.
 A repository whose language has no server installed is reported as such rather
 than silently half-resolved.
 
+Vesta is a Claude Code plugin; most of it — the hooks, the slash commands, the
+subagents — has no equivalent anywhere else. Its MCP server is portable on
+its own, and `doc/other-editors.md` has the config for Cursor, Kiro,
+Antigravity, and Codex.
+
 ## What has and has not been measured
 
 On a read-only structural question against this repository, paired with a
