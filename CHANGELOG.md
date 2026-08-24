@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.5.0
+
+**A definition's own body had no end, so a reference past it landed on the
+wrong one.** `Graph.at` picked whichever definition started closest before a
+line, with nothing bounding how far its territory ran — so a reference
+genuinely at module scope, after the last definition in a file (the ordinary
+`if __name__ == "__main__": main()` shape), was silently attributed to that
+last definition instead of the module. The misattribution then looked
+exactly like a function calling itself, which is filtered as noise, so the
+edge was simply dropped rather than ever reported as wrong: `uses("main")`
+on a file whose only real caller was its own `__main__` guard said "referred
+to by 0." Fixed by reading the body range a language server already reports
+(`DocumentSymbol.range`, not just the name's own position) and bounding by
+it; a definition without one falls back to the next definition's own start.
+Getting this right took four passes, each catching what the last one
+missed — a tie between a real definition and its file's own module node
+depending on Python dict ordering; a docstring's own claimed fallback that
+had never actually been implemented; a heuristic elsewhere that had been
+quietly relying on the original bug to work; a single import line producing
+two edges once the first three were fixed. Three regression tests, each
+checked against a real, running language server, and each confirmed to fail
+first against the unfixed code.
+
+**A name shared with its own file was two colliding "definitions."** Every
+`.py` file gets a module node named after the file, so a function called
+`home` living in `home.py` collided with the file's own node — `uses("home")`
+returned the real function and the file itself as separate hits, the
+second's "callers" actually being every file that merely imports it, shown
+with no way to tell that apart from a real call. Fixed at both places a name
+lookup happens (the indexed store and the in-memory fallback); a real
+`from x import y` is now labeled `(imports it)` rather than looking
+identical to a call three lines below it.
+
+**A query benchmark now exists and runs clean.** `bench/` derives ground
+truth for a spread of real definitions in this repository independently of
+Vesta's own graph — by parsing Python syntax directly, never by trusting the
+tool being measured — and checks `uses()`'s actual production answers
+against it. Currently: mean precision 0.998, mean recall 1.000. Building it
+is what found both defects above.
+
 ## 0.4.0
 
 **A swept slash command was checked against what it does, not just whether
