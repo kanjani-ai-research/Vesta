@@ -171,8 +171,20 @@ def from_definitions(
     return found
 
 
-def _callers_of(graph, node_ids: Sequence[str]) -> Dict[str, List[str]]:
-    """What refers to each of these, in as few asks as the graph allows."""
+def _callers_of(graph: Graph, node_ids: Sequence[str]) -> Dict[str, List[str]]:
+    """What refers to each of these, in as few asks as the graph allows.
+
+    Typed as the concrete Graph, not a wider "anything walkable" interface:
+    every real caller passes one (from_definitions itself is Graph-typed,
+    and it is the only caller of this), and an untyped/Protocol-typed
+    parameter here was unresolvable to the language server this whole
+    project is built on — confirmed live, `graph.referenced_by(node_id)`
+    below did not resolve at all when `graph` had no concrete type, and
+    resolved to a Protocol's own abstract stub (not the real
+    Graph.referenced_by a user actually asks about) when typed generically
+    against one. `referenced_by_any` stays duck-typed below on purpose: it
+    is a genuine capability check for a caller (store.AsGraph) that does
+    not exist yet, not a type this parameter needs to declare today."""
     batched = getattr(graph, "referenced_by_any", None)
     if batched is not None:
         return batched(node_ids)
@@ -182,7 +194,7 @@ def _callers_of(graph, node_ids: Sequence[str]) -> Dict[str, List[str]]:
     }
 
 
-def _definitions(graph, node_ids: Sequence[str]) -> Dict[str, Node]:
+def _definitions(graph: Graph, node_ids: Sequence[str]) -> Dict[str, Node]:
     """These definitions, in as few asks as the graph allows."""
     batched = getattr(graph, "by_ids", None)
     if batched is not None:

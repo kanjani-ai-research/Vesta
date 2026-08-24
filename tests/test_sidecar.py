@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 from vesta.graph import Graph, Node
-from vesta.sidecar import _does
+from vesta.resolve import MODULE
+from vesta.sidecar import _does, _matching
 from vesta.traverse import Attachment, Map
 
 
@@ -96,3 +97,55 @@ def test_a_mix_of_stale_and_fresh_hits_shows_only_the_fresh_ones(tmp_path, monke
 
     assert "current_function" in said
     assert "moved since" not in said
+
+
+def test_matching_excludes_a_module_node_that_collides_with_a_real_name(tmp_path):
+    """The bug, reproduced directly: a file named advance.py gets its own
+    module node named "advance" — the same name as a real `def advance()`
+    defined elsewhere. Confirmed live on this repository: uses("home")
+    returned vesta/home.py's own module node as a second "definition"
+    alongside the real function, its "callers" actually being every file
+    that imports the module, indistinguishable in the output from a real
+    call. _node_at in derive.py already excludes module nodes for the
+    identical reason; _matching (the function every name-lookup tool goes
+    through) did not."""
+    graph = Graph(
+        root=str(tmp_path),
+        nodes={
+            "mod": Node(id="mod", name="advance", path="advance.py", line=0, kind=MODULE),
+            "fn": Node(id="fn", name="advance", path="pipe.py", line=6, kind=12),
+        },
+    )
+    found = _matching(graph, "advance")
+    assert [n.id for n in found] == ["fn"]
+
+
+def test_uses_labels_an_import_edge_distinctly_from_a_real_call(tmp_path, monkeypatch):
+    """A plain `from store import retain` at the top of a file makes that
+    file's own module node show up as a "caller" of retain — a real edge
+    (the file does import the symbol), but a different KIND of reference
+    than an actual call, and rendered identically to one before this fix:
+    "← use  caller.py:1" (the module node's own line) read exactly like a
+    real call site a few lines below it. Confirmed live on this repository
+    via uses("home"): six of its eleven "callers" were files that merely
+    import it, shown with no way to tell them apart from the five that
+    actually call it."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    from vesta.held import graph_for
+    from vesta.sidecar import _uses
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "store.py").write_text(
+        "def retain(items):\n    return list(items)\n", encoding="utf-8",
+    )
+    (root / "caller.py").write_text(
+        "from store import retain\n\n\ndef use():\n    return retain([1])\n",
+        encoding="utf-8",
+    )
+    graph_for(root, rebuild=True)
+
+    said = _uses("retain", root)
+
+    assert "← use  caller.py:4" in said
+    assert "← caller.py (imports it)" in said

@@ -68,6 +68,7 @@ class Node(BaseModel):
     line: int
     kind: int = Field(description="LSP SymbolKind")
     container: str = ""
+    end_line: Optional[int] = None
 
     @property
     def qualified(self) -> str:
@@ -151,10 +152,63 @@ class Graph(BaseModel):
         This is the join, and it takes the *innermost* enclosing definition
         because attributing a change to a module when it belongs to one method
         would propagate from everything in that module.
+
+        Bounded by `end_line` where the server reported one (DocumentSymbol's
+        `range`, not just `selectionRange` — see resolve.py's Session._flatten):
+        a candidate whose body demonstrably ends before `line` is not it, full
+        stop. Where a node predates that field (an older cached graph) or a
+        server never reports a body range, falls back to bounding by the next
+        node's own start line in the same file — weaker (assumes no gap
+        between two definitions, which is usually true), but still closes the
+        actual bug this exists for: a reference genuinely at module scope,
+        after the LAST definition in a file (the common `if __name__ ==
+        "__main__": main()` shape) has no "next node" to bound it either way,
+        and without end_line it was silently attributed to that last
+        definition instead of falling through to the module — which then
+        made `source == target` at the call site in _resolve_with,
+        indistinguishable from real self-recursion, so the edge was simply
+        dropped, never reported as wrong. Confirmed live: vesta/instead.py's
+        own `main()`, called from its own `__main__` guard, showed "referred
+        to by 0" though the language server correctly reports that exact
+        call site when asked directly.
         """
+        in_file = [n for n in self.nodes.values() if n.path == path]
+        # Real definitions only — the module node is always the LAST
+        # resort, never a candidate that can win a tie against a real one.
+        # Both commonly sit at line 0 (a module node is synthesized there;
+        # the first real definition in a file often starts there too), and
+        # picking whichever one iteration happened to reach first made this
+        # non-deterministic — a real definition's own bound could be
+        # silently skipped just because dict iteration order handed `best`
+        # to the module node instead.
+        candidates = [n for n in in_file if not n.is_module]
+
+        def _ends(node: Node) -> Optional[int]:
+            if node.end_line is not None:
+                return node.end_line
+            following = min(
+                (n.line for n in candidates if n.line > node.line), default=None
+            )
+            return None if following is None else following - 1
+
+        # The INNERMOST containing definition, not just the closest
+        # preceding one: a nested def whose own body has ended (`return
+        # does` on the line AFTER `does`'s single-line body, but still
+        # inside the OUTER function `build_server`) must fall back to
+        # whichever enclosing candidate's own range still covers `line` —
+        # not straight past every candidate to the module. Confirmed live:
+        # `build_server() { def does(...): ...; return does }` — line 3
+        # (`return does`) is past `does`'s own end_line but still inside
+        # `build_server`'s, and an earlier version of this fix returned
+        # None for it, wrongly treating a definition nested one level
+        # deeper as if it had no enclosing scope at all once ITS body
+        # ended, rather than checking whether an OUTER one still applied.
         best: Optional[Node] = None
-        for node in self.nodes.values():
-            if node.path != path or node.line > line:
+        for node in candidates:
+            if node.line > line:
+                continue
+            end = _ends(node)
+            if end is not None and line > end:
                 continue
             if best is None or node.line > best.line:
                 best = node
@@ -286,6 +340,7 @@ def _resolve_with(
                     line=symbol.at.line,
                     kind=symbol.kind,
                     container=symbol.container,
+                    end_line=symbol.end_line,
                 )
                 at_position.setdefault(
                     (relative, symbol.at.line, symbol.at.character), identity
@@ -346,8 +401,30 @@ def _resolve_with(
                     )
                     if resolved == source:
                         continue
+                    # The SAME import line is also picked up by the second
+                    # pass above: `session.references` on the imported
+                    # symbol itself includes the import site, so a plain
+                    # `from x import y` produced two edges for one real
+                    # reference — an ordinary 'refers' edge from pass two
+                    # AND this 'imports' one, both (source, target, at) alike.
+                    # Which one survived a naive display dedup then depended
+                    # on the store's own row order, not anything meaningful.
+                    # Upgrading the existing edge's kind in place, rather
+                    # than appending a second one, keeps exactly one edge per
+                    # real reference and lets THIS pass's more precise
+                    # knowledge (it parsed the import syntax directly) win.
+                    existing = next(
+                        (e for e in graph.edges
+                         if e.source == source and e.target == resolved
+                         and e.at == f"{relative}:{binding.at.line}"),
+                        None,
+                    )
+                    if existing is not None:
+                        existing.kind = "imports"
+                        continue
                     graph.edges.append(
-                        Edge(source=source, target=resolved, at=f"{relative}:{binding.at.line}")
+                        Edge(source=source, target=resolved, kind="imports",
+                             at=f"{relative}:{binding.at.line}")
                     )
     finally:
         session.stop()
@@ -381,10 +458,21 @@ def _containing(graph: Graph, root: Path, location: Location) -> Optional[str]:
     file, not attribute the reference to every definition the file happens to
     contain. Falling back to the module node is what tells the two apart —
     the earlier alternative, dropping the reference outright, could not.
+
+    That fallback was documented here and never implemented: `graph.at`
+    returning None (a reference past every definition's real end — the
+    common `if __name__ == "__main__": main()` shape, once Graph.at gained
+    a real upper bound instead of assuming the last definition in a file
+    owns everything after it) fell straight through to returning None from
+    HERE too, silently dropping the reference exactly where this docstring
+    said it would not.
     """
     relative = _relative(root, location.path)
     node = graph.at(relative, location.line)
-    return node.id if node else None
+    if node is not None:
+        return node.id
+    whole = _node_id(relative, 0, relative)
+    return whole if whole in graph.nodes else None
 
 
 def _relative(root: Path, path: str) -> str:

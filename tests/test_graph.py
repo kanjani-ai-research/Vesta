@@ -17,7 +17,7 @@ import pytest
 
 from vesta.graph import Edge, Graph, Hole, Node, build
 from vesta.propagate import MAX_HOPS, from_definitions, from_files, from_lines, is_test
-from vesta.resolve import for_suffix
+from vesta.resolve import MODULE, for_suffix
 
 TREE = {
     "core.py": (
@@ -127,6 +127,83 @@ def test_a_line_resolves_to_the_definition_containing_it(graph: Graph, tree: Pat
 
     assert found is not None
     assert found.name == "middle"
+
+
+GUARD_TREE = {
+    "mod.py": (
+        "def main() -> int:\n"
+        "    return 0\n"
+        "\n"
+        "\n"
+        'if __name__ == "__main__":\n'
+        "    raise SystemExit(main())\n"
+    ),
+}
+
+
+@pytest.fixture(scope="module")
+def guard_tree(tmp_path_factory) -> Path:
+    root = tmp_path_factory.mktemp("guard")
+    for name, text in GUARD_TREE.items():
+        (root / name).write_text(text, encoding="utf-8")
+    return root
+
+
+@pytest.fixture(scope="module")
+def guard_graph(guard_tree: Path) -> Graph:
+    return build(guard_tree)
+
+
+@needs_server
+def test_at_does_not_extend_a_definition_past_its_own_body(guard_graph: Graph):
+    """The bug, reproduced directly: `main`'s real body is lines 0-1
+    (`def main() -> int: / return 0`); line 5 is `raise SystemExit(main())`,
+    genuinely at module scope inside the `if __name__ == "__main__":` guard.
+    Without a body-end bound, `at()` picked `main` anyway (the closest
+    PRECEDING definition, with no upper bound at all) — confirmed live on
+    this exact shape in vesta/instead.py before the fix, where it silently
+    made source == target at the real call site and the edge was dropped as
+    if it were self-recursion."""
+    main = node_named(guard_graph, "main")
+    assert main.end_line is not None
+    assert guard_graph.at("mod.py", 5) is None or guard_graph.at("mod.py", 5).id != main.id
+
+
+@needs_server
+def test_the_main_guard_call_becomes_a_real_edge(guard_graph: Graph):
+    """The actual observable bug: `uses("main")` on a file whose only call to
+    its own main() is the __main__ guard invocation showed "referred to by
+    0" — a real, common Python idiom, invisible to every query that walks
+    referenced_by. Fixed by (1) Graph.at gaining a real end_line bound from
+    the language server's own DocumentSymbol.range (not just
+    selectionRange), and (2) _containing actually implementing its own
+    documented "falls back to the module node" contract, which existed only
+    as a docstring claim before this."""
+    main = node_named(guard_graph, "main")
+    callers = guard_graph.referenced_by(main.id)
+    assert len(callers) == 1
+    source = guard_graph.nodes[callers[0].source]
+    assert source.is_module
+    assert source.path == "mod.py"
+
+
+def test_at_never_lets_the_module_node_win_a_tie_over_a_real_definition():
+    """A hand-built graph, not a live server: a module node and a real
+    definition both legitimately sit at line 0 of the same file (a module
+    node is synthesized at line 0; a file's first real definition often
+    starts there too). `nodes` is a plain dict, so which of the two Python
+    happens to iterate first is an implementation detail, not something a
+    correctness fix may depend on — the earlier version of this fix passed
+    against a live build only because dict order happened to favor the real
+    definition that run, and silently broke the moment it did not (proven
+    directly: reverting only the module-exclusion left the live-server tests
+    still green about half the time)."""
+    module = Node(id="mod", name="thing", path="thing.py", line=0, kind=MODULE)
+    real = Node(id="real", name="thing", path="thing.py", line=0, kind=12, end_line=1)
+    for order in ({"mod": module, "real": real}, {"real": real, "mod": module}):
+        graph = Graph(root="/x", nodes=order)
+        found = graph.at("thing.py", 5)
+        assert found is None or found.id == "real", order
 
 
 IMPORT_TREE = {

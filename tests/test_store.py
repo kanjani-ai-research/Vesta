@@ -53,6 +53,40 @@ def test_a_definition_is_found_by_qualified_name(stored: Path):
         assert [n.name for n in held.named("Log.note")] == ["note"]
 
 
+@pytest.fixture
+def stored_with_a_name_collision(tmp_path: Path, monkeypatch) -> Path:
+    """A file literally named advance.py, next to a real function also named
+    advance somewhere else — the exact live shape that broke uses("home") on
+    this repository: vesta/home.py's own module node collided with `def
+    home()` inside it, and callers of the real function got mixed in the
+    same answer with modules that merely import it."""
+    import vesta.store as store
+    from vesta.resolve import MODULE
+
+    where = tmp_path / "kept"
+    where.mkdir()
+    monkeypatch.setattr(store, "_at", lambda repo: where / f"{Path(repo).name}.db")
+
+    nodes = [
+        Node(id="mod", name="advance", path="advance.py", line=0, kind=MODULE),
+        Node(id="fn", name="advance", path="pipe.py", line=6, kind=12),
+        Node(id="caller", name="rewind", path="pipe.py", line=20, kind=12),
+    ]
+    graph = Graph(
+        root=str(tmp_path / "proj"),
+        nodes={n.id: n for n in nodes},
+        edges=[Edge(source="caller", target="fn")],
+    )
+    write(graph, tmp_path / "proj", shape="abc123")
+    return tmp_path / "proj"
+
+
+def test_named_excludes_a_colliding_module_node(stored_with_a_name_collision: Path):
+    with Held(stored_with_a_name_collision) as held:
+        found = held.named("advance")
+    assert [n.id for n in found] == ["fn"]
+
+
 def test_what_refers_to_a_definition(stored: Path):
     with Held(stored) as held:
         assert set(held.referenced_by("n1")) == {"n2", "n3"}

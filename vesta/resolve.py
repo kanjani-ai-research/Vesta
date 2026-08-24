@@ -174,6 +174,7 @@ class Symbol(BaseModel):
     kind: int = Field(description="LSP SymbolKind: 5 class, 6 method, 12 function")
     at: Location
     container: str = ""
+    end_line: Optional[int] = None
 
     @property
     def is_definition(self) -> bool:
@@ -690,10 +691,24 @@ class Session:
             if "location" in entry:  # the flat SymbolInformation shape
                 location = entry["location"].get("range", {})
             start = location.get("start") or {}
+            # DocumentSymbol carries TWO ranges: `selectionRange` (just the
+            # name token, what `location` above already reads for `at`) and
+            # `range` (the whole body, start through its closing line) — the
+            # end of THAT is what a graph needs to know where a definition's
+            # ownership of a line actually stops. Discarding it (only ever
+            # reading a start position) meant a reference genuinely at module
+            # scope, right after the LAST definition in a file — the common
+            # `if __name__ == "__main__": main()` shape — was silently
+            # attributed to that definition instead of the module, because
+            # nothing bounded how far its "territory" extended. See Graph.at.
+            body = entry.get("range") or {}
+            end = body.get("end") or {}
+            end_line = int(end["line"]) if "line" in end else None
             symbol = Symbol(
                 name=entry.get("name", ""),
                 kind=int(entry.get("kind", 0)),
                 container=container,
+                end_line=end_line,
                 at=Location(
                     path=path,
                     line=int(start.get("line", 0)),

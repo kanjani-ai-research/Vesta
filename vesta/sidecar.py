@@ -434,9 +434,31 @@ def _uses(name: str, project: Optional[Path]) -> str:
                 if other is None or other.id in seen:
                     continue
                 seen.add(other.id)
-                lines.append(
-                    f"    {arrow} {other.qualified}  {other.path}:{other.line + 1}"
-                )
+                if edge.kind == "imports":
+                    # A plain `from x import y` binds a name at module scope
+                    # with no enclosing function — the edge is real (this
+                    # file genuinely imports the symbol) but is a different
+                    # KIND of reference than a call, and looked identical to
+                    # one here before this label: "← across  vesta/across.py:1"
+                    # read exactly like a real call site such as
+                    # "← _where  vesta/across.py:216" a few lines below it.
+                    lines.append(f"    {arrow} {other.path} (imports it)")
+                elif other.is_module:
+                    # A genuine call made at true module scope — no import
+                    # involved, and no enclosing function either (the common
+                    # `if __name__ == "__main__": main()` shape). The
+                    # location comes from the EDGE, not from the module
+                    # node's own line 0: `other.line` is always 0 for a
+                    # module node, which would misreport where the call
+                    # actually is. Checked by edge.kind rather than
+                    # other.is_module alone, because a module node is the
+                    # correct source for BOTH this case and the import case
+                    # above, and only the edge's own kind tells them apart.
+                    lines.append(f"    {arrow} module scope, {edge.at}")
+                else:
+                    lines.append(
+                        f"    {arrow} {other.qualified}  {other.path}:{other.line + 1}"
+                    )
                 if len(seen) >= 12:
                     break
     if len(wanted) > 8:
@@ -723,6 +745,17 @@ def _matching(graph, name: str) -> list:
     module, _, last = wanted.rpartition(".")
     found = []
     for node in graph.nodes.values():
+        # A module node is named after its file (home.py's own node is named
+        # "home"), which collides with any function or class that happens to
+        # share the file's name — confirmed live: uses("home") on this very
+        # repository returned the real `def home()` AND vesta/home.py's own
+        # module node as two separate "definitions," the second one's
+        # "callers" actually being every file that imports the module, shown
+        # in the identical shape as a real function call. An agent asking
+        # what uses a NAME never means the file itself (_node_at in derive.py
+        # excludes the same way, for the same reason).
+        if node.is_module:
+            continue
         if node.name == wanted or node.qualified == wanted:
             found.append(node)
         elif node.qualified.endswith(f".{wanted}"):
