@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -146,7 +147,8 @@ def _named(prompt: str, graph: Graph) -> List[str]:
         if is_test(node) or "/tests/" in node.path or node.path.startswith("tests/"):
             continue
 
-        # Something nested, reached by a bare word, that nothing refers to.
+        # Something nested, reached by a bare word, that nothing OUTSIDE its
+        # own enclosing definition refers to.
         #
         # "what does this project do" matched `build_server.does` — a function
         # defined inside another and registered by a decorator, so nothing
@@ -154,15 +156,33 @@ def _named(prompt: str, graph: Graph) -> List[str]:
         # it; somebody writing `build_server.does` did, and that still passes
         # because the qualified name was spelled out.
         #
+        # "Nothing refers to it" was never quite the right test — the
+        # enclosing function returning its own nested definition
+        # (`return does`, the ordinary factory/decorator-registration shape)
+        # is a real reference, just not a call, and once Graph.at correctly
+        # attributed it to `build_server` (rather than a longstanding bug
+        # that mis-scoped it as a self-reference and dropped it) checking
+        # bare emptiness started keeping `does` in the results for the wrong
+        # reason. What actually distinguishes "somebody meant this" is a
+        # reference from OUTSIDE the definition that contains it — a
+        # reference the enclosing scope makes to its own nested definition,
+        # while defining or wiring it up, does not count as somebody
+        # elsewhere in the codebase having named it.
+        #
         # Not a wider rule than that. A top-level definition nothing refers to
         # is exactly where a wrong change hides, and what earlier sessions
         # learned about one is worth having.
-        if (
-            node.container
-            and node.qualified not in words
-            and not graph.referenced_by(node.id)
-        ):
-            continue
+        if node.container and node.qualified not in words:
+            outside = [
+                edge for edge in graph.referenced_by(node.id)
+                if edge.source != node.id
+                and not (
+                    (source := graph.nodes.get(edge.source)) is not None
+                    and source.qualified == node.container
+                )
+            ]
+            if not outside:
+                continue
         found.append(node.id)
     return found
 
@@ -287,7 +307,13 @@ def main() -> int:
         return 0
 
     prompt = str(payload.get("prompt") or "")
-    project = payload.get("cwd") or "."
+    # CLAUDE_PROJECT_DIR first, same reasoning as vesta.instead.decide: the
+    # host sets it once at session spawn to the actual project root, where
+    # `cwd` is the tool call's working directory at the moment it fired and
+    # can drift mid-session without the project changing — which is what
+    # made this hook fire with another project's context injected into a
+    # session working on an entirely different one.
+    project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "."
 
     parts = []
     try:
