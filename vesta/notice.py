@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -150,7 +151,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         prompt = payload.get("prompt", "") or ""
-        here = payload.get("cwd") or None
+        # CLAUDE_PROJECT_DIR first — see vesta.instead.decide's own note: `cwd`
+        # is the tool call's working directory at the moment it fired and can
+        # drift mid-session without the project changing, which is what made
+        # this hook offer an unrelated project while the session worked on a
+        # different one entirely.
+        here = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or None
         found = elsewhere_in(prompt, Path(here) if here else None)
         offered = say(found)
         if offered:

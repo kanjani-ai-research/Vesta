@@ -79,7 +79,10 @@ def _catch_up(root: Path) -> None:
 def _answer(payload: dict) -> int:
     from . import driving
 
-    where = payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "."
+    # CLAUDE_PROJECT_DIR first, same as vesta.instead.decide and vesta.notice:
+    # `cwd` is a snapshot of the working directory at the moment this fired
+    # and can drift mid-session without the project changing.
+    where = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "."
     root = Path(where).expanduser().resolve()
 
     # Asked as this session, so consent that belonged to another one does not

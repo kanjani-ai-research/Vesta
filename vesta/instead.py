@@ -172,7 +172,19 @@ def decide(payload: dict) -> Optional[dict]:
     if not name:
         return None
 
-    where = payload.get("cwd") or ""
+    # `CLAUDE_PROJECT_DIR`, not `payload["cwd"]`, first: the host sets this once
+    # at session spawn to the actual project root, where `cwd` is the tool
+    # call's working directory at the moment it fired — a shell `cd`, a
+    # subprocess launched from elsewhere, or a harness that resets the working
+    # directory between calls (observed live: a session's own cwd drifted to
+    # an unrelated project mid-run) all move `cwd` without moving the project.
+    # This is the same signal `project_of` in sidecar.py trusts as its
+    # documented fallback when MCP roots aren't available; a stdio hook has no
+    # session to ask roots/list on, so it is the strongest signal reachable
+    # here. `cwd` remains the fallback for a host that does not set it.
+    import os
+
+    where = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""
     if not where:
         return None
     project = Path(where).expanduser().resolve()

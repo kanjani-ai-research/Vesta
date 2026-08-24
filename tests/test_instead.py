@@ -166,3 +166,42 @@ def test_a_malformed_payload_allows_the_call():
     assert decide({}) is None
     assert decide({"tool_name": "Grep"}) is None
     assert decide({"tool_name": "Grep", "tool_input": {"pattern": "def x"}}) is None
+
+
+# ── Which project: CLAUDE_PROJECT_DIR over a drifted cwd ────────────────────
+# `cwd` is the tool call's working directory at the moment it fired — a shell
+# `cd`, or a harness that resets the working directory between calls, moves it
+# without moving the project. Observed live: a session's own cwd drifted to an
+# unrelated (but Vesta-indexed) project mid-run, and a plain grep on the real
+# project got answered from that other project's graph instead of being let
+# through. CLAUDE_PROJECT_DIR is set once at session spawn and does not drift.
+
+
+def test_claude_project_dir_wins_over_a_drifted_cwd(repo, tmp_path, monkeypatch):
+    """The bug, reproduced directly: cwd points at a DIFFERENT project that
+    also has a graph (so readiness().can_answer is true for it too) — the
+    wrong graph must not answer just because cwd landed there."""
+    from vesta.held import graph_for
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "other.py").write_text("def keep(x):\n    return x\n", encoding="utf-8")
+    graph_for(elsewhere, rebuild=True)
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
+    said = decide(
+        {"tool_name": "Grep", "tool_input": {"pattern": "def keep"}, "cwd": str(elsewhere)}
+    )
+    assert said is not None
+    reason = said["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "store.py" in reason        # repo's file, resolved via CLAUDE_PROJECT_DIR
+    assert "other.py" not in reason    # NOT elsewhere's file, despite cwd pointing there
+
+
+def test_cwd_is_still_the_fallback_when_claude_project_dir_is_unset(repo, monkeypatch):
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    said = decide(
+        {"tool_name": "Grep", "tool_input": {"pattern": "def keep"}, "cwd": str(repo)}
+    )
+    assert said is not None
+    assert "store.py" in said["hookSpecificOutput"]["permissionDecisionReason"]
