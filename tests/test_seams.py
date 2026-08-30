@@ -229,7 +229,13 @@ def test_every_tool_the_server_offers_can_be_called():
     assert len(tools) >= 13
     for tool in tools:
         assert tool.description, f"{tool.name} says nothing about itself"
-        assert tool.inputSchema is not None, f"{tool.name} has no schema"
+        # `mcp` renamed `inputSchema` to `input_schema` in 2.0. Both majors are
+        # supported by the sidecar for the reason its own import block states,
+        # so this asserts against whichever the installed one speaks.
+        schema = getattr(tool, "inputSchema", None) or getattr(
+            tool, "input_schema", None
+        )
+        assert schema is not None, f"{tool.name} has no schema"
 
 
 # ── Agents: what routes to them ─────────────────────────────────────────────

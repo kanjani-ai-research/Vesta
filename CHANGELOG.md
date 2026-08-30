@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.6.0
+
+**A decision now leaves a witness.** One compact record per invocation — what
+was asked, how the space of candidates contracted, which checks held, and the
+digests binding it to the specification, vocabulary, and code it ran against —
+kept in place of the reasoning chain it summarises: 4.2kb where retaining every
+judgement cost 303kb. `spec/witness.md` is the format, with its checks, its
+conformance levels, and its stated limits; `/vesta:why` walks the record back
+and says whether the reasoning has aged well.
+
+**The narrowing is guided, and guidance may only demote.** Before a narrowing
+runs, the active specification predicts where the work belongs; the narrowing
+is steered toward that region, every override is recorded at the step it
+happened, and neither the specification's prediction nor a model's judgement
+may ever remove a candidate — only evidence computed from the code may. Zero
+interventions means the specification and the code agreed; the friction figure
+says how hard they fought. `/vesta:honing` is the surface.
+
+**Skills are read as authorities.** A SKILL.md — one file, a folder of them,
+anywhere — becomes vocabulary with provenance; the body is never mined for
+structure, because the format guarantees none. Three skills sharing a name are
+three authorities, kept apart by content digest; measured on real plugins,
+identity by name silently discarded two of three.
+
+**Bindings survive the code moving.** An attachment now carries the path, name,
+and a hash of the region it was written about, so a definition shifted by an
+edit re-anchors instead of dangling — 68% of this repository's own map had
+rotted silently before this — and a claim can say whether the bytes it
+described are still the bytes that are there.
+
+**Tools got names a person would say.** `does`, `means`, `touches`, `uses` are
+joined by `honing`, `why`, `noted`, and `bears` — `declare` and `bears_on` are
+gone, and this is a breaking release for anything that called them. The domain
+agent also stopped being offered an eighty-definition ceiling that left seven
+of eight definitions unbindable on an ordinary repository, and an ontology
+that predates its own code now says so in the empty answer instead of a log
+nobody reads.
+
 ## 0.5.0
 
 **A definition's own body had no end, so a reference past it landed on the
