@@ -31,7 +31,7 @@ from vesta.bundle import (
 from vesta.graph import Graph, Node
 from vesta.space import Basis, Verdict
 from vesta.space import Witness as Judgement
-from vesta.warrant import Convergence, Step
+from vesta.warrant import Convergence, Intervention, Step
 
 
 def chain(*steps: Step) -> Convergence:
@@ -461,3 +461,84 @@ def test_the_vocabulary_that_decided_the_region_is_named(tmp_path):
 
     assert held.vocabulary == "bff8d95182b1dc91"
     assert "read through vocabulary bff8d951" in held.describe()
+
+
+# ── Guided mode in the witness ──────────────────────────────────────────────
+
+
+def test_a_blind_record_carrying_interventions_is_malformed(tmp_path):
+    """There was nothing to intervene with: the mode says guidance never saw
+    the region, and the record contradicts itself."""
+    trail = chain(
+        Step(sites=10, population=10),
+        Step(
+            sites=9, population=10, admissible=["a"],
+            witness=[judged(Verdict.SOUND_PRUNE, Basis.STRUCTURAL)],
+            interventions=[Intervention(about="a", evidence="e")],
+        ),
+    )
+
+    held = witness("x", trail, tmp_path, output="here")
+
+    assert held.verdict == UNSOUND
+    assert any(
+        "contradicts itself" in f.detail for f in held.findings if not f.held
+    )
+
+
+def test_a_guided_witness_carries_mode_interventions_and_friction(tmp_path):
+    trail = chain(
+        Step(sites=10, population=10),
+        Step(
+            sites=2, population=10, admissible=["a", "b"],
+            witness=[
+                judged(Verdict.SOUND_PRUNE, Basis.STRUCTURAL, f"n{i}")
+                for i in range(8)
+            ],
+            interventions=[
+                Intervention(
+                    step=1, path="a.py", line=10, name="b",
+                    evidence="the evidence kept this at standing",
+                    action="demoted — outside the region",
+                )
+            ],
+        ),
+    )
+    trail.mode = "guided"
+
+    held = witness(
+        "x", trail, tmp_path, output="here",
+        expected=type("E", (), {"where": ["a", "b"], "because": []})(),
+    )
+
+    assert held.mode == "guided"
+    assert len(held.interventions) == 1
+    assert held.friction == pytest.approx(1 / 8)
+    assert "guided — 1 intervention(s)" in held.describe()
+    assert held.verdict == SANE
+
+
+def test_an_out_of_region_survivor_is_the_guided_modes_strongest_flag(tmp_path):
+    """Guidance demoted it and the evidence kept it anyway — a flag that exists
+    only because guidance may not remove."""
+    trail = chain(
+        Step(sites=10, population=10),
+        Step(
+            sites=2, population=10, admissible=["a", "stray"],
+            witness=[
+                judged(Verdict.SOUND_PRUNE, Basis.STRUCTURAL, f"n{i}")
+                for i in range(8)
+            ],
+            interventions=[Intervention(about="stray", evidence="kept by evidence")],
+        ),
+    )
+    trail.mode = "guided"
+
+    held = witness(
+        "x", trail, tmp_path, output="here",
+        expected=type("E", (), {"where": ["a"], "because": []})(),
+    )
+
+    failed = next(f for f in held.findings if not f.held and "belongs" in f.check)
+    assert "notwithstanding guidance" in failed.detail
+    assert "overcame" in failed.detail

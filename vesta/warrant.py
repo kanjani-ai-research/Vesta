@@ -80,6 +80,36 @@ STUCK_AFTER = 3
 MOVED = 0.02
 
 
+class Intervention(BaseModel):
+    """One occasion on which guidance overrode the evidence, at the step it did.
+
+    Guided mode's raw signal. The narrowing computed what the evidence supported
+    — exactly as blind mode would — and the region said otherwise, so the
+    candidate's standing was reduced. Never its membership: the region rests on
+    the specifications, whose adequacy is exactly what a later reader is
+    entitled to question, and a wrong specification allowed to remove would take
+    the correct answer with it, irrecoverably.
+
+    Few when the specifications and the subject agree, which is what makes them
+    worth carrying in full: the interventions are precisely the informative
+    events, and zero of them is the guided-mode reading of two independent
+    sources concurring.
+    """
+
+    step: int = 0
+    about: str = ""
+    path: str = ""
+    line: int = 0
+    name: str = ""
+    # What the evidence supported, and what guidance did about it.
+    evidence: str = ""
+    action: str = "demoted"
+
+    def describe(self) -> str:
+        where = f"{self.path}:{self.line + 1} {self.name}" if self.path else self.about
+        return f"step {self.step}: {where} — {self.evidence}; {self.action}"
+
+
 class Step(BaseModel):
     """One measurement of a decision space, and what closed it further.
 
@@ -108,6 +138,11 @@ class Step(BaseModel):
     # Sound exclusions are permanent; demotions can be reopened; gaps record
     # what nothing could decide.
     witness: List[Witness] = Field(default_factory=list)
+
+    # Where guidance overrode the evidence at this step (guided mode only).
+    # Kept whole rather than counted: they are few when the process is healthy,
+    # and they are precisely the informative events.
+    interventions: List[Intervention] = Field(default_factory=list)
 
     # Reasons this step gave, held once and referred to by position.
     #
@@ -235,6 +270,33 @@ class Convergence(BaseModel):
     action: str = ""
     steps: List[Step] = Field(default_factory=list)
 
+    # How the narrowing related to the predicted region: "blind" — never shown
+    # it, so the landing is evidence — or "guided" — steered by it, so the
+    # signal moves to the interventions. Fixed when the trajectory opens;
+    # a mode that switched mid-flight would make every figure unreadable.
+    mode: str = "blind"
+
+    @property
+    def interventions(self) -> List[Intervention]:
+        """Every occasion guidance overrode the evidence, in order."""
+        return [i for step in self.steps for i in step.interventions]
+
+    @property
+    def friction(self) -> float:
+        """How often guidance had to act, against how much was judged.
+
+        The guided mode's correctness signal. Near zero, the specifications and
+        the subject's evidence concurred — the same two-source agreement a
+        blind in-region landing is, observed through a different instrument.
+        High, the specifications dragged the decision against the evidence,
+        which is a fact about one of them and the attribution's job to say
+        which.
+        """
+        judged = len(self.judgements)
+        if not judged:
+            return 0.0
+        return len(self.interventions) / judged
+
     @property
     def latest(self) -> Optional[Step]:
         return self.steps[-1] if self.steps else None
@@ -348,6 +410,11 @@ class Convergence(BaseModel):
             f"  sites    {trail}",
             f"  outputs  {outputs}",
         ]
+        if self.mode == "guided":
+            lines.append(
+                f"  guided — {len(self.interventions)} intervention(s), "
+                f"friction {self.friction:.0%}"
+            )
 
         if self.converged:
             lines.append(
@@ -541,6 +608,12 @@ def narrow(
     action: str,
     doing: str,
     outputs: Optional[int] = None,
+    # The predicted region, where the caller is running guided. Candidates the
+    # evidence keeps but the region does not admit are demoted — never removed
+    # — and each such override is recorded as an intervention at this step.
+    # None means blind: the narrowing never sees the region, and its landing
+    # keeps its full evidential weight.
+    region: Optional[Set[str]] = None,
     # A caller's own rule. Returns a verdict and a reason, and optionally the
     # basis that rule rests on — omitted means `ASSERTED`, the kind that claims
     # least, because a basis nobody stated is not one to infer for them.
@@ -665,6 +738,30 @@ def narrow(
             )
         )
 
+    # Guided: the evidence has spoken above, exactly as it would blind. Now the
+    # region gets its say — and only a say. A surviving candidate the region
+    # does not admit is demoted, never removed: the region rests on the
+    # specifications, whose adequacy is an open question by design, and a wrong
+    # specification allowed to remove would take the correct answer with it.
+    # Each override is recorded where it happened, which is what makes drift
+    # visible at the step it begins rather than at a post-mortem.
+    interventions: List[Intervention] = []
+    if region is not None:
+        for node_id in surviving:
+            if node_id in region:
+                continue
+            node = graph.nodes.get(node_id)
+            interventions.append(
+                Intervention(
+                    about=node_id,
+                    path=node.path if node else "",
+                    line=node.line if node else 0,
+                    name=node.name if node else "",
+                    evidence="the evidence kept this at standing",
+                    action="demoted — outside the region the specifications predict",
+                )
+            )
+
     return Step(
         at=time.time(),
         doing=doing,
@@ -672,6 +769,7 @@ def narrow(
         outputs=previous.outputs if outputs is None else outputs,
         population=previous.population,
         witness=witness,
+        interventions=interventions,
         admissible=surviving,
     )
 

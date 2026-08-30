@@ -962,6 +962,25 @@ def _narrowing(
             "now, yourself, without asking, then ask again."
         )
 
+    # Where an active specification says this belongs, worked out from its own
+    # words BEFORE the narrowing runs — so the narrowing can be steered by it,
+    # and departures flagged at the step they occur. Nothing active predicts
+    # nothing, and the witness says so rather than treating an absent authority
+    # as a violated one.
+    from .skill import expect
+    from .skill import recall as recall_skills
+
+    expected = None
+    standard = digest = ""
+    store = recall_skills(project)
+    if store is not None:
+        for authority in store.live:
+            here = expect(authority, action, graph, mapped)
+            if not here.unpredicted:
+                expected, standard, digest = here, authority.id, authority.digest
+                break
+    region = set(expected.where) if expected is not None and expected.where else None
+
     # A different action is a different decision space. Continuing one under
     # the other's name would report a contraction that never happened, so the
     # old trajectory is dropped rather than extended.
@@ -969,10 +988,22 @@ def _narrowing(
     if held is None:
         forget(project)
         held = track(action, [open_space(action, graph)])
+        # Guided when a specification predicts a region, blind otherwise —
+        # fixed for the life of the trajectory, because a mode that switched
+        # mid-flight would make every figure unreadable.
+        held.mode = "guided" if region else "blind"
 
     step = narrow(
-        held.steps[-1], graph, mapped, action, doing or "a step", outputs=outputs
+        held.steps[-1],
+        graph,
+        mapped,
+        action,
+        doing or "a step",
+        outputs=outputs,
+        region=region if held.mode == "guided" else None,
     )
+    for meddled in step.interventions:
+        meddled.step = len(held.steps)
     held.steps.append(step)
     keep(held, project)
 
@@ -988,25 +1019,11 @@ def _narrowing(
     import os
 
     from .bundle import keep as keep_witness, witness
-    from .skill import expect
-    from .skill import recall as recall_skills
 
     ontology = recall_ontology(project)
 
-    # Where an active standard says this belongs, worked out from the standard's
-    # own words rather than from the chain — so that agreement between the two
-    # means something. Nothing active predicts nothing, and a witness says so
-    # rather than treating an absent authority as a violated one.
-    expected = None
-    standard = digest = ""
-    store = recall_skills(project)
-    if store is not None:
-        for authority in store.live:
-            here = expect(authority, action, graph, mapped)
-            if not here.unpredicted:
-                expected, standard, digest = here, authority.id, authority.digest
-                break
-
+    # The region and its specification were computed above, before the
+    # narrowing ran — the witness reuses them rather than deriving twice.
     judged = witness(
         action,
         held,

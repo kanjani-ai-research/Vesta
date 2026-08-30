@@ -494,3 +494,55 @@ def test_a_trajectory_names_what_was_judged_by_an_authority(code, mapped):
     said = track("retry a failed request", [start, named, pooled]).describe()
 
     assert "may evaluate differently on another run" in said
+
+
+# ── Guided mode: steering that may demote and never remove ──────────────────
+
+
+def test_a_guided_narrowing_records_interventions_without_removing(code, mapped):
+    """Evidence first, exactly as blind; then the region gets a say — and only
+    a say. The survivor set is identical to blind's, so nothing the evidence
+    kept is lost; what changes is that the departure is recorded at the step
+    it happened, rather than discovered at a post-mortem.
+    """
+    start = open_space("retry a failed request", code)
+    blind = narrow(start, code, mapped, "retry a failed request", "ontology")
+
+    # A region admitting only the named definition: the two one-hop
+    # neighbours survive on evidence and are demoted by guidance.
+    guided = narrow(
+        start, code, mapped, "retry a failed request", "ontology",
+        region={"retry.py:10:parse_retry"},
+    )
+
+    assert guided.admissible == blind.admissible, "guidance never removes"
+    assert len(guided.interventions) == 2
+    assert {i.name for i in guided.interventions} == {"backoff", "send"}
+    assert all("demot" in i.action for i in guided.interventions)
+    assert not blind.interventions, "blind mode has nothing to intervene with"
+
+
+def test_friction_reads_concurrence_and_drag(code, mapped):
+    """Zero friction is the guided-mode reading of two independent sources
+    concurring — the same fact a blind in-region landing is, observed through
+    a different instrument. Friction above zero records the specifications
+    dragging the decision against the evidence.
+    """
+    start = open_space("retry a failed request", code)
+
+    concurring = narrow(
+        start, code, mapped, "retry a failed request", "ontology",
+        region={"retry.py:10:parse_retry", "retry.py:30:backoff", "http.py:10:send"},
+    )
+    agreed = track("retry a failed request", [start, concurring])
+    agreed.mode = "guided"
+    assert agreed.friction == 0.0
+    assert "guided — 0 intervention(s)" in agreed.describe()
+
+    dragged = narrow(
+        start, code, mapped, "retry a failed request", "ontology",
+        region={"retry.py:10:parse_retry"},
+    )
+    dragging = track("retry a failed request", [start, dragged])
+    dragging.mode = "guided"
+    assert dragging.friction > 0.0

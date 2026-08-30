@@ -63,7 +63,7 @@ from pydantic import BaseModel, Field
 
 from .graph import Graph
 from .space import Basis, Verdict
-from .warrant import Convergence
+from .warrant import Convergence, Intervention
 
 logger = logging.getLogger("vesta.bundle")
 
@@ -167,6 +167,19 @@ class Witness(BaseModel):
     # without anyone noticing it had become so.
     vocabulary: str = ""
 
+    # How the narrowing related to the predicted region. A guided landing is
+    # partly by construction and must never be read with blind-mode weight;
+    # the interventions and friction carry guided mode's signal instead, and
+    # the mode is what keeps the two readings apart.
+    mode: str = "blind"
+    interventions: List[Intervention] = Field(default_factory=list)
+    friction: float = 0.0
+
+    # Which revision of the record format this follows, and the level it was
+    # produced at — so an absent check is never read as a passed one.
+    format_version: int = 1
+    level: int = 1
+
     # The verdict and its working.
     verdict: str = UNKNOWN
     findings: List[Finding] = Field(default_factory=list)
@@ -193,6 +206,13 @@ class Witness(BaseModel):
         ]
         if self.narrowed:
             lines.append("  narrowed  " + " → ".join(str(n) for n in self.narrowed))
+        if self.mode == "guided":
+            lines.append(
+                f"  guided — {len(self.interventions)} intervention(s), "
+                f"friction {self.friction:.0%}"
+            )
+            for meddled in self.interventions[:4]:
+                lines.append(f"    {meddled.describe()}")
         if self.output:
             lines.append(f"  output    {self.output}")
 
@@ -403,6 +423,19 @@ def _stayed_in_bounds(trail: Convergence, expected: Sequence[str]) -> Finding:
     within = set(expected)
     strayed = [n for n in last.admissible if n not in within]
     if strayed:
+        if trail.mode == "guided":
+            # In guided mode a survivor outside the region is the strongest
+            # flag the mode can raise: guidance demoted it and the evidence
+            # kept it anyway. It exists only because guidance may not remove.
+            return Finding(
+                check="the narrowing stayed where the standard says it belongs",
+                held=False,
+                detail=(
+                    f"{len(strayed)} of {len(last.admissible)} survivor(s) are "
+                    "outside the region notwithstanding guidance — the evidence "
+                    "overcame the specifications' pull"
+                ),
+            )
         return Finding(
             check="the narrowing stayed where the standard says it belongs",
             held=False,
@@ -411,9 +444,58 @@ def _stayed_in_bounds(trail: Convergence, expected: Sequence[str]) -> Finding:
                 "are outside the region the standard predicts"
             ),
         )
+    if trail.mode == "guided":
+        # Held, but partly by construction: the narrowing was steered. The
+        # friction figure, not the landing, carries the guided-mode signal.
+        return Finding(
+            check="the narrowing stayed where the standard says it belongs",
+            detail=(
+                f"all {len(last.admissible)} survivor(s) are inside it "
+                "(guided — read the friction, not the landing)"
+            ),
+        )
     return Finding(
         check="the narrowing stayed where the standard says it belongs",
         detail=f"all {len(last.admissible)} survivor(s) are inside it",
+    )
+
+
+def _guidance_observed(trail: Convergence) -> Finding:
+    """Whether guidance stayed within its bound — and within its mode.
+
+    In guided mode an intervention may demote and may not remove; that a run
+    honoured it is checkable from the record, and it is the strongest available
+    check on the part of the steering that rests on the specifications rather
+    than on the subject. And a blind record carrying interventions is not a
+    weaker record but a malformed one: there was nothing to intervene with.
+    """
+    meddled = trail.interventions
+    if trail.mode != "guided":
+        if meddled:
+            return Finding(
+                check="guidance stayed within its bound",
+                held=False,
+                detail=(
+                    f"{len(meddled)} intervention(s) on a blind narrowing — the "
+                    "mode says guidance never saw the region, and the record "
+                    "contradicts itself"
+                ),
+            )
+        return Finding(
+            check="guidance stayed within its bound",
+            detail="the mode was blind — guidance had nothing to do",
+        )
+
+    removed = [i for i in meddled if "demot" not in i.action]
+    if removed:
+        return Finding(
+            check="guidance stayed within its bound",
+            held=False,
+            detail=f"{len(removed)} intervention(s) removed a candidate",
+        )
+    return Finding(
+        check="guidance stayed within its bound",
+        detail=f"{len(meddled)} intervention(s), every one a demotion",
     )
 
 
@@ -430,6 +512,7 @@ def judge(
         _within_authority(trail),
         _output_stood_on_something(trail, output),
         _stayed_in_bounds(trail, expected),
+        _guidance_observed(trail),
     ]
 
 
@@ -467,6 +550,9 @@ def witness(
         commit=_commit(root),
         narrowed=[s.sites for s in trail.steps],
         outputs=[s.outputs for s in trail.steps],
+        mode=trail.mode,
+        interventions=list(trail.interventions),
+        friction=trail.friction,
         findings=findings,
         chain_at=chain_at,
         stood_by=list(getattr(expected, "because", ()) or ()),
