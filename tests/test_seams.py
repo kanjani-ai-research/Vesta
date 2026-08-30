@@ -108,7 +108,7 @@ def test_stating_a_rule_reaches_the_agent(fresh):
             },
         )
     )
-    assert "declare" in said
+    assert "noted" in said
 
 
 def test_a_change_to_agreed_behaviour_reaches_the_agent(fresh):
@@ -516,7 +516,7 @@ def test_capturing_a_rule_works_as_a_companion(fresh):
             },
         )
     )
-    assert "declare" in said
+    assert "noted" in said
 
 
 def test_the_contract_flow_is_reached_once_driving_is_on(fresh):

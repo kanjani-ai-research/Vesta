@@ -37,7 +37,7 @@ def _flat(text: str) -> str:
 def test_the_skill_tells_the_agent_to_record():
     """Without this, capture depends on an agent inventing the idea."""
     said = _flat(SKILL.read_text(encoding="utf-8"))
-    assert "declare" in said
+    assert "noted" in said
     assert "when they say it" in said
 
 
@@ -75,11 +75,14 @@ def test_the_tool_description_says_when_to_call_it():
     from vesta.sidecar import build_server
 
     tools = asyncio.run(build_server().list_tools())
-    declare = next(t for t in tools if t.name == "declare")
-    said = _flat(declare.description)
-    assert "the moment a user states" in said
-    assert "do not interrupt to confirm" in said
-    assert "expires with the turn" in said
+    catching = next(t for t in tools if t.name == "noted")
+    said = _flat(catching.description)
+    # The three things the description has to convey, whatever words carry
+    # them: catch it as it is said, do not stop to ask, and a rule about the
+    # code is not the same as an instruction for this minute.
+    assert "the instant a user lays down" in said
+    assert "do not ask permission" in said
+    assert "expires when the turn does" in said
 
 
 def test_the_standard_is_fixed_and_balanced():
@@ -225,7 +228,7 @@ def test_the_hook_tells_the_agent_to_record_a_stated_rule():
         "in this project every module must open with a docstring saying what "
         "it is for. can you check whether resolve.py follows that?"
     )
-    assert "declare" in said
+    assert "noted" in said
     assert "own words" in said
     # And it leaves the judgement with the agent rather than asserting.
     assert "may have" in said

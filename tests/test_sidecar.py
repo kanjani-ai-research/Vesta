@@ -149,3 +149,90 @@ def test_uses_labels_an_import_edge_distinctly_from_a_real_call(tmp_path, monkey
 
     assert "← use  caller.py:4" in said
     assert "← caller.py (imports it)" in said
+
+
+def test_a_stale_ontology_is_named_when_nothing_is_found(tmp_path, monkeypatch):
+    """"Nothing does that" and "nothing has read the part that does" are the
+    same sentence and opposite facts.
+
+    The ontology already knew it predated the code and said so only to a log,
+    which nobody reads. Measured on this repository, two whole modules were
+    unreachable that way, and the only way to tell was to already know.
+    """
+    import vesta.sidecar as sidecar
+
+    monkeypatch.setattr(sidecar, "graph_for", lambda *a, **k: Graph(root=str(tmp_path)))
+    monkeypatch.setattr(
+        sidecar, "recall_map", lambda p: Map(ontology="t", attachments=[
+            Attachment(node="n1", term="t1", label="something else", kind="activity",
+                       strength=1.0)
+        ])
+    )
+    monkeypatch.setattr(sidecar, "recall_ontology", lambda p: None)
+    monkeypatch.setattr("vesta.domain.predates_the_code", lambda p: True)
+
+    said = sidecar._does("encrypt user passwords", tmp_path)
+
+    assert "Nothing here is recorded as doing that" in said
+    assert "changed since it was last read" in said
+    assert "vesta-domain" in said
+
+
+def test_a_current_ontology_finding_nothing_says_only_that(tmp_path, monkeypatch):
+    """Where the ontology is current, "nothing does that" is the whole answer —
+    adding a caveat about staleness would send somebody to re-derive a map that
+    is already right."""
+    import vesta.sidecar as sidecar
+
+    monkeypatch.setattr(sidecar, "graph_for", lambda *a, **k: Graph(root=str(tmp_path)))
+    monkeypatch.setattr(
+        sidecar, "recall_map", lambda p: Map(ontology="t", attachments=[
+            Attachment(node="n1", term="t1", label="something else", kind="activity",
+                       strength=1.0)
+        ])
+    )
+    monkeypatch.setattr(sidecar, "recall_ontology", lambda p: None)
+    monkeypatch.setattr("vesta.domain.predates_the_code", lambda p: False)
+
+    said = sidecar._does("encrypt user passwords", tmp_path)
+
+    assert "Nothing here is recorded as doing that" in said
+    assert "changed since it was last read" not in said
+
+
+def test_the_working_is_kept_only_when_asked_for(tmp_path, monkeypatch):
+    """The chain is a local artefact for somebody debugging their own session.
+
+    Two orders of magnitude larger than the verdict it supports — measured, 78kb
+    against 4kb — so it is off unless asked for, and the witness carries a path
+    to it rather than the thing itself.
+    """
+    import vesta.sidecar as sidecar
+    from vesta.bundle import recent
+    from vesta.graph import Graph, Node
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    node = Node(id="n1", name="parse_retry", path="retry.py", line=10, kind=12)
+    monkeypatch.setattr(
+        sidecar, "graph_for", lambda *a, **k: Graph(root=str(tmp_path), nodes={node.id: node})
+    )
+    monkeypatch.setattr(
+        sidecar,
+        "recall_map",
+        lambda p: Map(
+            ontology="t",
+            attachments=[
+                Attachment(
+                    node="n1", term="t1", label="retry a failed request",
+                    kind="activity", strength=1.0, path="retry.py", name="parse_retry",
+                )
+            ],
+        ),
+    )
+
+    sidecar._narrowing("retry a failed request", "quietly", None, tmp_path)
+    assert not recent(tmp_path, 1)[0].chain_at, "off by default"
+
+    sidecar._narrowing("retry a failed request", "loudly", None, tmp_path, keeping=True)
+    kept = recent(tmp_path, 1)[0].chain_at
+    assert kept and Path(kept).is_file()

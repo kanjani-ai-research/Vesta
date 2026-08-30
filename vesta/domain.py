@@ -63,6 +63,29 @@ class Ontology(BaseModel):
     modules: str = ""
     derived_at: float = 0.0
 
+    @property
+    def version(self) -> str:
+        """What this ontology says, as a mark a record can cite.
+
+        `modules` marks the code an ontology was derived *from*; this marks what
+        it *says*, which is a different fact and the one that matters to
+        anything holding a decision made against it. An ontology decides which
+        region a change is expected to land in, so a record judged in-bounds
+        under one version and out under another is not contradicting itself —
+        it is being read against a standard that moved, and without a version
+        nobody can tell those apart.
+
+        Content-derived rather than counted up, because a vocabulary edited by
+        hand — a word removed, another rephrased — is a different ontology at
+        the same size, and it is exactly the edit somebody makes when they
+        disagree with what was derived.
+        """
+        said = "\n".join(
+            f"{t.get('kind', '')}:{t.get('label', '')}"
+            for t in sorted(self.terms, key=lambda t: (t.get("kind", ""), t.get("label", "")))
+        )
+        return hashlib.sha256(said.encode("utf-8")).hexdigest()[:16]
+
     def describe(self) -> str:
         kinds: Dict[str, int] = {}
         for term in self.terms:
@@ -151,6 +174,32 @@ def recall(repo: Path | str) -> Optional[Ontology]:
     if held.modules and held.modules != _mark(root, _speaks(root)):
         logger.info("the ontology for %s predates its current modules", root)
     return held
+
+
+def predates_the_code(repo: Path | str) -> bool:
+    """Whether the ontology was derived before the code it is asked about.
+
+    The check already existed and only wrote a log line, which nobody reads.
+    That made a real failure invisible: a module written after the last
+    derivation is named by nothing, so a question about it answers "nothing here
+    is recorded as doing that" — the same words as work the repository genuinely
+    does not do. Measured on this repository, `skill.py` and `bundle.py` were
+    both in exactly that state, and the only way to tell was to already know.
+
+    Coarse on purpose. It hashes each module's path and docstring length, so it
+    notices a module appearing or a docstring being rewritten, and misses an
+    edit of the same length. A cheap check that catches the common case beats an
+    exact one nobody can afford to run on every question.
+    """
+    root = Path(repo).expanduser().resolve()
+    path = _where(root)
+    if not path.is_file():
+        return False
+    try:
+        held = Ontology.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return bool(held.modules) and held.modules != _mark(root, _speaks(root))
 
 
 def as_terms(ontology: Ontology) -> List:

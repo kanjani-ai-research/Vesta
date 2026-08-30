@@ -18,7 +18,16 @@ from pathlib import Path
 import pytest
 
 from vesta.graph import Edge, Graph, Node
-from vesta.traverse import Term, about, attach, neighbours, read_ontology, where
+from vesta.traverse import (
+    Attachment,
+    Map,
+    Term,
+    about,
+    attach,
+    neighbours,
+    read_ontology,
+    where,
+)
 
 
 def node(name: str, path: str = "x.py", line: int = 0, container: str = "") -> Node:
@@ -201,3 +210,137 @@ def test_asking_in_words_the_label_does_not_use(tmp_path):
     assert [a.node for a in where(graph, mapped, "texts that overlap")] == ["n1"]
     # Something genuinely absent stays absent — the widening must not invent.
     assert where(graph, mapped, "database migration rollback") == []
+
+
+# ── A binding that survives the code moving ─────────────────────────────────
+#
+# A node id is sha256(path, line, name), so inserting a line above a definition
+# changes it. Measured on this repository, 235 of 344 bindings pointed at ids
+# the graph no longer had — 68% — and every one was skipped in silence, so a
+# stale map and a narrow one produced the same short answer.
+
+
+def _bound(path: str = "retry.py", line: int = 10) -> tuple:
+    """A definition and an attachment written about it where it then stood."""
+    definition = Node(
+        id=f"{path}:{line}:parse_retry",
+        name="parse_retry",
+        qualified="parse_retry",
+        kind=12,
+        path=path,
+        line=line,
+    )
+    binding = Attachment(
+        node=definition.id,
+        term="t1",
+        label="retry a failed request",
+        kind="activity",
+        strength=1.0,
+        how="read",
+        path=path,
+        name="parse_retry",
+    )
+    return definition, binding
+
+
+def test_a_definition_that_moved_is_found_again():
+    """The ordinary edit: three lines added above, everything shifts down."""
+    was, binding = _bound(line=10)
+    now = Node(
+        id="retry.py:13:parse_retry",
+        name="parse_retry",
+        qualified="parse_retry",
+        kind=12,
+        path="retry.py",
+        line=13,
+    )
+    mapped = Map(ontology="test", attachments=[binding])
+
+    resolved = mapped.resolve_against(Graph(root="/x", nodes={now.id: now}))
+
+    assert resolved.reanchored == [binding]
+    assert resolved.at[id(binding)] == now.id
+    assert not resolved.gone
+
+
+def test_re_anchoring_is_reported_not_silent():
+    """A repair is the signal that the ontology predates the code.
+
+    Folding it into the total would hide exactly what a reader needs in order to
+    know the map is worth re-deriving.
+    """
+    was, binding = _bound(line=10)
+    now = Node(
+        id="retry.py:13:parse_retry", name="parse_retry", qualified="parse_retry",
+        kind=12, path="retry.py", line=13,
+    )
+    mapped = Map(ontology="test", attachments=[binding])
+
+    said = mapped.resolve_against(Graph(root="/x", nodes={now.id: now})).describe()
+
+    assert "re-anchored" in said
+
+
+def test_a_definition_that_never_moved_is_not_reported_as_repaired():
+    was, binding = _bound(line=10)
+    mapped = Map(ontology="test", attachments=[binding])
+
+    resolved = mapped.resolve_against(Graph(root="/x", nodes={was.id: was}))
+
+    assert resolved.standing == [binding]
+    assert not resolved.reanchored
+    assert "re-anchored" not in resolved.describe()
+
+
+def test_a_renamed_definition_is_gone_not_guessed_at():
+    """Path and name is the identity a person uses to find a function again.
+
+    It either matches or it does not — what it must never do is match something
+    that merely resembles what was there, which would be an invented binding the
+    record cannot justify.
+    """
+    was, binding = _bound()
+    renamed = Node(
+        id="retry.py:10:parse_retry_spec", name="parse_retry_spec",
+        qualified="parse_retry_spec", kind=12, path="retry.py", line=10,
+    )
+    mapped = Map(ontology="test", attachments=[binding])
+
+    resolved = mapped.resolve_against(Graph(root="/x", nodes={renamed.id: renamed}))
+
+    assert resolved.gone == [binding]
+    assert not resolved.live
+
+
+def test_a_binding_written_before_this_existed_still_resolves_by_id():
+    """Old attachments carry no path or name and are not migrated.
+
+    They keep working wherever their id still resolves, and orphan otherwise —
+    the alternative was guessing at 235 bindings the record cannot support.
+    """
+    was, _ = _bound()
+    old = Attachment(
+        node=was.id, term="t1", label="retry a failed request",
+        kind="activity", strength=1.0,
+    )
+    mapped = Map(ontology="test", attachments=[old])
+
+    resolved = mapped.resolve_against(Graph(root="/x", nodes={was.id: was}))
+
+    assert resolved.standing == [old]
+
+
+def test_two_terms_on_one_definition_both_resolve():
+    """Keyed by object identity, not by node id.
+
+    Two attachments naming the same definition under different terms is
+    ordinary, and a mapping keyed the other way would silently lose one.
+    """
+    was, first = _bound()
+    second = first.model_copy(update={"term": "t2", "label": "wait and try again"})
+    mapped = Map(ontology="test", attachments=[first, second])
+
+    resolved = mapped.resolve_against(Graph(root="/x", nodes={was.id: was}))
+
+    assert len(resolved.live) == 2
+    assert resolved.at[id(first)] == resolved.at[id(second)] == was.id

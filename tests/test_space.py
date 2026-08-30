@@ -15,7 +15,18 @@ import pytest
 from vesta.enforce import COUNT_AT_MOST, FILES_MATCHING, against, against_with_witness
 from vesta.graph import Edge, Graph, Node
 from vesta.rules import Found, Rule
-from vesta.space import Verdict, demote, gap, refine, sound_prune, survive
+from vesta.space import (
+    Basis,
+    Outcome,
+    Verdict,
+    Witness,
+    demote,
+    evaluated,
+    gap,
+    refine,
+    sound_prune,
+    survive,
+)
 
 
 @pytest.fixture
@@ -108,3 +119,108 @@ def test_against_with_witness_survivors_match_against_held_and_broken(repo):
     checked_texts = {f.rule for f in verdict.findings if not f.undecided}
     survivor_texts = {r.stated or r.text for r in result.survivors}
     assert survivor_texts <= checked_texts
+
+
+# ── What a judgement rests on ───────────────────────────────────────────────
+
+
+def test_a_basis_nobody_stated_claims_the_least():
+    """The default has to be the kind that cannot be re-run.
+
+    A judgement whose basis nobody stated is one nothing can replay, and
+    defaulting the other way is how a record comes to imply that all of its
+    reasoning is checkable when some of it was somebody reading.
+    """
+    assert Outcome(verdict=Verdict.SOUND_PRUNE).basis is Basis.ASSERTED
+    assert Witness(rule="x", verdict=Verdict.GAP).basis is Basis.ASSERTED
+    assert not Witness(rule="x", verdict=Verdict.GAP).replayable
+
+
+def test_only_re_runnable_kinds_count_as_replayable():
+    """Structural is a predicate over the graph and byte is a hash comparison;
+    both either agree with what was recorded or do not. An assertion is somebody
+    having read the code, and re-reading it proves nothing about the first read.
+    """
+    def witness(basis):
+        return Witness(rule="x", verdict=Verdict.SOUND_PRUNE, basis=basis)
+
+    assert witness(Basis.STRUCTURAL).replayable
+    assert witness(Basis.BYTE).replayable
+    assert not witness(Basis.ASSERTED).replayable
+
+
+def test_a_gap_rests_on_nothing_re_runnable():
+    """Nothing was decided, so there is nothing replay could confirm."""
+    assert gap("no check exists for this").basis is Basis.ASSERTED
+
+
+def test_refinement_carries_the_basis_through():
+    """Dropped between the outcome and the witness, it would be as though the
+    member had never stated it."""
+    result = refine(
+        [Rule(text="never a bare except")],
+        [lambda r: sound_prune("nothing matches", Basis.STRUCTURAL)],
+    )
+
+    assert result.witness[0].basis is Basis.STRUCTURAL
+    assert result.replayable == 1.0
+
+
+def test_a_result_states_its_own_replayable_share():
+    """Reported rather than assumed: one judgement a reader can verify and one
+    they can only take or leave is the difference between an audit and a
+    summary."""
+    result = refine(
+        [Rule(text="first"), Rule(text="second")],
+        [
+            lambda r: (
+                sound_prune("structural", Basis.STRUCTURAL)
+                if "first" in (r.stated or r.text)
+                else demote("somebody read it")
+            )
+        ],
+    )
+
+    assert result.replayable == 0.5
+
+
+# ── A verdict pooled from an authority ──────────────────────────────────────
+
+
+def test_an_evaluated_verdict_demotes_and_never_prunes():
+    """`SOUND_PRUNE` means certain and not to be reopened, and a probabilistic
+    result is precisely not that.
+
+    Allowing an evaluation to prune would let a wrong call silently remove the
+    right answer from the space with no way back; as a demotion it costs a
+    ranking rather than a candidate.
+    """
+    outcome = evaluated("the retry-policy skill says otherwise", authority="retry-policy")
+
+    assert outcome.verdict is Verdict.DEMOTE
+    assert outcome.basis is Basis.EVALUATED
+
+
+def test_an_evaluated_verdict_carries_what_it_was_shown():
+    """The retrieval is deterministic even where the judgement is not. When a
+    pooled verdict turns out wrong the cause is usually what was put in front of
+    it, and a record that blends the two cannot say which."""
+    outcome = evaluated("x", authority="retry-policy", evidence=["a.py:10:work"])
+
+    assert outcome.authority == "retry-policy"
+    assert outcome.evidence == ["a.py:10:work"]
+
+
+def test_an_evaluation_is_rerunnable_but_not_replayable():
+    """Re-running a computation answers *does this still hold*; re-running an
+    evaluation answers *does it still evaluate the same way*. Counting the
+    second as the first would let a bundle report as deterministic a share of
+    its reasoning that is not.
+    """
+    pooled = Witness(rule="x", verdict=Verdict.DEMOTE, basis=Basis.EVALUATED)
+    read = Witness(rule="x", verdict=Verdict.DEMOTE, basis=Basis.ASSERTED)
+    computed = Witness(rule="x", verdict=Verdict.SOUND_PRUNE, basis=Basis.STRUCTURAL)
+
+    assert not pooled.replayable and pooled.rerunnable
+    assert not read.replayable and not read.rerunnable
+    assert computed.replayable and computed.rerunnable

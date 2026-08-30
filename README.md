@@ -93,6 +93,8 @@ tools everywhere else:
     /vesta:does       where a kind of work happens, asked in ordinary words
     /vesta:defects    things worth fixing, found without being asked
     /vesta:decided    rules you have stated, and whether the code honours them
+    /vesta:honing     whether you're honing in, or just going round again
+    /vesta:why        why it concluded that, and whether it still holds today
     /vesta:tutorial   learn it a page at a time, on your own repository
 
 `/vesta:help` lists the rest. Most of the time none of this needs typing —
@@ -125,7 +127,7 @@ you gave an agent in earlier sessions — a passing remark and a real decision
 read identically in a transcript, and only you know which is which.
 
     /vesta:learn        shows what's waiting, lets you confirm or dismiss each
-    /vesta:declare      state a rule outright, one you've always just observed
+    /vesta:noted        catch a rule outright, one you've always just observed
                          and never had to correct anyone on
 
 In a live session, the `learn` MCP tool asks directly, one candidate at a

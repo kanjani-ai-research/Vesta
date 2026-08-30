@@ -146,19 +146,63 @@ def write_attachments(repo: Path | str, text: str) -> Tuple[Map, List[str]]:
         t["label"].strip().lower(): t for t in (ontology.terms if ontology else [])
     }
 
+    from .authority import bounded_region
+
     already = {(a.node, a.label.lower()) for a in mapped.attachments}
+    # The region a binding was written about, hashed once per definition rather
+    # than once per attachment: several terms commonly attach to the same
+    # definition, and each would otherwise re-read and re-hash the same file.
+    stamped: Dict[str, tuple] = {}
     for node_id, label in placed:
         if (node_id, label.lower()) in already:
             continue
         term = by_label.get(label.lower())
+        node = graph.nodes.get(node_id)
+
+        if node_id not in stamped:
+            stamped[node_id] = (
+                bounded_region(graph, node, root) if node is not None else ("", "")
+            )
+        region, digest = stamped[node_id]
+
+        if term is None:
+            # A label naming no term is a typo, not a new word.
+            #
+            # This used to invent `loose:<hash>` with an empty kind and carry
+            # on. The attachment then existed, pointed at real code, and was
+            # bound to a term the ontology had never heard of — so it answered
+            # nothing, `neighbours` could never match it (that joins on term
+            # id), and nobody was told. Measured on this repository, an agent
+            # paraphrasing its own labels produced 51 of them in one pass and
+            # only caught it by reading the JSON by hand.
+            #
+            # Refused and named instead. The agent that wrote the label is the
+            # only thing that can fix it, and it needs to be told which one
+            # was wrong — the same reason `read_attachments` already refuses a
+            # citation the graph cannot place rather than storing a binding to
+            # nothing.
+            refused.append(
+                f"{node_id}: no term is named {label!r} — "
+                "copy the label exactly as it was written"
+            )
+            continue
+
         mapped.attachments.append(
             Attachment(
                 node=node_id,
-                term=term["id"] if term else f"loose:{abs(hash(label)) % 100000}",
-                label=term["label"] if term else label,
-                kind=term.get("kind", "") if term else "",
+                term=term["id"],
+                label=term["label"],
+                kind=term.get("kind", ""),
                 strength=1.0,
                 how="read",
+                # What this points at, so a line inserted above it does not
+                # orphan the binding, and what its bytes were, so a later
+                # reader can tell a claim that still stands from one whose
+                # code changed underneath it.
+                path=node.path if node is not None else "",
+                name=node.name if node is not None else "",
+                region=region,
+                region_hash=digest,
             )
         )
         already.add((node_id, label.lower()))
@@ -193,11 +237,20 @@ def _waiting(root: Path) -> Optional[str]:
     )
 
 
-def definitions_worth_reading(repo: Path | str, limit: int = 80) -> List[str]:
+def definitions_worth_reading(repo: Path | str, limit: int = 400) -> List[str]:
     """The definitions an agent should read, most depended upon first.
 
     Public and non-test: a private helper is about whatever its caller is about,
     and reading every one of them is most of the cost for least of the meaning.
+
+    **The limit is a coverage ceiling, not a page size.** A definition never
+    offered is never bound, and a question that should have reached it comes
+    back empty — indistinguishable from a matcher that failed, which is the more
+    expensive mistake because it sends somebody to fix the wrong thing. This
+    defaulted to 80, and on this repository that bound 79 of 646 definitions:
+    seven in eight invisible to every question asked in the vocabulary of the
+    work. Four hundred covers an ordinary repository outright and still sorts by
+    reference count, so a caller who wants fewer gets the ones that matter most.
     """
     root = Path(repo).expanduser().resolve()
     graph = graph_for(root, trust_for=600)
@@ -225,7 +278,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--definitions", action="store_true", help="list what is worth reading"
     )
-    parser.add_argument("--limit", type=int, default=80)
+    parser.add_argument("--limit", type=int, default=400)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)

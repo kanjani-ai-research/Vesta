@@ -452,7 +452,7 @@ In *this* repository:
   vesta decided --check
       whether the code still honours them
 
-  /vesta:declare <a rule>
+  /vesta:noted <a rule>
       state one outright, for a constraint you
       have simply always observed and so never
       had to correct anybody about

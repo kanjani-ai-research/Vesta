@@ -73,3 +73,29 @@ def test_a_repository_that_says_nothing_yields_nothing(tmp_path: Path):
     (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
 
     assert len(_speaks(tmp_path)) < 3
+
+
+def test_an_ontology_versions_what_it_says_not_when_it_was_written():
+    """An ontology decides which region a change is expected to land in, so
+    anything holding a decision made against it needs to cite which one.
+
+    Content-derived rather than counted, because a vocabulary edited by hand — a
+    word removed, another rephrased — is a different ontology at the same size,
+    and that is exactly the edit somebody makes when they disagree with what was
+    derived.
+    """
+    from vesta.domain import Ontology
+
+    said = [
+        {"kind": "activity", "label": "retry a failed request"},
+        {"kind": "role", "label": "a retry policy"},
+    ]
+    first = Ontology(terms=list(said))
+
+    assert first.version == Ontology(terms=list(said)).version
+    assert first.version == Ontology(terms=list(reversed(said))).version, "order is not content"
+    assert first.version != Ontology(terms=said[:1]).version, "a removed word is a new version"
+
+    reworded = [dict(t) for t in said]
+    reworded[0]["label"] = "retry a failed request, at most three times"
+    assert first.version != Ontology(terms=reworded).version

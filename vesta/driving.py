@@ -376,14 +376,37 @@ def iterate(repo: Path | str, at: Optional[float] = None) -> Verdict:
         here.readings = here.readings[-(STUCK_AFTER + 2) :]
     here.iterations += 1
 
+    # A decision space that has stopped contracting, if one is being tracked.
+    # Independent evidence of the same thing the readings measure: `stuck` says
+    # the repository stopped changing, this says the work stopped being decided.
+    # A loop can be moving — writing code every iteration — while the space it
+    # is choosing from never closes, and the readings alone cannot see that.
+    from .warrant import recall as _recall_space
+
+    closing = _recall_space(repo)
+
     if verdict.done:
         here.on = False
         here.stopped = "done"
     elif here.stuck:
         verdict.keep_going = False
+        why = f"nothing has changed in {STUCK_AFTER} iteration(s)"
+        if closing is not None and closing.stuck:
+            # Both axes agreeing is worth saying, because the remedies differ
+            # and a reader told only "stuck" cannot tell which they have.
+            why += (
+                f", and the decision space for \"{closing.action}\" has not "
+                "contracted either"
+            )
+        verdict.why = f"{why} — say what remains rather than continuing"
+        here.on = False
+        here.stopped = verdict.why
+    elif closing is not None and closing.stuck:
+        verdict.keep_going = False
         verdict.why = (
-            f"nothing has changed in {STUCK_AFTER} iteration(s) — "
-            "say what remains rather than continuing"
+            f'the decision space for "{closing.action}" has not contracted in '
+            f"{STUCK_AFTER} step(s) — the work is being elaborated rather than "
+            "decided, and iterating will not close it"
         )
         here.on = False
         here.stopped = verdict.why

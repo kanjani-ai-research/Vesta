@@ -402,6 +402,14 @@ def _asked(args: argparse.Namespace) -> int:
             where,
         ),
         "projects": lambda: sidecar._projects(where),
+        "honing": lambda: sidecar._narrowing(
+            " ".join(args.action) if isinstance(args.action, list) else args.action,
+            args.established,
+            args.outputs or None,
+            where,
+            args.keeping,
+        ),
+        "why": lambda: sidecar._replayed(where, args.which),
     }
     with sidecar.quiet_stdout():
         answer = answering[args.command]()
@@ -868,6 +876,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     does.add_argument("phrase", help="the work, in ordinary words")
     does.add_argument("--root", default=".")
     does.set_defaults(run=_asked)
+
+    honing = sub.add_parser(
+        "honing", help="whether you are honing in, or just going round again"
+    )
+    honing.add_argument("action", nargs="+", help="the work, in plain words")
+    honing.add_argument("--established", default="", help="what you just worked out")
+    honing.add_argument(
+        "--outputs", type=int, default=0, help="behaviours still admissible"
+    )
+    honing.add_argument(
+        "--keeping",
+        action="store_true",
+        help="keep the full working alongside the answer",
+    )
+    honing.add_argument("--root", default=".")
+    honing.set_defaults(run=_asked)
+
+    why = sub.add_parser("why", help="why it concluded that, and whether it still holds")
+    why.add_argument(
+        "--which", type=int, default=1, help="how far back, newest first"
+    )
+    why.add_argument("--root", default=".")
+    why.set_defaults(run=_asked)
 
     uses = sub.add_parser("uses", help="where a definition is and what refers to it")
     uses.add_argument("name")

@@ -369,7 +369,7 @@ def _a_rule_stated(prompt: str) -> str:
     return (
         "The user may have just stated a standing rule for this project. If "
         "they did — a constraint on the code rather than on this turn, said "
-        "rather than mused — call the `declare` tool with it in their own "
+        "rather than mused — call the `noted` tool with it in their own "
         "words, say in one line that it was recorded, and carry on with what "
         "they actually asked for. If it only scopes this turn, do nothing."
     )

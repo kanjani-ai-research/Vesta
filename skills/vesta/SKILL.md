@@ -36,7 +36,7 @@ decided — and the moment to capture that is when they say it, not later. A use
 who has to run a command to record a rule records nothing.
 
 So when the user states a standing constraint in the course of ordinary work,
-call **`declare`** with it, in their own words. Then say in one line that it was
+call **`noted`** with it, in their own words. Then say in one line that it was
 recorded, and carry on with what they actually asked for.
 
 What counts:
@@ -50,7 +50,7 @@ What counts:
   you reached, or a rule you inferred from the code — Vesta already derives
   those, and a rule the user never stated has nobody behind it.
 
-Record it once. `declare` is safe to call again with the same words — it
+Record it once. `noted` is safe to call again with the same words — it
 replaces rather than duplicates — but announcing it twice is noise.
 
 Do not interrupt to confirm. Recording is cheap and reversible: `decided`
@@ -59,7 +59,7 @@ each one makes the capture cost more than the rule is worth.
 
 ## Before changing files, ask what bears on them
 
-Call **`bears_on`** with the files you are about to change, alongside `touches`.
+Call **`bears`** with the files you are about to change, alongside `touches`.
 It answers with nothing at all unless a rule the user set covers this work *and*
 the code no longer matches it — uncommon, and exactly when they want to know.
 

@@ -84,10 +84,101 @@ class Attachment(BaseModel):
     # know whether a name matched or a whole file did.
     how: str = "name"
 
+    # What this points at, beside the id rather than instead of it.
+    #
+    # A node id is sha256(path, line, name), so inserting a line above a
+    # definition changes it and an attachment holding only the hash has nothing
+    # left to match on. Measured on this repository: 235 of 344 bindings — 68% —
+    # pointed at ids the graph no longer had, and every one was skipped in
+    # silence, so a stale map and a narrow one produced the same short answer.
+    #
+    # `Note` has carried `path` and `line` since it was written, for this exact
+    # reason. This is the same fix applied to the record that never had it.
+    # Empty on an attachment written before this existed, which is why
+    # `resolve_in` falls back to the id alone rather than treating a missing
+    # path as a miss.
+    path: str = ""
+    name: str = ""
+
+    # The bytes the claim was made about, and the span they covered. Compared
+    # later against the same span to tell a binding that still stands from one
+    # whose code changed underneath it — `authority.check` is the mechanism and
+    # this is the field that lets it run on an attachment at all. Without it,
+    # currency is not merely unknown, it is unaskable: hashing the region now
+    # yields something to compare against nothing, and a check that cannot fail
+    # is not a check.
+    region: str = ""
+    region_hash: str = ""
+
     def describe(self, graph: Graph) -> str:
         node = graph.nodes.get(self.node)
         where = node.describe() if node else self.node
         return f"{where} — {self.label} ({self.kind}, {self.strength:.2f})"
+
+    def resolve_in(self, graph: Graph) -> Optional[str]:
+        """The node this points at now, re-anchoring by path and name if it moved.
+
+        Returns the current id, or None where nothing in the graph answers to it.
+        The id is tried first because it is exact: a definition that has not
+        moved resolves without a scan. Falling back to `(path, name)` recovers
+        the ordinary case — a definition still in its file, still called what it
+        was called, a few lines up or down.
+
+        **A path-and-name match is not a guess.** It is the same identity a
+        person uses to find a function again, and it either matches or it does
+        not. What it cannot survive is a rename or a move between files, and
+        those correctly report as gone rather than being matched to something
+        that merely resembles them.
+        """
+        if self.node in graph.nodes:
+            return self.node
+        if not self.path or not self.name:
+            return None
+        for node in graph.nodes.values():
+            if node.path == self.path and node.name == self.name:
+                return node.id
+        return None
+
+
+class Resolved(BaseModel):
+    """A map's bindings, sorted by whether the code they name is still there.
+
+    Three outcomes and not two, because "still standing" and "found again after
+    it moved" are different facts about the same repository: the first says the
+    ontology is current, the second says it predates the code and is worth
+    re-deriving. Reporting them as one number is how 68% decay looked like a
+    narrow ontology for as long as it did.
+    """
+
+    # Bindings whose id still resolves — the code has not moved at all.
+    standing: List[Attachment] = Field(default_factory=list)
+    # Bindings recovered by path and name after their id changed.
+    reanchored: List[Attachment] = Field(default_factory=list)
+    # Bindings nothing answers to: renamed, moved between files, or deleted.
+    gone: List[Attachment] = Field(default_factory=list)
+
+    # Where each live attachment points now, keyed by `id()` of the attachment.
+    # Keyed by object identity rather than by node id because two attachments
+    # can name the same definition under different terms, and a dict keyed the
+    # other way would silently lose one.
+    at: Dict[int, str] = Field(default_factory=dict)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    @property
+    def live(self) -> List[Attachment]:
+        """Everything that still points at real code, however it got there."""
+        return self.standing + self.reanchored
+
+    def describe(self) -> str:
+        parts = [f"{len(self.live)} binding(s) resolve"]
+        if self.reanchored:
+            parts.append(
+                f"{len(self.reanchored)} re-anchored after the code moved"
+            )
+        if self.gone:
+            parts.append(f"{len(self.gone)} name nothing in this repository")
+        return ", ".join(parts)
 
 
 class Map(BaseModel):
@@ -104,6 +195,37 @@ class Map(BaseModel):
     # not built or something it calls by another name, and both are worth
     # seeing.
     unattached: List[str] = Field(default_factory=list)
+
+    def resolve_against(self, graph: Graph) -> "Resolved":
+        """Every attachment, re-anchored where its definition moved.
+
+        Indexed once rather than scanned per attachment: `Attachment.resolve_in`
+        walks the graph to find a moved definition, and doing that for each of a
+        few hundred bindings against a few thousand definitions is the kind of
+        quadratic that only shows up on somebody else's repository.
+
+        The re-anchored ones are counted separately from the ones that never
+        moved. A repair is a fact worth surfacing — it is the signal that the
+        ontology predates the code and is worth re-deriving — and folding it
+        into the total would hide exactly what a reader needs to see.
+        """
+        by_identity: Dict[Tuple[str, str], str] = {}
+        for node in graph.nodes.values():
+            by_identity.setdefault((node.path, node.name), node.id)
+
+        found = Resolved()
+        for attachment in self.attachments:
+            if attachment.node in graph.nodes:
+                found.at[id(attachment)] = attachment.node
+                found.standing.append(attachment)
+                continue
+            moved = by_identity.get((attachment.path, attachment.name))
+            if moved is not None and attachment.path and attachment.name:
+                found.at[id(attachment)] = moved
+                found.reanchored.append(attachment)
+                continue
+            found.gone.append(attachment)
+        return found
 
     def for_node(self, node_id: str) -> List[Attachment]:
         return [a for a in self.attachments if a.node == node_id]
@@ -213,6 +335,7 @@ def attach(
             strength = max(len(shared) / len(wanted), len(shared) / len(spoken))
             if strength < floor:
                 continue
+            bound = graph.nodes.get(node_id)
             found.attachments.append(
                 Attachment(
                     node=node_id,
@@ -220,6 +343,15 @@ def attach(
                     label=term.label,
                     kind=term.kind,
                     strength=round(strength, 2),
+                    # What this points at, so a line inserted above it does not
+                    # orphan the binding. No region hash: this binder matched a
+                    # definition's *name* against a term's words and never read
+                    # its body, so it has no claim about those bytes to make.
+                    # Stamping one here would manufacture a currency check for a
+                    # claim that was never about the code's contents — the same
+                    # false confidence as hashing a region nobody recorded.
+                    path=bound.path if bound else "",
+                    name=bound.name if bound else "",
                 )
             )
             hit = True

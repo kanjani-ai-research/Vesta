@@ -50,7 +50,15 @@ KINDS = (
     "harvests",
     "sessions",
     "prepared",
+    "converging",
 )
+
+# Holdings kept as a directory per project rather than a single file, so the
+# file walk above steps straight past them. Named separately rather than making
+# the walk recursive: recursing would also descend into anything else that ever
+# gains a subdirectory, and a reclaim that removes more than it was asked to is
+# the one mistake this must not make.
+NESTED = ("bundles",)
 
 # How long a preparation mark is believed before it is treated as abandoned.
 # Longer than a build takes, short enough that a crashed process does not block
@@ -125,6 +133,25 @@ def _key_of(path: Path) -> str:
     return stem.replace("-stamps", "")
 
 
+def _project_of(holding: Path) -> Optional[Path]:
+    """The repository a nested holding says it belongs to, if it says.
+
+    Read from the holding rather than inferred from its name, because a name
+    carries a hash of a path and a hash cannot be reversed into one. A bundle
+    records its project outright, so the question has a real answer here that
+    it does not have for a graph file — and an answer beats a key lookup that
+    treats "not mentioned anywhere else" as "deleted".
+    """
+    for path in sorted(holding.glob("*.json"))[-1:]:
+        try:
+            said = json.loads(path.read_text(encoding="utf-8")).get("project", "")
+        except (OSError, ValueError):
+            return None
+        if said:
+            return Path(said)
+    return None
+
+
 def sweep(dry: bool = False) -> Swept:
     """Let go of records whose repository is gone.
 
@@ -171,6 +198,43 @@ def sweep(dry: bool = False) -> Swept:
                     path.unlink()
                 except OSError as exc:
                     logger.info("could not remove %s: %s", path, exc)
+
+    for kind in NESTED:
+        directory = home() / kind
+        if not directory.is_dir():
+            continue
+        for holding in sorted(directory.iterdir()):
+            if not holding.is_dir():
+                continue
+
+            # Which repository this belongs to, asked of the holding itself
+            # before falling back to what the graphs claim.
+            #
+            # `alive` is built only from graph files, so a project holding
+            # bundles and no graph is unknown to it — and "unknown" would then
+            # mean "gone", which would reclaim a live repository's history. A
+            # bundle records its own project, so it can answer for itself; only
+            # when it cannot is the graph key used, and a holding nothing can
+            # place is kept rather than removed. Gone must mean gone.
+            root = _project_of(holding)
+            if root is not None:
+                if root.is_dir():
+                    swept.kept += 1
+                    continue
+            elif _key_of(holding) in alive or not alive:
+                swept.kept += 1
+                continue
+
+            inside = [p for p in holding.rglob("*") if p.is_file()]
+            swept.removed.append(f"{kind}/{holding.name}")
+            swept.freed += sum(p.stat().st_size for p in inside)
+            if not dry:
+                try:
+                    for p in inside:
+                        p.unlink()
+                    holding.rmdir()
+                except OSError as exc:
+                    logger.info("could not remove %s: %s", holding, exc)
 
     return swept
 

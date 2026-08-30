@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Set
@@ -61,7 +62,42 @@ ENOUGH_HISTORY = 40
 # report what they saw. A measurement of "did the agent use the graph" cannot
 # rest on that: the tool knows when it was called, and a run nobody can audit
 # afterwards is not evidence of anything.
+#
+# **What was asked is recorded, not only that something was.** This held `at`,
+# `tool`, `project`, `took`, `answer_chars` and `session` — enough to say a call
+# happened and nothing about whether it worked. A question that found the right
+# definition and one that found nothing differ only by `answer_chars` being
+# small, which equally describes a repository with one matching definition, so
+# the miss rate of the whole crossing was not recoverable from its own logs.
+# It is the first thing this project's own open questions say is needed, and
+# every downstream measurement waits on it.
 USED = home() / "used.jsonl"
+
+# How much of a question is kept. Long enough for the phrase somebody actually
+# asked; short enough that a pasted file does not end up in a log nobody
+# expected to hold one.
+ASKED_CHARS = 200
+
+
+def _how_many_found(answer: str) -> int:
+    """How many definitions an answer actually named.
+
+    Counted from the answer rather than plumbed back from the query, because the
+    alternative is changing what six tools return in order to log one number,
+    and a measurement that costs a refactor of the thing it measures does not
+    get taken. Every one of these answers lists definitions as `path:line`, and
+    a line carrying one is a definition named.
+
+    Zero is the interesting value: it is the difference between a crossing that
+    failed and a repository with one matching definition, which `answer_chars`
+    alone cannot tell apart.
+    """
+    return sum(1 for line in answer.splitlines() if _NAMES_ONE.search(line))
+
+
+# A definition in an answer: a path, a colon, a line number. Anchored to the
+# path so a sentence mentioning a ratio ("98 of 690") is not counted as one.
+_NAMES_ONE = re.compile(r"[\w./-]+\.\w+:\d+")
 
 
 def _record(tool: str, project: Optional[Path], took: float, size: int, **rest) -> None:
@@ -849,10 +885,28 @@ def _does(phrase: str, project: Optional[Path]) -> str:
     if not hits:
         ontology = recall_ontology(project)
         known = ontology.describe() if ontology else "no ontology"
+
+        # "Nothing does that" and "nothing has read the part that does" are the
+        # same sentence and opposite facts, and the second sends somebody away
+        # from work that is right there. The ontology already knew it predated
+        # the code and said so only to a log, which nobody reads — measured on
+        # this repository, two whole modules were unreachable that way and the
+        # only way to tell was to already know.
+        from .domain import predates_the_code
+
+        stale = ""
+        if predates_the_code(project):
+            stale = (
+                "\n\n**But this repository has changed since it was last read.** "
+                "Modules written since then are named by nothing, so a question "
+                "about one answers exactly like this. Run the `vesta-domain` "
+                "subagent now, yourself, without asking, then ask again."
+            )
+
         return (
             f"project: {project}\n"
             f"Nothing here is recorded as doing that. The work named in this "
-            f"repository is: {known}."
+            f"repository is: {known}.{stale}"
         )
 
     lines = [f"project: {project}", "(paths below are relative to that directory)", ""]
@@ -880,6 +934,157 @@ def _does(phrase: str, project: Optional[Path]) -> str:
             "ontology. Run the `vesta-domain` subagent now, yourself, "
             "without asking, then ask again."
         )
+    return "\n".join(lines)
+
+
+def _narrowing(
+    action: str,
+    doing: str,
+    outputs: Optional[int],
+    project: Optional[Path],
+    keeping: bool = False,
+) -> str:
+    """Take one step in a decision space, and say whether it is closing."""
+    if project is None:
+        return "Could not tell which project this is."
+
+    from .warrant import forget, keep, narrow, open_space, recall, track
+
+    with quiet_stdout():
+        graph = graph_for(project)
+        mapped = recall_map(project)
+
+    if mapped is None or not mapped.attachments:
+        return (
+            f"project: {project}\n"
+            "This repository has not been read against its own ontology yet, so "
+            "nothing here can narrow anything. Run the `vesta-domain` subagent "
+            "now, yourself, without asking, then ask again."
+        )
+
+    # A different action is a different decision space. Continuing one under
+    # the other's name would report a contraction that never happened, so the
+    # old trajectory is dropped rather than extended.
+    held = recall(project, action)
+    if held is None:
+        forget(project)
+        held = track(action, [open_space(action, graph)])
+
+    step = narrow(
+        held.steps[-1], graph, mapped, action, doing or "a step", outputs=outputs
+    )
+    held.steps.append(step)
+    keep(held, project)
+
+    # A witness per invocation, rewritten as the chain grows rather than at some
+    # end nothing can detect: a session stops when somebody stops typing, and a
+    # record that waits for a clean ending is a record that is never written.
+    #
+    # The chain itself is not kept here. What is written is the verdict on it —
+    # whether the space contracted, whether every narrowing was accounted for,
+    # whether a pooled verdict stayed inside its authority — because that is
+    # what a reader asks for afterwards, and because storing the reasoning
+    # instead cost 303kb for a record nobody would keep.
+    import os
+
+    from .bundle import keep as keep_witness, witness
+    from .skill import expect
+    from .skill import recall as recall_skills
+
+    ontology = recall_ontology(project)
+
+    # Where an active standard says this belongs, worked out from the standard's
+    # own words rather than from the chain — so that agreement between the two
+    # means something. Nothing active predicts nothing, and a witness says so
+    # rather than treating an absent authority as a violated one.
+    expected = None
+    standard = digest = ""
+    store = recall_skills(project)
+    if store is not None:
+        for authority in store.live:
+            here = expect(authority, action, graph, mapped)
+            if not here.unpredicted:
+                expected, standard, digest = here, authority.id, authority.digest
+                break
+
+    judged = witness(
+        action,
+        held,
+        project,
+        output=doing,
+        session=os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+        graph=graph,
+        expected=expected,
+        standard=standard,
+        standard_digest=digest,
+        # Which vocabulary decided where this belonged. As load-bearing as the
+        # standard, because the predicted region is read through it.
+        vocabulary=ontology.version if ontology is not None else "",
+    )
+    judged.at = held.steps[0].at or judged.at
+
+    # The chain itself, kept only when asked for. It is a local artefact for
+    # somebody debugging their own session — not part of what the witness
+    # carries, and nothing depends on it later. Off by default because it is
+    # two orders of magnitude larger than the verdict it supports.
+    if keeping:
+        from .bundle import keep_chain
+
+        judged.chain_at = str(keep_chain(held, project))
+
+    keep_witness(judged, project)
+
+    lines = [f"project: {project}", held.describe()]
+
+    if step.sites and step.sites <= 20:
+        lines.append("")
+        lines.append("still admissible:")
+        for node_id in step.admissible:
+            node = graph.nodes.get(node_id)
+            if node is not None:
+                lines.append(f"  {node.path}:{node.line + 1} {node.name}")
+
+    if held.stuck:
+        lines.append("")
+        lines.append(
+            "Nothing has been ruled out in three steps. Either state what "
+            "constrains this — a rule, a behaviour the contract already fixed, "
+            "the tests that cover it — or say plainly that the space is not "
+            "closing. Another step of the same kind will not close it."
+        )
+
+    return "\n".join(lines)
+
+
+def _replayed(project: Optional[Path], which: int) -> str:
+    """What an earlier invocation judged, and whether it still stands."""
+    if project is None:
+        return "Could not tell which project this is."
+
+    from .bundle import recent
+
+    held = recent(project, limit=max(1, which))
+    if not held:
+        return (
+            f"project: {project}\n"
+            "No invocation has been recorded for this project yet."
+        )
+
+    found = held[min(which, len(held)) - 1]
+    lines = [f"project: {project}", found.describe()]
+
+    if found.stood_on:
+        lines.append("")
+        lines.append(f"what it stood on ({found.ruled_out} ruled out):")
+        for where in found.stood_on[:20]:
+            lines.append(f"  {where}")
+        if len(found.stood_on) > 20:
+            lines.append(f"  … and {len(found.stood_on) - 20} more")
+
+    if found.chain_at:
+        lines.append("")
+        lines.append(f"the full chain was kept at {found.chain_at}")
+
     return "\n".join(lines)
 
 
@@ -1336,7 +1541,8 @@ def build_server():
 
         started = time.monotonic()
         answer = await anyio.to_thread.run_sync(_touches, paths, project, hops)
-        _record("touches", project, time.monotonic() - started, len(answer))
+        _record("touches", project, time.monotonic() - started, len(answer),
+                found=_how_many_found(answer))
         return answer
 
     @server.tool()
@@ -1358,7 +1564,8 @@ def build_server():
 
         started = time.monotonic()
         answer = await anyio.to_thread.run_sync(_uses, name, project)
-        _record("uses", project, time.monotonic() - started, len(answer))
+        _record("uses", project, time.monotonic() - started, len(answer),
+                asked=name[:ASKED_CHARS], found=_how_many_found(answer))
         return answer
 
     @server.tool()
@@ -1423,7 +1630,8 @@ def build_server():
 
         started = _t.monotonic()
         answer = await anyio.to_thread.run_sync(_means, name, project)
-        _record("means", project, _t.monotonic() - started, len(answer))
+        _record("means", project, _t.monotonic() - started, len(answer),
+                asked=name[:ASKED_CHARS], found=_how_many_found(answer))
         return answer
 
     @server.tool()
@@ -1446,7 +1654,94 @@ def build_server():
 
         started = _t.monotonic()
         answer = await anyio.to_thread.run_sync(_does, phrase, project)
-        _record("does", project, _t.monotonic() - started, len(answer))
+        _record(
+            "does",
+            project,
+            _t.monotonic() - started,
+            len(answer),
+            asked=phrase[:ASKED_CHARS],
+            found=_how_many_found(answer),
+        )
+        return answer
+
+    @server.tool()
+    async def honing(
+        action: str,
+        established: str = "",
+        outputs: int = 0,
+        keeping: bool = False,
+        context: Context = None,
+    ) -> str:
+        """Whether you are honing in on this, or just going round again.
+
+        Call it as you work rather than once. The first call takes the measure
+        of everywhere the change could land; each one after says what you have
+        since ruled out, and what is left. Circling shows up as a number that
+        stops moving.
+
+        Two things have to settle before work is really located: *where* the
+        change goes, and *what* it is allowed to do. Knowing the file and not
+        the outcome is the comfortable half of a decision — say how many
+        behaviours are still open once something has pinned that down.
+
+        Nothing is ruled out silently. Every candidate that fell away says who
+        ruled it out and why, so "three left" is something you can interrogate
+        rather than take on faith. And when three rounds pass without anything
+        being decided, it says so: that is elaboration wearing the clothes of
+        progress, and one more round will not fix it.
+
+        Never blocks. It tells you where you stand; the call is yours.
+
+        Args:
+            action: The work, in plain words. Keep the wording steady between
+                calls — change it and you are asking about different work.
+            established: What you just worked out, for the record.
+            outputs: How many behaviours are still admissible, once something
+                has settled that. Leave it out while it is still open.
+            keeping: Keep the full working alongside the answer, for when you
+                are debugging the reasoning rather than doing the work. Large,
+                local, and off unless asked for.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(
+            _narrowing, action, established, outputs or None, project, keeping
+        )
+        _record("honing", project, _t.monotonic() - started, len(answer),
+            asked=action[:ASKED_CHARS], found=_how_many_found(answer))
+        return answer
+
+    @server.tool()
+    async def why(which: int = 1, context: Context = None) -> str:
+        """Why it concluded that — and whether the reasoning has aged well.
+
+        Every conclusion leaves a trail: what was asked, what was ruled out,
+        and on whose authority. This walks back down it and checks the ground
+        it stood on, so "we decided this last Tuesday" becomes something you
+        can audit rather than remember.
+
+        Four answers per step, because pretending there are two is how a
+        record starts flattering itself. Some reasoning still holds. Some no
+        longer does — the code moved out from under it. Some was a judgement
+        call against a standard, and can be put back in front of that standard,
+        though it may not answer the same way twice. And some was somebody
+        reading carefully, which nothing can check afterwards, and saying so is
+        more useful than a confident tick.
+
+        Args:
+            which: How far back to look, newest first. 1 is the last thing
+                decided.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_replayed, project, which)
+        _record("why", project, _t.monotonic() - started, len(answer))
         return answer
 
     @server.tool()
@@ -1474,7 +1769,8 @@ def build_server():
 
         started = _t.monotonic()
         answer = await anyio.to_thread.run_sync(_elsewhere, phrase, project, here)
-        _record("elsewhere", here, _t.monotonic() - started, len(answer))
+        _record("elsewhere", here, _t.monotonic() - started, len(answer),
+            asked=phrase[:ASKED_CHARS], found=_how_many_found(answer))
         return answer
 
     @server.tool()
@@ -1557,17 +1853,17 @@ def build_server():
         return "\n".join(lines)
 
     @server.tool()
-    async def bears_on(paths: List[str], context: Context = None) -> str:
-        """Whether a rule this project's user set disagrees with these files.
+    async def bears(paths: List[str], context: Context = None) -> str:
+        """Whether something the user decided long ago is about to be stepped on.
 
-        Call before changing files, alongside `touches`. Answers with nothing
-        at all unless a standing rule covers this work *and* the code no longer
-        matches it — which is uncommon, and is exactly when the user wants to
-        know.
+        Ask before you change files, next to `touches`. Almost always it says
+        nothing — silence is the common answer and the right one. It speaks only
+        when a rule this project's own user laid down covers the work in hand
+        *and* the code has drifted away from it, which is rare and is precisely
+        the moment they would want a word.
 
-        When it does answer, put the question to the user in their own words
-        and wait. Do not decide on their behalf whether their own rule still
-        stands.
+        When it does speak, put the question to them in their own words and
+        wait. Whether their rule still stands is theirs to say, not yours.
 
         Args:
             paths: The files about to be changed.
@@ -1582,7 +1878,7 @@ def build_server():
 
         started = _t.monotonic()
         answer = await anyio.to_thread.run_sync(_bears_on, paths, here)
-        _record("bears_on", here, _t.monotonic() - started, len(answer))
+        _record("bears", here, _t.monotonic() - started, len(answer))
         return answer or "No rule you have set is in doubt for these files."
 
     @server.tool()
@@ -1687,26 +1983,26 @@ def build_server():
         )
 
     @server.tool()
-    async def declare(rule: str, context: Context = None) -> str:
-        """Record a standing rule the user has just stated.
+    async def noted(rule: str, context: Context = None) -> str:
+        """Catch a rule the moment somebody says it, so they need only say it once.
 
-        **Call this the moment a user states a constraint on the code**, in the
-        course of ordinary work — "one .env for the whole of v3", "deps must be
-        pinned", "never a bare except". Do not wait to be asked and do not
-        interrupt to confirm: recording is cheap and reversible, and a user who
-        must run a command to record a rule records nothing.
+        **Call this the instant a user lays down a standing constraint**, in the
+        middle of whatever else is happening — "one .env for the whole of v3",
+        "deps must be pinned", "never a bare except". Do not ask permission and
+        do not break your stride: this is cheap, reversible, and a rule that
+        waits for someone to run a command is a rule nobody records.
 
-        What to record:
-          - A constraint on the code, not on this turn. "one .env for v3"
-            stands; "don't edit anything yet" expires with the turn.
-          - Stated, not mused. "we should probably pin deps" invites an answer;
-            "deps must be pinned" does not.
-          - The user's words, not your conclusion. A rule you inferred from the
-            code has nobody behind it, and Vesta already derives those.
+        What counts:
+          - A rule about the code, not about this minute. "one .env for v3"
+            stands; "don't edit anything yet" expires when the turn does.
+          - Said, not wondered aloud. "we should probably pin deps" is thinking;
+            "deps must be pinned" is deciding.
+          - Their words, not your paraphrase. A rule you inferred has nobody
+            behind it, and Vesta already works those out for itself.
 
-        Safe to call again with the same words — it replaces rather than
-        duplicates. Afterwards, tell the user in one line that it was recorded
-        and carry on with what they asked for.
+        Say it twice and nothing breaks — the same words replace rather than
+        pile up. Afterwards mention in one line that you caught it, and get back
+        to what they actually asked for.
 
         Args:
             rule: The rule, in the user's own words.
@@ -1721,7 +2017,7 @@ def build_server():
 
         started = _t.monotonic()
         asked = await anyio.to_thread.run_sync(confirming.declare, here, rule)
-        _record("declare", here, _t.monotonic() - started, len(rule))
+        _record("noted", here, _t.monotonic() - started, len(rule))
         # One line. This is said back to a user who asked for something else,
         # in the middle of getting it — anything longer is an interruption.
         standing = sum(1 for v in asked.verdicts if v.binding)

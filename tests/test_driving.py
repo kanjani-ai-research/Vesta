@@ -192,6 +192,58 @@ def test_it_is_not_stuck_before_it_has_had_a_chance(tmp_path):
     assert not driving.state(tmp_path).stuck
 
 
+def test_a_space_that_will_not_close_stops_the_loop(tmp_path):
+    """The second axis, and the one the readings cannot see.
+
+    A loop can be moving — writing code every iteration, so `stuck` never
+    fires — while the space it is choosing from never contracts. That is an
+    agent elaborating rather than deciding, and it will do so indefinitely.
+    """
+    from vesta.graph import Graph, Node
+    from vesta.warrant import Step, keep as keep_space, track
+
+    (tmp_path / "app.py").write_text(
+        '"""Doing."""\n\n\ndef work():\n    """It."""\n    return 1\n', encoding="utf-8"
+    )
+    keep(Contract(goal="x", behaviours=[Behaviour(does="a user can do it")]), tmp_path)
+    sign(tmp_path)
+    driving.start(tmp_path)
+
+    # A trajectory that has taken steps without ruling anything out.
+    flat = [
+        Step(sites=40, outputs=0, population=40, doing=f"step {n}")
+        for n in range(driving.STUCK_AFTER + 2)
+    ]
+    keep_space(track("make retries configurable", flat), tmp_path)
+
+    verdict = driving.iterate(tmp_path)
+
+    assert not verdict.keep_going
+    assert "decision space" in verdict.why
+    assert "make retries configurable" in verdict.why
+    assert not driving.state(tmp_path).on
+
+
+def test_a_space_that_is_closing_does_not_stop_the_loop(tmp_path):
+    """Contraction is the ordinary case and must not read as a reason to stop."""
+    from vesta.warrant import Step, keep as keep_space, track
+
+    (tmp_path / "app.py").write_text(
+        '"""Doing."""\n\n\ndef work():\n    """It."""\n    return 1\n', encoding="utf-8"
+    )
+    keep(Contract(goal="x", behaviours=[Behaviour(does="a user can do it")]), tmp_path)
+    sign(tmp_path)
+    driving.start(tmp_path)
+
+    closing = [
+        Step(sites=n, outputs=0, population=40, doing="closing")
+        for n in (40, 30, 18, 9, 3)
+    ]
+    keep_space(track("make retries configurable", closing), tmp_path)
+
+    assert driving.iterate(tmp_path).keep_going
+
+
 def test_finishing_turns_driving_off(project):
     driving.start(project)
     verdict = driving.iterate(project)

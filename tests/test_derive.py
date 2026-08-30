@@ -92,3 +92,126 @@ def test_an_unbuilt_graph_says_so_rather_than_answering_emptily(tmp_path: Path, 
 
     said = derive._waiting(tmp_path)
     assert said and "background" in said
+
+
+# ── What a binding records about the code it names ──────────────────────────
+
+
+def test_a_written_binding_carries_identity_and_bytes(tmp_path, monkeypatch):
+    """Writing the id alone is what left 68% of this repository's map dangling.
+
+    A binding records what it points at — so a line inserted above it does not
+    orphan it — and what the bytes were, so a later reader can tell a claim that
+    still stands from one whose code changed underneath it. Neither is
+    recoverable afterwards: an id is a hash, and a hash of a region nobody kept
+    cannot be compared with anything.
+    """
+    import vesta.derive as derive
+    from vesta.home import VESTA_HOME
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    (tmp_path / "app.py").write_text(
+        '"""App."""\n\n\ndef parse_retry(spec):\n    """Read it."""\n    return spec\n',
+        encoding="utf-8",
+    )
+
+    derive.write_terms(tmp_path, "activity: retry a failed request")
+    mapped, refused = derive.write_attachments(
+        tmp_path, "app.py:4 parse_retry | retry a failed request"
+    )
+
+    assert not refused
+    binding = mapped.attachments[0]
+    assert binding.path == "app.py"
+    assert binding.name == "parse_retry"
+    assert binding.region and binding.region_hash
+
+
+def test_bindings_on_one_definition_hash_its_region_once(tmp_path, monkeypatch):
+    """Several terms commonly attach to the same definition, and each would
+    otherwise re-read and re-hash the same file."""
+    import vesta.derive as derive
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    (tmp_path / "app.py").write_text(
+        '"""App."""\n\n\ndef parse_retry(spec):\n    """Read it."""\n    return spec\n',
+        encoding="utf-8",
+    )
+
+    derive.write_terms(
+        tmp_path, "activity: retry a failed request\nactivity: wait and try again"
+    )
+    mapped, _ = derive.write_attachments(
+        tmp_path,
+        "app.py:4 parse_retry | retry a failed request\n"
+        "app.py:4 parse_retry | wait and try again",
+    )
+
+    assert len(mapped.attachments) == 2
+    first, second = mapped.attachments
+    assert first.region_hash == second.region_hash
+    assert first.label != second.label
+
+
+def test_more_definitions_are_offered_than_a_small_repository_has(tmp_path, monkeypatch):
+    """The limit is a coverage ceiling, not a page size.
+
+    It defaulted to 80, and on this repository that bound 79 of 646 definitions
+    — seven in eight never offered, so never bound, so unreachable by any
+    question asked in the vocabulary of the work. A miss like that looks exactly
+    like a matcher that failed, which sends somebody to fix the wrong thing.
+    """
+    import inspect
+
+    from vesta.derive import definitions_worth_reading
+
+    default = inspect.signature(definitions_worth_reading).parameters["limit"].default
+    assert default >= 400
+
+
+def test_a_label_naming_no_term_is_refused_not_invented(tmp_path, monkeypatch):
+    """A label the ontology does not have is a typo, not a new word.
+
+    This used to invent a `loose:` term with an empty kind and carry on. The
+    attachment then existed, pointed at real code, and was bound to a term
+    nothing had heard of — so it answered nothing, `neighbours` could never
+    match it, and nobody was told. Measured on this repository, an agent
+    paraphrasing its own labels produced 51 of them in one pass, caught only by
+    reading the stored JSON by hand.
+    """
+    import vesta.derive as derive
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    (tmp_path / "app.py").write_text(
+        '"""App."""\n\n\ndef parse_retry(spec):\n    """Read it."""\n    return spec\n',
+        encoding="utf-8",
+    )
+
+    derive.write_terms(tmp_path, "activity: retry a failed request")
+    mapped, refused = derive.write_attachments(
+        tmp_path, "app.py:4 parse_retry | retrying a failed request"
+    )
+
+    assert not mapped.attachments, "nothing bound to a term nobody named"
+    assert refused and "no term is named" in refused[0]
+    assert "retrying a failed request" in refused[0], "says which label was wrong"
+
+
+def test_an_exact_label_still_attaches(tmp_path, monkeypatch):
+    """The refusal must not be so strict that the ordinary case stops working."""
+    import vesta.derive as derive
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    (tmp_path / "app.py").write_text(
+        '"""App."""\n\n\ndef parse_retry(spec):\n    """Read it."""\n    return spec\n',
+        encoding="utf-8",
+    )
+
+    derive.write_terms(tmp_path, "activity: retry a failed request")
+    mapped, refused = derive.write_attachments(
+        tmp_path, "app.py:4 parse_retry | retry a failed request"
+    )
+
+    assert not refused
+    assert len(mapped.attachments) == 1
+    assert mapped.attachments[0].kind == "activity", "a real term, not a loose one"

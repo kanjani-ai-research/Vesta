@@ -86,6 +86,18 @@ knowledge bases whatever it is called, and `build` is about whatever it builds.
    to none of them, and a definition that resolves symbols is not "repository
    auditing" merely because it sits in a tool that audits.
 
+   **Ask for as many definitions as the repository has.** `--definitions` returns
+   the eighty most-referenced unless told otherwise, and eighty is a fraction of
+   an ordinary repository — on this one it was 80 of 646, so seven definitions in
+   eight were never offered and could not be bound however carefully you read.
+   A question then misses not because the matcher failed but because nothing
+   named the code it should have reached, and the two are indistinguishable from
+   outside. Pass `--limit` to raise it:
+
+   ```
+   vesta-domain --repo "<REPO>" --definitions --limit 400
+   ```
+
    Record them:
 
    ```
@@ -94,5 +106,10 @@ knowledge bases whatever it is called, and `build` is about whatever it builds.
    vesta/propagate.py:161 from_files | Propagating impact analysis across definition graphs
    ATTACH
    ```
+
+   `--attach` adds rather than replaces, so write in batches of sixty to eighty
+   lines and check the count after each. One large batch that fails loses
+   everything in it; a batch that writes zero is a failure to report and retry,
+   not something to move past.
 
 Report what you named and what you attached, briefly. Do not report the whole list.

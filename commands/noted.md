@@ -1,5 +1,5 @@
 ---
-description: State a rule for this project that Vesta could not have found
+description: Catch a rule you have always just observed, so it only needs saying once
 argument-hint: <the rule, in your own words>
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/vesta-run:*)
 ---

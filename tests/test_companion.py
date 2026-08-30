@@ -117,7 +117,7 @@ def test_7_it_allows_a_search_it_cannot_answer(working):
 
 def test_8_it_offers_to_record_a_rule_the_user_states(working):
     said = _injected("never use a bare except in this project", working)
-    assert "declare" in said.lower()
+    assert "noted" in said.lower()
 
 
 def test_9_the_turn_ending_brings_the_graph_up_to_date(working, monkeypatch):

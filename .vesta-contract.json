@@ -1,0 +1,210 @@
+{
+  "goal": "A replayable bundle per invocation: what was judged, on what basis, which of it still holds, and which parts nothing can check — such that the judging can be visualised, audited, and addressed for future runs",
+  "behaviours": [
+    {
+      "does": "an attachment whose definition moved re-anchors itself by path and name instead of dangling, and says it was re-anchored",
+      "nodes": [
+        "Attachment.resolve_in",
+        "Map.resolve_against",
+        "Resolved"
+      ],
+      "tests": [
+        "tests/test_traverse.py::test_a_definition_that_moved_is_found_again",
+        "tests/test_traverse.py::test_re_anchoring_is_reported_not_silent",
+        "tests/test_traverse.py::test_a_renamed_definition_is_gone_not_guessed_at",
+        "tests/test_warrant.py::test_narrowing_survives_a_definition_moving"
+      ],
+      "met_at": 1788033928.337858
+    },
+    {
+      "does": "an attachment records the bytes it was written about, so a later reader can tell a binding that still stands from one whose code has changed underneath it",
+      "nodes": [
+        "Attachment.region",
+        "Attachment.region_hash",
+        "write_attachments"
+      ],
+      "tests": [
+        "tests/test_derive.py::test_a_written_binding_carries_identity_and_bytes",
+        "tests/test_derive.py::test_bindings_on_one_definition_hash_its_region_once"
+      ],
+      "met_at": 1788033928.339391
+    },
+    {
+      "does": "a judgement can be addressed across runs: it carries what it judged rather than how that looked at the time",
+      "nodes": [
+        "Witness.about",
+        "Witness.path",
+        "Witness.name",
+        "Convergence.why_gone"
+      ],
+      "tests": [
+        "tests/test_warrant.py::test_a_judgement_carries_what_it_judged",
+        "tests/test_warrant.py::test_a_judgement_is_addressable_after_its_line_moves",
+        "tests/test_warrant.py::test_identity_and_display_come_from_one_place"
+      ],
+      "met_at": 1788033928.33972
+    },
+    {
+      "does": "every judgement says what kind of thing it rests on — a structural predicate over the graph, a byte comparison, or an assertion nothing can re-evaluate",
+      "nodes": [
+        "Basis",
+        "Witness.basis",
+        "Witness.replayable",
+        "Outcome.basis"
+      ],
+      "tests": [
+        "tests/test_space.py::test_only_re_runnable_kinds_count_as_replayable",
+        "tests/test_space.py::test_a_basis_nobody_stated_claims_the_least",
+        "tests/test_warrant.py::test_reachability_is_structural_not_asserted",
+        "tests/test_warrant.py::test_a_caller_may_state_the_basis_of_its_own_rule"
+      ],
+      "met_at": 1788041697.693961
+    },
+    {
+      "does": "a bundle states honestly what fraction of its own reasoning can be replayed, rather than implying all of it can",
+      "nodes": [
+        "Convergence.replayable",
+        "Convergence.asserted",
+        "Step.replayable",
+        "Result.replayable"
+      ],
+      "tests": [
+        "tests/test_warrant.py::test_a_trajectory_states_what_share_of_it_replays",
+        "tests/test_warrant.py::test_a_trajectory_that_replays_entirely_says_so",
+        "tests/test_space.py::test_a_result_states_its_own_replayable_share"
+      ],
+      "met_at": 1788041697.696325
+    },
+    {
+      "does": "a tool call records what was asked and what came back, so an invocation's trail can be reconstructed rather than inferred from how long it took",
+      "nodes": [
+        "_record",
+        "_how_many_found",
+        "ASKED_CHARS"
+      ],
+      "tests": [
+        "tests/test_bundle.py::test_a_question_and_its_result_are_recorded",
+        "tests/test_bundle.py::test_definitions_named_in_an_answer_are_counted",
+        "tests/test_bundle.py::test_a_ratio_in_prose_is_not_counted_as_a_definition"
+      ],
+      "met_at": 1788044214.3505988
+    },
+    {
+      "does": "an invocation is kept as one bundle: the intent that opened it, the trajectory that narrowed it, the judgements that closed it, and the commit it was taken against",
+      "nodes": [
+        "Bundle",
+        "open_bundle",
+        "bundle.keep",
+        "_commit"
+      ],
+      "tests": [
+        "tests/test_bundle.py::test_a_bundle_pins_the_commit_it_was_taken_against",
+        "tests/test_bundle.py::test_a_directory_that_is_not_a_repository_pins_nothing",
+        "tests/test_bundle.py::test_a_bundle_states_what_share_of_it_replays"
+      ],
+      "met_at": 1788044214.355798
+    },
+    {
+      "does": "replaying a bundle against the current repository reports, per judgement, whether it still holds, no longer holds, or cannot be checked",
+      "nodes": [
+        "replay",
+        "Replayed",
+        "summarise",
+        "_find"
+      ],
+      "tests": [
+        "tests/test_bundle.py::test_replay_reports_three_outcomes_never_two",
+        "tests/test_bundle.py::test_a_structural_judgement_survives_its_definition_moving",
+        "tests/test_bundle.py::test_what_was_read_is_never_reported_as_confirmed",
+        "tests/test_bundle.py::test_a_byte_judgement_says_it_has_no_hash_to_compare"
+      ],
+      "met_at": 1788044214.357095
+    },
+    {
+      "does": "bundles are bounded: the most recent fifty per project are kept and older ones drop off as new ones are written",
+      "nodes": [
+        "KEEP",
+        "recent",
+        "_project_of"
+      ],
+      "tests": [
+        "tests/test_bundle.py::test_bundles_are_bounded_on_write",
+        "tests/test_bundle.py::test_the_most_recent_bundle_comes_back_first",
+        "tests/test_bundle.py::test_a_live_repository_keeps_its_bundles"
+      ],
+      "met_at": 1788044214.35803
+    },
+    {
+      "does": "a skill file becomes vocabulary and, where it states ordered steps, a procedure — carrying which skill each term came from",
+      "nodes": [
+        "Skill",
+        "read_skill",
+        "acquire",
+        "Store",
+        "add",
+        "activate"
+      ],
+      "tests": [
+        "tests/test_skill.py::test_a_skill_is_read_from_the_two_fields_the_spec_guarantees",
+        "tests/test_skill.py::test_a_skill_with_no_heading_at_all_is_still_a_skill",
+        "tests/test_skill.py::test_two_different_skills_sharing_a_name_are_both_kept",
+        "tests/test_skill.py::test_skills_are_found_at_any_depth"
+      ],
+      "met_at": 1788047229.654752
+    },
+    {
+      "does": "a skill's conditions narrow a decision space, so the requirements an action is held to come from a standard written before the action was proposed",
+      "nodes": [
+        "applies",
+        "to_judge",
+        "evaluated",
+        "Basis.EVALUATED"
+      ],
+      "tests": [
+        "tests/test_warrant.py::test_an_authority_may_not_close_the_space",
+        "tests/test_space.py::test_an_evaluated_verdict_demotes_and_never_prunes",
+        "tests/test_skill.py::test_the_slice_varies_with_what_was_asked"
+      ],
+      "met_at": 1788047229.6556082
+    },
+    {
+      "does": "asking what a skill requires that this repository does not name reports the difference",
+      "nodes": [
+        "Difference",
+        "difference",
+        "Difference.bears_on"
+      ],
+      "tests": [
+        "tests/test_skill.py::test_words_a_repository_has_no_vocabulary_for_are_listed",
+        "tests/test_skill.py::test_a_standard_about_different_work_says_so_rather_than_faulting_this_one",
+        "tests/test_skill.py::test_the_code_counts_as_naming_something_even_where_the_ontology_does_not"
+      ],
+      "met_at": 1788047296.458817
+    }
+  ],
+  "constraints": [
+    "no new runtime dependency — pydantic stays the only one",
+    "no network call and no API key, as tests/test_conformance.py asserts",
+    "nothing derived is written into the repository except the contract itself",
+    "a judgement nothing can re-evaluate is recorded as asserted, never dressed up as derived",
+    "no general expression language over the graph — a closed set of predicate kinds that each replay deterministically",
+    "bundles are for audit; recomputation only where a step is already deterministic and side-effect free"
+  ],
+  "inferred": [
+    "bundles live under ~/.vesta/bundles, keyed by project the way every other holding is (home.kept_at)",
+    "Witness gains identity and basis rather than a parallel type being introduced beside it",
+    "_record's existing **rest carries the new fields, so 17 tool call sites stay untouched",
+    "the ring buffer follows driving.readings — trim on write, not by sweep",
+    "existing attachments are not migrated; they re-derive on the next vesta-domain run",
+    "authority.Standing is reused for byte-basis judgements rather than a second currency check being written"
+  ],
+  "noted": [
+    "a local frontend for ontology editing and management — deferred until replay shows what actually needs editing",
+    "ontology intersection — union and diff first; intersection needs a synonym relation that does not exist yet (open-questions.md §2)",
+    "symbolic execution of model-derived bindings — out of reach by construction, and marked asserted instead",
+    "Behaviour 10 is deliberately narrowed to vocabulary and authority, not procedure: numbered steps appear in about twenty of thirty-one shipped skills but not reliably under any heading — one ships 22 steps and no workflow heading at all — so deriving a Procedure would invent the structure procedure.py refuses at write time.",
+    "A normative specification for the witness record lives at spec/witness.md, separate from doc/ which holds working notes. It specifies four blame attributions (inadequate standard, insufficient narrowing, sound-but-wrong, degraded environment), ten required fields, six checks, and three conformance levels. Several required fields and all of levels 2 and 3 are specified but not implemented; the document marks these throughout and must not be read as describing running code."
+  ],
+  "signed_at": 1788027975.028619,
+  "deferred": []
+}

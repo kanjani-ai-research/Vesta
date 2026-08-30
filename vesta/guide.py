@@ -92,6 +92,18 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ],
     ),
     (
+        "Am I getting anywhere with this change?",
+        "Ask as you work rather than once. Each answer says what you have ruled "
+        "out since the last one — so going round in circles shows up as a "
+        "number that stops moving, which is the one thing an agent convinced it "
+        "is making progress will never tell you.",
+        [
+            ("vesta honing 'make retries configurable'", "where the change could still land, and what is left"),
+            ("vesta why", "why it concluded that, and whether the reasoning still holds"),
+            ("vesta why --which 3", "three decisions back"),
+        ],
+    ),
+    (
         "What words is my project described in?",
         "Everything answered about the work rather than the syntax is answered "
         "in these. They are read from your code, which makes them a good first "
