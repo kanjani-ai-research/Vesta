@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.1
+
+**A word form is no longer a different word.** The crossing from a user's
+words to the vocabulary's matched exact tokens, so "check the balances" found
+nothing in a repository whose label says "read an account balance" — the most
+ordinary phrasing there is, treated as foreign. Every matched surface (query
+phrases, term labels, identifier words) now passes through one deterministic
+stemmer, symmetrically, so plurals and verb forms land on the same token;
+stems stay internal and nothing displayed changes. And a phrase that genuinely
+misses now answers with the vocabulary's own names instead of a term count —
+the reader of that answer is a model with the question still in hand, and
+given the names it can cross in one step and ask again. The matcher still
+decides; the reader only translates.
+
 ## 0.6.0
 
 **A decision now leaves a witness.** One compact record per invocation — what

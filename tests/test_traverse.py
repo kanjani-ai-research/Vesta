@@ -212,6 +212,49 @@ def test_asking_in_words_the_label_does_not_use(tmp_path):
     assert where(graph, mapped, "database migration rollback") == []
 
 
+def test_a_word_form_is_not_a_different_word(tmp_path):
+    """The crossing must survive plurals and verb forms.
+
+    Demonstrated live: a label saying "read an account balance" answered
+    nothing when asked about "the balances", and "post a transaction to the
+    ledger" answered nothing for "posting transactions" — the most ordinary
+    phrasings there are, treated as different words because the match was on
+    exact tokens. Assuming the asker reproduces the vocabulary's word forms
+    is assuming they already know the vocabulary, which is exactly what the
+    crossing exists to spare them.
+    """
+    from vesta.graph import Graph, Node
+    from vesta.traverse import Attachment, Map, where
+
+    graph = Graph(root=str(tmp_path))
+    graph.nodes["n1"] = Node(
+        id="n1", name="balance", qualified="Ledger.balance", kind=12,
+        path="ledger.py", line=17,
+    )
+    graph.nodes["n2"] = Node(
+        id="n2", name="post", qualified="Ledger.post", kind=12,
+        path="ledger.py", line=12,
+    )
+    mapped = Map(
+        ontology="test",
+        attachments=[
+            Attachment(node="n1", term="t1", label="read an account balance",
+                       kind="activity", strength=1.0, how="read"),
+            Attachment(node="n2", term="t2", label="post a transaction to the ledger",
+                       kind="activity", strength=1.0, how="read"),
+        ],
+    )
+
+    assert [a.node for a in where(graph, mapped, "the account balances")] == ["n1"]
+    assert where(graph, mapped, "posting transactions")[0].node == "n2"
+    # Entries/entry, the third live failure class.
+    assert where(graph, mapped, "ledger postings")[0].node == "n2"
+    # The stems stay internal: what is answered is still the label as written.
+    assert where(graph, mapped, "the account balances")[0].label == "read an account balance"
+    # And a genuinely absent idea still answers nothing.
+    assert where(graph, mapped, "database migration rollback") == []
+
+
 # ── A binding that survives the code moving ─────────────────────────────────
 #
 # A node id is sha256(path, line, name), so inserting a line above a definition

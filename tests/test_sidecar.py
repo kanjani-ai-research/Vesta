@@ -173,7 +173,7 @@ def test_a_stale_ontology_is_named_when_nothing_is_found(tmp_path, monkeypatch):
 
     said = sidecar._does("encrypt user passwords", tmp_path)
 
-    assert "Nothing here is recorded as doing that" in said
+    assert "Nothing here is recorded under those words" in said
     assert "changed since it was last read" in said
     assert "vesta-domain" in said
 
@@ -196,8 +196,37 @@ def test_a_current_ontology_finding_nothing_says_only_that(tmp_path, monkeypatch
 
     said = sidecar._does("encrypt user passwords", tmp_path)
 
-    assert "Nothing here is recorded as doing that" in said
+    assert "Nothing here is recorded under those words" in said
     assert "changed since it was last read" not in said
+
+
+def test_a_miss_carries_the_vocabulary_itself(tmp_path, monkeypatch):
+    """A missed crossing must hand back the names, not a count.
+
+    The reader of this answer is a model with the question still in hand; given
+    the vocabulary's own words it can cross in one step and ask again. The old
+    answer said "111 term(s)" — which told the one party able to translate
+    exactly nothing. Demonstrated live: "check the balances" against a label
+    saying "read an account balance" returned a dead end."""
+    import vesta.sidecar as sidecar
+
+    monkeypatch.setattr(sidecar, "graph_for", lambda *a, **k: Graph(root=str(tmp_path)))
+    monkeypatch.setattr(
+        sidecar, "recall_map", lambda p: Map(ontology="t", attachments=[
+            Attachment(node="n1", term="t1", label="read an account balance",
+                       kind="activity", strength=1.0),
+            Attachment(node="n2", term="t2", label="post a transaction to the ledger",
+                       kind="activity", strength=1.0),
+        ])
+    )
+    monkeypatch.setattr(sidecar, "recall_ontology", lambda p: None)
+    monkeypatch.setattr("vesta.domain.predates_the_code", lambda p: False)
+
+    said = sidecar._does("frobnicate the widgets", tmp_path)
+
+    assert "read an account balance" in said
+    assert "post a transaction to the ledger" in said
+    assert "ask again" in said
 
 
 def test_the_working_is_kept_only_when_asked_for(tmp_path, monkeypatch):

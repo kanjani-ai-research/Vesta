@@ -903,10 +903,22 @@ def _does(phrase: str, project: Optional[Path]) -> str:
                 "subagent now, yourself, without asking, then ask again."
             )
 
+        # The asker's words did not cross — but a model is reading this
+        # answer, and a model given the vocabulary can cross in one step.
+        # Returning only a term *count* here wasted the one capability the
+        # caller certainly has; the miss now carries the names themselves, so
+        # "check the balances" failing against "read an account balance" costs
+        # a re-ask instead of a dead end. The deterministic matcher still
+        # decides — the reader only translates.
+        spoken = sorted({a.label for a in mapped.attachments})
+        listed = "\n".join(f"  · {label}" for label in spoken[:80])
         return (
             f"project: {project}\n"
-            f"Nothing here is recorded as doing that. The work named in this "
-            f"repository is: {known}.{stale}"
+            f"Nothing here is recorded under those words ({known}). The work "
+            "this repository records is named:\n"
+            f"{listed}\n"
+            "The crossing is by word, not by meaning — pick the nearest of "
+            f"those names and ask again in its words.{stale}"
         )
 
     lines = [f"project: {project}", "(paths below are relative to that directory)", ""]

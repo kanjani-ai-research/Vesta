@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vesta"
-version = "0.6.0"
+version = "0.6.1"
 description = "What a change touches — a domain model of a codebase, and bounded propagation over it"
 requires-python = ">=3.10"
 # Resolution, not just parsing. The standard library's `ast` gives syntax and no

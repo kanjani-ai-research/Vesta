@@ -66,7 +66,7 @@ class Term(BaseModel):
     @property
     def words(self) -> Set[str]:
         return {
-            word
+            _stem(word)
             for word in re.findall(r"[a-z0-9]+", self.label.lower())
             if len(word) > 2 and word not in EVERYWHERE
         }
@@ -266,7 +266,7 @@ def _words_of(node: Node) -> Set[str]:
     """
     spelled = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", f"{node.container} {node.name}")
     return {
-        word
+        _stem(word)
         for word in re.findall(r"[a-z0-9]+", spelled.lower())
         if len(word) > 2 and word not in EVERYWHERE
     }
@@ -367,10 +367,39 @@ def about(graph: Graph, mapped: Map, node_id: str) -> List[Attachment]:
     return sorted(mapped.for_node(node_id), key=lambda a: -a.strength)
 
 
+def _stem(word: str) -> str:
+    """A word reduced to a comparable root, deterministically.
+
+    Not linguistics — symmetry. Every surface that is ever matched passes
+    through this, so "balances" and "balance", "posting" and "post", "entries"
+    and "entry" land on the same token. Requiring the asker to reproduce the
+    vocabulary's exact word *forms* was measured failing on the most ordinary
+    phrasing there is — "check the balances" against a label saying "read an
+    account balance" — and a crossing that fails on plurals is not a crossing.
+
+    The outputs are internal; nothing displays a stem. The rules are ordered,
+    first match wins, and deliberately crude: a wrong root costs nothing so
+    long as both sides of the comparison arrive at the same one.
+    """
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 5 and word.endswith("ing"):
+        word = word[:-3]
+    elif len(word) > 4 and word.endswith("ed"):
+        word = word[:-2]
+    elif len(word) > 4 and word.endswith("es"):
+        word = word[:-2]
+    elif len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        word = word[:-1]
+    if len(word) > 4 and word.endswith("e"):
+        word = word[:-1]
+    return word
+
+
 def _bag(text: str) -> Set[str]:
     """The words in a phrase that carry any meaning."""
     return {
-        word
+        _stem(word)
         for word in re.findall(r"[a-z0-9]+", text.lower())
         if len(word) > 2 and word not in EVERYWHERE
     }
