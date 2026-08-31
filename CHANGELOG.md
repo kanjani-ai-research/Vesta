@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.2
+
+**One mode: a committed conclusion is earned by dominance.** The judgement
+seam's calibration asks the evaluator to score every candidate conclusion on
+its own merits — committing without stated support is a failure mode, and a
+stated contradiction is decisive evidence — and `vesta.bound.conclude`
+decides what the scores earn: a committed conclusion must beat every
+alternative strictly by a margin, or the conclusion is that the record does
+not decide. Nearness is itself the signal; the measured wrong commitments
+sat at leads of exactly the margin, so the boundary belongs to caution.
+
+**The region informs; it never decides.** Guidance may re-rank, but where a
+demotion would change which candidate wins, the region is overriding the
+evidence — and every measured occurrence of that flip was wrong. The
+evidence's winner stands, and the defiance is returned as a recorded fact,
+the out-of-region-survivor signal the witness already carries.
+
 ## 0.6.1
 
 **A word form is no longer a different word.** The crossing from a user's
