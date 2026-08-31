@@ -484,6 +484,21 @@ def to_judge(skill: Skill, action: str, evidence: Sequence[str], graph: Graph) -
             lines.append(f"  {node.path}:{node.line + 1} {node.qualified}")
     if not evidence:
         lines.append("  (nothing in this repository was found to bear on it)")
+    lines += [
+        "",
+        "HOW TO JUDGE — calibrated in both directions:",
+        "- score each candidate conclusion independently on how strongly the",
+        "  rules and evidence support it; do not pick a winner, do not",
+        "  normalize",
+        "- committing without stated support is a failure mode: if the",
+        "  evidence never states the claimed outcome, 'cannot tell' outranks",
+        "  a supported-by-inference conclusion",
+        "- BUT a stated contradiction is decisive evidence: when an evidence",
+        "  item affirmatively contradicts the claim, the adverse conclusion",
+        "  deserves a HIGH score — do not retreat to 'cannot tell' merely",
+        "  because other documentation is thin. Reserve 'cannot tell' for",
+        "  absence and genuine conflict, not for contradiction.",
+    ]
     return "\n".join(lines)
 
 
