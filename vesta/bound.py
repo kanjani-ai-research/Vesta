@@ -41,6 +41,11 @@ def conclude(
     out_of_region = region is not None and winner not in region
     if winner in committed:
         lead = scores[winner] - max(v for k, v in scores.items() if k != winner)
-        if lead < dominance:
+        # Committing requires a lead STRICTLY above the margin; at the
+        # boundary it abstains — the measured wrong commitments sat at
+        # leads of exactly the margin, so the boundary belongs to caution.
+        # Compared with a tolerance so float representation error cannot
+        # move a case across the line in either direction.
+        if lead <= dominance + 1e-9:
             return undecided, out_of_region
     return winner, out_of_region
