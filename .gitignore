@@ -7,3 +7,4 @@ __pycache__/
 var/
 theory/
 bench/results.json
+dist/

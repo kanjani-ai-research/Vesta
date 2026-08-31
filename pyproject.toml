@@ -6,14 +6,24 @@
 [tool.setuptools]
 packages = ["vesta"]
 
+# The shipped vocabulary templates are data beside the code; without this the
+# wheel silently drops them and `vesta words --templates` lists nothing.
+[tool.setuptools.package-data]
+vesta = ["templates/*.md"]
+
 [build-system]
 requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vesta"
+# Distributed as `causum-vesta` (the bare name was taken on PyPI); the import
+# package and the command are still `vesta`. `causum` itself is reserved for
+# the umbrella, not spent on one product.
+name = "causum-vesta"
 version = "0.6.1"
-description = "What a change touches — a domain model of a codebase, and bounded propagation over it"
+description = "Answers structural questions about a repository from a resolved graph, an ontology of what the work is called, and what earlier sessions worked out — and leaves a witness per decision"
+readme = "README.md"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 # Resolution, not just parsing. The standard library's `ast` gives syntax and no
 # name resolution: it cannot tell that `found.describe()` refers to
