@@ -18,6 +18,16 @@ from pathlib import Path
 
 import pytest
 
+# The sidecar is an extra. A checkout without it is a working Vesta whose
+# tools are absent, and a test that starts the server there is describing
+# the environment, not the code — so it is skipped with the reason, not failed.
+import importlib.util as _importlib_util
+
+needs_mcp = pytest.mark.skipif(
+    _importlib_util.find_spec("mcp") is None,
+    reason="the sidecar extra is not installed: pip install 'causum-vesta[sidecar]'",
+)
+
 
 @pytest.fixture
 def no_api(monkeypatch):
@@ -99,6 +109,7 @@ def test_an_unprepared_project_answers_at_once(no_api, tmp_path):
     assert "background" in said or "nothing" in said.lower()
 
 
+@needs_mcp
 def test_the_server_actually_starts_as_a_process():
     """Not that it imports — that it runs.
 

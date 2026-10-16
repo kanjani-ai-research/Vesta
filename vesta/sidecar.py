@@ -704,8 +704,9 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
     return "\n".join(lines)
 
 
-def _functions_query(project: Optional[Path], name: str = "") -> str:
-    """The functions kept for a project, or one in full — read-only.
+def _functions_query(project: Optional[Path], name: str = "", procedure: str = "") -> str:
+    """The functions kept for a project, one in full, or a procedure as the
+    briefs that perform it — read-only.
 
     Not gated on readiness: a function is authored, not derived, and listing
     what somebody wrote down needs no graph.
@@ -716,6 +717,17 @@ def _functions_query(project: Optional[Path], name: str = "") -> str:
     from . import function as functions
 
     kept = functions.recall(project)
+    if procedure:
+        from . import procedure as procedures
+
+        found = procedures.recall(project).get(procedure)
+        if found is None:
+            return (
+                f"project: {project}\nno procedure {procedure!r} is recorded here — "
+                + procedures.recall(project).describe()
+            )
+        return f"project: {project}\n" + functions.pipeline(found, kept)
+
     if not name:
         lines = [f"project: {project}", kept.describe()]
         lines.extend(f"  {one.describe()}" for one in kept.functions)
@@ -750,6 +762,10 @@ def _functions_query(project: Optional[Path], name: str = "") -> str:
     if learned:
         lines.append("  the next brief will carry:")
         lines.extend(f"    · {why}" for why in learned)
+    leaks = kept.leaks(name)
+    if leaks:
+        lines.append("  criteria bad runs got past:")
+        lines.extend(f"    {leak.describe()}" for leak in leaks)
     return "\n".join(lines)
 
 
@@ -953,12 +969,18 @@ def _does(phrase: str, project: Optional[Path]) -> str:
         from .domain import predates_the_code
 
         stale = ""
-        if predates_the_code(project):
+        unread = mapped.unread(graph)
+        if unread or predates_the_code(project):
+            which = (
+                " These are named by nothing: " + ", ".join(unread[:8])
+                + (f" and {len(unread) - 8} more." if len(unread) > 8 else ".")
+            ) if unread else ""
             stale = (
                 "\n\n**But this repository has changed since it was last read.** "
                 "Modules written since then are named by nothing, so a question "
-                "about one answers exactly like this. Run the `vesta-domain` "
-                "subagent now, yourself, without asking, then ask again."
+                f"about one answers exactly like this.{which} Run the "
+                "`vesta-domain` subagent now, yourself, without asking, and tell "
+                "it those files are what it is for; then ask again."
             )
 
         # The asker's words did not cross — but a model is reading this
@@ -1003,6 +1025,20 @@ def _does(phrase: str, project: Optional[Path]) -> str:
             "to has moved since the repository was last read against its "
             "ontology. Run the `vesta-domain` subagent now, yourself, "
             "without asking, then ask again."
+        )
+
+    # A hit does not mean the vocabulary is current. The answer above comes
+    # from the modules that were read; the ones written since are absent from
+    # it, and an answer that looks complete while missing a module is worse
+    # than one that says so.
+    unread = mapped.unread(graph)
+    if unread:
+        lines.append("")
+        lines.append(
+            f"{len(unread)} module(s) written since the vocabulary was derived "
+            f"are not in this answer: {', '.join(unread[:6])}"
+            + (f" and {len(unread) - 6} more" if len(unread) > 6 else "")
+            + ". Run the `vesta-domain` subagent for them if the question could reach them."
         )
     return "\n".join(lines)
 
@@ -2190,9 +2226,10 @@ def build_server():
         return answer
 
     @server.tool()
-    async def functions(name: str = "", context: Context = None) -> str:
-        """The named functions recorded for this project, or one of them in
-        full.
+    async def functions(name: str = "", procedure: str = "", context: Context = None) -> str:
+        """The named functions recorded for this project, one of them in
+        full, or a recorded procedure as the sequence of briefs that perform
+        it.
 
         A function is one thing done to the project the same way each time: a
         shell command, or an *ask* — a step a model performs, with its model,
@@ -2204,13 +2241,15 @@ def build_server():
 
         Args:
             name: A function to show in full; empty lists them all.
+            procedure: A procedure id; its steps in order, each with the
+                function that performs it or the fact that nothing does.
         """
         project = await project_of(context)
         import anyio
         import time as _t
 
         started = _t.monotonic()
-        answer = await anyio.to_thread.run_sync(_functions_query, project, name)
+        answer = await anyio.to_thread.run_sync(_functions_query, project, name, procedure)
         _record("functions", project, _t.monotonic() - started, len(answer))
         return answer
 
@@ -2227,6 +2266,15 @@ def main() -> int:
     deleted, stopped the server from starting at all.
     """
     _quieten()
+    # The first start of a new version reconciles the records the last one
+    # wrote, once, before any tool reads them.
+    try:
+        from . import __version__
+        from .tidy import arrived
+
+        arrived(__version__)
+    except Exception as exc:  # noqa: BLE001 - never block the server on housekeeping
+        logger.info("could not check for a new version: %s", exc)
     try:
         server = build_server()
     except ImportError:

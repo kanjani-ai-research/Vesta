@@ -1,210 +1,447 @@
 {
-  "goal": "A replayable bundle per invocation: what was judged, on what basis, which of it still holds, and which parts nothing can check — such that the judging can be visualised, audited, and addressed for future runs",
+  "goal": "Named functions over a project, with the step a model performs as a primitive — reached for, checked, sequenced, judged, witnessed and counted — and Vesta's own hooks, walker, tests, contract and vocabulary made honest by using it on itself",
   "behaviours": [
     {
-      "does": "an attachment whose definition moved re-anchors itself by path and name instead of dangling, and says it was re-anchored",
+      "does": "a user can record a named function for a project, as a shell command or an ask, and list, show, and forget it",
       "nodes": [
-        "Attachment.resolve_in",
-        "Map.resolve_against",
-        "Resolved"
+        "function.Function",
+        "function.add",
+        "function.remove",
+        "cli._function"
       ],
       "tests": [
-        "tests/test_traverse.py::test_a_definition_that_moved_is_found_again",
-        "tests/test_traverse.py::test_re_anchoring_is_reported_not_silent",
-        "tests/test_traverse.py::test_a_renamed_definition_is_gone_not_guessed_at",
-        "tests/test_warrant.py::test_narrowing_survives_a_definition_moving"
+        "tests/test_function.py"
       ],
-      "met_at": 1788033928.337858
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "an attachment records the bytes it was written about, so a later reader can tell a binding that still stands from one whose code has changed underneath it",
+      "does": "an ask names its model by role and declares every input its prompt uses, or is refused",
       "nodes": [
-        "Attachment.region",
-        "Attachment.region_hash",
-        "write_attachments"
+        "function.Ask",
+        "function.Function._one_kind_and_every_input_declared"
       ],
       "tests": [
-        "tests/test_derive.py::test_a_written_binding_carries_identity_and_bytes",
-        "tests/test_derive.py::test_bindings_on_one_definition_hash_its_region_once"
+        "tests/test_function.py"
       ],
-      "met_at": 1788033928.339391
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "a judgement can be addressed across runs: it carries what it judged rather than how that looked at the time",
+      "does": "a function whose role names no step of a recorded procedure is refused",
       "nodes": [
-        "Witness.about",
-        "Witness.path",
-        "Witness.name",
-        "Convergence.why_gone"
+        "function.add"
       ],
       "tests": [
-        "tests/test_warrant.py::test_a_judgement_carries_what_it_judged",
-        "tests/test_warrant.py::test_a_judgement_is_addressable_after_its_line_moves",
-        "tests/test_warrant.py::test_identity_and_display_come_from_one_place"
+        "tests/test_function.py"
       ],
-      "met_at": 1788033928.33972
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "every judgement says what kind of thing it rests on — a structural predicate over the graph, a byte comparison, or an assertion nothing can re-evaluate",
+      "does": "a criterion that checks against nothing is refused when it is written",
       "nodes": [
-        "Basis",
-        "Witness.basis",
-        "Witness.replayable",
-        "Outcome.basis"
+        "function.Criterion._a_check_says_what_it_checks"
       ],
       "tests": [
-        "tests/test_space.py::test_only_re_runnable_kinds_count_as_replayable",
-        "tests/test_space.py::test_a_basis_nobody_stated_claims_the_least",
-        "tests/test_warrant.py::test_reachability_is_structural_not_asserted",
-        "tests/test_warrant.py::test_a_caller_may_state_the_basis_of_its_own_rule"
+        "tests/test_function.py"
       ],
-      "met_at": 1788041697.693961
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "a bundle states honestly what fraction of its own reasoning can be replayed, rather than implying all of it can",
+      "does": "an agent can render a function's brief with its inputs filled, and record the output back with a verdict per checkable criterion",
       "nodes": [
-        "Convergence.replayable",
-        "Convergence.asserted",
-        "Step.replayable",
-        "Result.replayable"
+        "function.brief",
+        "function.done",
+        "function.check"
       ],
       "tests": [
-        "tests/test_warrant.py::test_a_trajectory_states_what_share_of_it_replays",
-        "tests/test_warrant.py::test_a_trajectory_that_replays_entirely_says_so",
-        "tests/test_space.py::test_a_result_states_its_own_replayable_share"
+        "tests/test_function.py"
       ],
-      "met_at": 1788041697.696325
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "a tool call records what was asked and what came back, so an invocation's trail can be reconstructed rather than inferred from how long it took",
+      "does": "an asserted criterion is reported as asserted, never as met",
       "nodes": [
-        "_record",
-        "_how_many_found",
-        "ASKED_CHARS"
+        "function.Verdict"
       ],
       "tests": [
-        "tests/test_bundle.py::test_a_question_and_its_result_are_recorded",
-        "tests/test_bundle.py::test_definitions_named_in_an_answer_are_counted",
-        "tests/test_bundle.py::test_a_ratio_in_prose_is_not_counted_as_a_definition"
+        "tests/test_function.py"
       ],
-      "met_at": 1788044214.3505988
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "an invocation is kept as one bundle: the intent that opened it, the trajectory that narrowed it, the judgements that closed it, and the commit it was taken against",
+      "does": "a user can judge a run good or bad with a reason, and the next brief carries recent bad reasons",
       "nodes": [
-        "Bundle",
-        "open_bundle",
-        "bundle.keep",
-        "_commit"
+        "function.judge",
+        "function.lessons"
       ],
       "tests": [
-        "tests/test_bundle.py::test_a_bundle_pins_the_commit_it_was_taken_against",
-        "tests/test_bundle.py::test_a_directory_that_is_not_a_repository_pins_nothing",
-        "tests/test_bundle.py::test_a_bundle_states_what_share_of_it_replays"
+        "tests/test_function.py"
       ],
-      "met_at": 1788044214.355798
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "replaying a bundle against the current repository reports, per judgement, whether it still holds, no longer holds, or cannot be checked",
+      "does": "a user can name the criterion a bad run got past, and see which criteria let bad runs through",
       "nodes": [
-        "replay",
-        "Replayed",
-        "summarise",
-        "_find"
+        "function.Functions.leaks",
+        "function.Leak"
       ],
       "tests": [
-        "tests/test_bundle.py::test_replay_reports_three_outcomes_never_two",
-        "tests/test_bundle.py::test_a_structural_judgement_survives_its_definition_moving",
-        "tests/test_bundle.py::test_what_was_read_is_never_reported_as_confirmed",
-        "tests/test_bundle.py::test_a_byte_judgement_says_it_has_no_hash_to_compare"
+        "tests/test_function.py"
       ],
-      "met_at": 1788044214.357095
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "bundles are bounded: the most recent fifty per project are kept and older ones drop off as new ones are written",
+      "does": "an agent is offered a recorded function at a prompt that plainly asks for what it does, once per session",
       "nodes": [
-        "KEEP",
-        "recent",
-        "_project_of"
+        "function.for_prompt",
+        "inject._a_function_for_this"
       ],
       "tests": [
-        "tests/test_bundle.py::test_bundles_are_bounded_on_write",
-        "tests/test_bundle.py::test_the_most_recent_bundle_comes_back_first",
-        "tests/test_bundle.py::test_a_live_repository_keeps_its_bundles"
+        "tests/test_function.py"
       ],
-      "met_at": 1788044214.35803
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "a skill file becomes vocabulary and, where it states ordered steps, a procedure — carrying which skill each term came from",
+      "does": "an exits criterion holds when a stated command accepts the output",
       "nodes": [
-        "Skill",
-        "read_skill",
-        "acquire",
-        "Store",
-        "add",
-        "activate"
+        "function._exits"
       ],
       "tests": [
-        "tests/test_skill.py::test_a_skill_is_read_from_the_two_fields_the_spec_guarantees",
-        "tests/test_skill.py::test_a_skill_with_no_heading_at_all_is_still_a_skill",
-        "tests/test_skill.py::test_two_different_skills_sharing_a_name_are_both_kept",
-        "tests/test_skill.py::test_skills_are_found_at_any_depth"
+        "tests/test_function.py"
       ],
-      "met_at": 1788047229.654752
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "a skill's conditions narrow a decision space, so the requirements an action is held to come from a standard written before the action was proposed",
+      "does": "an agent can read a procedure as the briefs that perform it, in step order",
       "nodes": [
-        "applies",
-        "to_judge",
-        "evaluated",
-        "Basis.EVALUATED"
+        "function.pipeline",
+        "function.in_order",
+        "sidecar._functions_query"
       ],
       "tests": [
-        "tests/test_warrant.py::test_an_authority_may_not_close_the_space",
-        "tests/test_space.py::test_an_evaluated_verdict_demotes_and_never_prunes",
-        "tests/test_skill.py::test_the_slice_varies_with_what_was_asked"
+        "tests/test_function.py"
       ],
-      "met_at": 1788047229.6556082
+      "met_at": 1792126542.2525032
     },
     {
-      "does": "asking what a skill requires that this repository does not name reports the difference",
+      "does": "a function run leaves a witness that why reads",
       "nodes": [
-        "Difference",
-        "difference",
-        "Difference.bears_on"
+        "function._witnessed",
+        "bundle.Witness"
       ],
       "tests": [
-        "tests/test_skill.py::test_words_a_repository_has_no_vocabulary_for_are_listed",
-        "tests/test_skill.py::test_a_standard_about_different_work_says_so_rather_than_faulting_this_one",
-        "tests/test_skill.py::test_the_code_counts_as_naming_something_even_where_the_ontology_does_not"
+        "tests/test_function.py"
       ],
-      "met_at": 1788047296.458817
+      "met_at": 1792126542.2525032
+    },
+    {
+      "does": "a driven project is not done while a role-bearing function has no met run since the last change",
+      "nodes": [
+        "function.unperformed",
+        "driving.look",
+        "driving._last_change"
+      ],
+      "tests": [
+        "tests/test_driving.py"
+      ],
+      "met_at": 1792126542.2525032
+    },
+    {
+      "does": "a single search of the code for a held definition is refused with the answer, and a compound command, a pipe filter, or a search over prose is let through",
+      "nodes": [
+        "instead._searched_for",
+        "instead._one_search",
+        "instead._is_code"
+      ],
+      "tests": [
+        "tests/test_instead.py"
+      ],
+      "met_at": 1792126542.2525032
+    },
+    {
+      "does": "build output beside a manifest and anything the root gitignore names are not indexed",
+      "nodes": [
+        "home.walk",
+        "home.ignored_by_git"
+      ],
+      "tests": [
+        "tests/test_home.py"
+      ],
+      "met_at": 1792126542.2525032
+    },
+    {
+      "does": "a bare word shorter than four letters, or a common word, is not injected unless spelled out",
+      "nodes": [
+        "inject._named"
+      ],
+      "tests": [
+        "tests/test_inject.py"
+      ],
+      "met_at": 1792126542.2525032
+    },
+    {
+      "does": "a checkout without the sidecar extra skips the server tests with the reason",
+      "nodes": [
+        "tests.test_seams.needs_mcp"
+      ],
+      "tests": [
+        "tests/test_seams.py",
+        "tests/test_conformance.py",
+        "tests/test_capture.py"
+      ],
+      "met_at": 1792126542.2525032
+    },
+    {
+      "does": "agreeing new work keeps the delivered contract under the next, and refuses while the signed one has work outstanding",
+      "nodes": [
+        "contract.succeed",
+        "contract.Contract.previous",
+        "cli._contract"
+      ],
+      "tests": [
+        "tests/test_contract.py"
+      ],
+      "met_at": 1792126542.2525032
+    },
+    {
+      "does": "a question about the work names the modules no attachment reaches",
+      "nodes": [
+        "traverse.Map.unread",
+        "inject._read_but_not_lately",
+        "sidecar._does"
+      ],
+      "tests": [
+        "tests/test_traverse.py"
+      ],
+      "met_at": 1792126542.2525032
     }
   ],
   "constraints": [
-    "no new runtime dependency — pydantic stays the only one",
-    "no network call and no API key, as tests/test_conformance.py asserts",
-    "nothing derived is written into the repository except the contract itself",
-    "a judgement nothing can re-evaluate is recorded as asserted, never dressed up as derived",
-    "no general expression language over the graph — a closed set of predicate kinds that each replay deterministically",
-    "bundles are for audit; recomputation only where a step is already deterministic and side-effect free"
+    "no network call and no API key — an ask is a brief the host agent performs on its own inference",
+    "criteria are a closed set of checks, each deterministic or marked asserted; no expression language",
+    "pydantic stays the only runtime dependency",
+    "nothing derived is written into the repository except the contract itself"
   ],
   "inferred": [
-    "bundles live under ~/.vesta/bundles, keyed by project the way every other holding is (home.kept_at)",
-    "Witness gains identity and basis rather than a parallel type being introduced beside it",
-    "_record's existing **rest carries the new fields, so 17 tool call sites stay untouched",
-    "the ring buffer follows driving.readings — trim on write, not by sweep",
-    "existing attachments are not migrated; they re-derive on the next vesta-domain run",
-    "authority.Standing is reused for byte-basis judgements rather than a second currency check being written"
+    "functions and their runs are kept under ~/.vesta/functions keyed by project, as every other holding is (home.kept_at)",
+    "a run keeps a digest and size of the output, not the output",
+    "a function run is written as a bundle.Witness with no trajectory, the function's definition as the standard by digest",
+    "models are named by role (haiku, sonnet, opus) because the host resolves the role; Vesta holds no provider's id",
+    "the search hook parses one command with shlex rather than a regex over the whole line"
   ],
-  "noted": [
-    "a local frontend for ontology editing and management — deferred until replay shows what actually needs editing",
-    "ontology intersection — union and diff first; intersection needs a synonym relation that does not exist yet (open-questions.md §2)",
-    "symbolic execution of model-derived bindings — out of reach by construction, and marked asserted instead",
-    "Behaviour 10 is deliberately narrowed to vocabulary and authority, not procedure: numbered steps appear in about twenty of thirty-one shipped skills but not reliably under any heading — one ships 22 steps and no workflow heading at all — so deriving a Procedure would invent the structure procedure.py refuses at write time.",
-    "A normative specification for the witness record lives at spec/witness.md, separate from doc/ which holds working notes. It specifies four blame attributions (inadequate standard, insufficient narrowing, sound-but-wrong, degraded environment), ten required fields, six checks, and three conformance levels. Several required fields and all of levels 2 and 3 are specified but not implemented; the document marks these throughout and must not be read as describing running code."
-  ],
-  "signed_at": 1788027975.028619,
-  "deferred": []
+  "noted": [],
+  "signed_at": 1792126542.2525032,
+  "deferred": [],
+  "previous": [
+    {
+      "goal": "A replayable bundle per invocation: what was judged, on what basis, which of it still holds, and which parts nothing can check — such that the judging can be visualised, audited, and addressed for future runs",
+      "behaviours": [
+        {
+          "does": "an attachment whose definition moved re-anchors itself by path and name instead of dangling, and says it was re-anchored",
+          "nodes": [
+            "Attachment.resolve_in",
+            "Map.resolve_against",
+            "Resolved"
+          ],
+          "tests": [
+            "tests/test_traverse.py::test_a_definition_that_moved_is_found_again",
+            "tests/test_traverse.py::test_re_anchoring_is_reported_not_silent",
+            "tests/test_traverse.py::test_a_renamed_definition_is_gone_not_guessed_at",
+            "tests/test_warrant.py::test_narrowing_survives_a_definition_moving"
+          ],
+          "met_at": 1788033928.337858
+        },
+        {
+          "does": "an attachment records the bytes it was written about, so a later reader can tell a binding that still stands from one whose code has changed underneath it",
+          "nodes": [
+            "Attachment.region",
+            "Attachment.region_hash",
+            "write_attachments"
+          ],
+          "tests": [
+            "tests/test_derive.py::test_a_written_binding_carries_identity_and_bytes",
+            "tests/test_derive.py::test_bindings_on_one_definition_hash_its_region_once"
+          ],
+          "met_at": 1788033928.339391
+        },
+        {
+          "does": "a judgement can be addressed across runs: it carries what it judged rather than how that looked at the time",
+          "nodes": [
+            "Witness.about",
+            "Witness.path",
+            "Witness.name",
+            "Convergence.why_gone"
+          ],
+          "tests": [
+            "tests/test_warrant.py::test_a_judgement_carries_what_it_judged",
+            "tests/test_warrant.py::test_a_judgement_is_addressable_after_its_line_moves",
+            "tests/test_warrant.py::test_identity_and_display_come_from_one_place"
+          ],
+          "met_at": 1788033928.33972
+        },
+        {
+          "does": "every judgement says what kind of thing it rests on — a structural predicate over the graph, a byte comparison, or an assertion nothing can re-evaluate",
+          "nodes": [
+            "Basis",
+            "Witness.basis",
+            "Witness.replayable",
+            "Outcome.basis"
+          ],
+          "tests": [
+            "tests/test_space.py::test_only_re_runnable_kinds_count_as_replayable",
+            "tests/test_space.py::test_a_basis_nobody_stated_claims_the_least",
+            "tests/test_warrant.py::test_reachability_is_structural_not_asserted",
+            "tests/test_warrant.py::test_a_caller_may_state_the_basis_of_its_own_rule"
+          ],
+          "met_at": 1788041697.693961
+        },
+        {
+          "does": "a bundle states honestly what fraction of its own reasoning can be replayed, rather than implying all of it can",
+          "nodes": [
+            "Convergence.replayable",
+            "Convergence.asserted",
+            "Step.replayable",
+            "Result.replayable"
+          ],
+          "tests": [
+            "tests/test_warrant.py::test_a_trajectory_states_what_share_of_it_replays",
+            "tests/test_warrant.py::test_a_trajectory_that_replays_entirely_says_so",
+            "tests/test_space.py::test_a_result_states_its_own_replayable_share"
+          ],
+          "met_at": 1788041697.696325
+        },
+        {
+          "does": "a tool call records what was asked and what came back, so an invocation's trail can be reconstructed rather than inferred from how long it took",
+          "nodes": [
+            "_record",
+            "_how_many_found",
+            "ASKED_CHARS"
+          ],
+          "tests": [
+            "tests/test_bundle.py::test_a_question_and_its_result_are_recorded",
+            "tests/test_bundle.py::test_definitions_named_in_an_answer_are_counted",
+            "tests/test_bundle.py::test_a_ratio_in_prose_is_not_counted_as_a_definition"
+          ],
+          "met_at": 1788044214.3505988
+        },
+        {
+          "does": "an invocation is kept as one bundle: the intent that opened it, the trajectory that narrowed it, the judgements that closed it, and the commit it was taken against",
+          "nodes": [
+            "Bundle",
+            "open_bundle",
+            "bundle.keep",
+            "_commit"
+          ],
+          "tests": [
+            "tests/test_bundle.py::test_a_bundle_pins_the_commit_it_was_taken_against",
+            "tests/test_bundle.py::test_a_directory_that_is_not_a_repository_pins_nothing",
+            "tests/test_bundle.py::test_a_bundle_states_what_share_of_it_replays"
+          ],
+          "met_at": 1788044214.355798
+        },
+        {
+          "does": "replaying a bundle against the current repository reports, per judgement, whether it still holds, no longer holds, or cannot be checked",
+          "nodes": [
+            "replay",
+            "Replayed",
+            "summarise",
+            "_find"
+          ],
+          "tests": [
+            "tests/test_bundle.py::test_replay_reports_three_outcomes_never_two",
+            "tests/test_bundle.py::test_a_structural_judgement_survives_its_definition_moving",
+            "tests/test_bundle.py::test_what_was_read_is_never_reported_as_confirmed",
+            "tests/test_bundle.py::test_a_byte_judgement_says_it_has_no_hash_to_compare"
+          ],
+          "met_at": 1788044214.357095
+        },
+        {
+          "does": "bundles are bounded: the most recent fifty per project are kept and older ones drop off as new ones are written",
+          "nodes": [
+            "KEEP",
+            "recent",
+            "_project_of"
+          ],
+          "tests": [
+            "tests/test_bundle.py::test_bundles_are_bounded_on_write",
+            "tests/test_bundle.py::test_the_most_recent_bundle_comes_back_first",
+            "tests/test_bundle.py::test_a_live_repository_keeps_its_bundles"
+          ],
+          "met_at": 1788044214.35803
+        },
+        {
+          "does": "a skill file becomes vocabulary and, where it states ordered steps, a procedure — carrying which skill each term came from",
+          "nodes": [
+            "Skill",
+            "read_skill",
+            "acquire",
+            "Store",
+            "add",
+            "activate"
+          ],
+          "tests": [
+            "tests/test_skill.py::test_a_skill_is_read_from_the_two_fields_the_spec_guarantees",
+            "tests/test_skill.py::test_a_skill_with_no_heading_at_all_is_still_a_skill",
+            "tests/test_skill.py::test_two_different_skills_sharing_a_name_are_both_kept",
+            "tests/test_skill.py::test_skills_are_found_at_any_depth"
+          ],
+          "met_at": 1788047229.654752
+        },
+        {
+          "does": "a skill's conditions narrow a decision space, so the requirements an action is held to come from a standard written before the action was proposed",
+          "nodes": [
+            "applies",
+            "to_judge",
+            "evaluated",
+            "Basis.EVALUATED"
+          ],
+          "tests": [
+            "tests/test_warrant.py::test_an_authority_may_not_close_the_space",
+            "tests/test_space.py::test_an_evaluated_verdict_demotes_and_never_prunes",
+            "tests/test_skill.py::test_the_slice_varies_with_what_was_asked"
+          ],
+          "met_at": 1788047229.6556082
+        },
+        {
+          "does": "asking what a skill requires that this repository does not name reports the difference",
+          "nodes": [
+            "Difference",
+            "difference",
+            "Difference.bears_on"
+          ],
+          "tests": [
+            "tests/test_skill.py::test_words_a_repository_has_no_vocabulary_for_are_listed",
+            "tests/test_skill.py::test_a_standard_about_different_work_says_so_rather_than_faulting_this_one",
+            "tests/test_skill.py::test_the_code_counts_as_naming_something_even_where_the_ontology_does_not"
+          ],
+          "met_at": 1788047296.458817
+        }
+      ],
+      "constraints": [
+        "no new runtime dependency — pydantic stays the only one",
+        "no network call and no API key, as tests/test_conformance.py asserts",
+        "nothing derived is written into the repository except the contract itself",
+        "a judgement nothing can re-evaluate is recorded as asserted, never dressed up as derived",
+        "no general expression language over the graph — a closed set of predicate kinds that each replay deterministically",
+        "bundles are for audit; recomputation only where a step is already deterministic and side-effect free"
+      ],
+      "inferred": [
+        "bundles live under ~/.vesta/bundles, keyed by project the way every other holding is (home.kept_at)",
+        "Witness gains identity and basis rather than a parallel type being introduced beside it",
+        "_record's existing **rest carries the new fields, so 17 tool call sites stay untouched",
+        "the ring buffer follows driving.readings — trim on write, not by sweep",
+        "existing attachments are not migrated; they re-derive on the next vesta-domain run",
+        "authority.Standing is reused for byte-basis judgements rather than a second currency check being written"
+      ],
+      "noted": [
+        "a local frontend for ontology editing and management — deferred until replay shows what actually needs editing",
+        "ontology intersection — union and diff first; intersection needs a synonym relation that does not exist yet (open-questions.md §2)",
+        "symbolic execution of model-derived bindings — out of reach by construction, and marked asserted instead",
+        "Behaviour 10 is deliberately narrowed to vocabulary and authority, not procedure: numbered steps appear in about twenty of thirty-one shipped skills but not reliably under any heading — one ships 22 steps and no workflow heading at all — so deriving a Procedure would invent the structure procedure.py refuses at write time.",
+        "A normative specification for the witness record lives at spec/witness.md, separate from doc/ which holds working notes. It specifies four blame attributions (inadequate standard, insufficient narrowing, sound-but-wrong, degraded environment), ten required fields, six checks, and three conformance levels. Several required fields and all of levels 2 and 3 are specified but not implemented; the document marks these throughout and must not be read as describing running code."
+      ],
+      "signed_at": 1788027975.028619,
+      "deferred": [],
+      "previous": []
+    }
+  ]
 }

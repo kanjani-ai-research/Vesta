@@ -205,3 +205,61 @@ def test_cwd_is_still_the_fallback_when_claude_project_dir_is_unset(repo, monkey
     )
     assert said is not None
     assert "store.py" in said["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+# ── Only a single search of the code is refused ─────────────────────────────
+
+
+def _bash(command: str, repo: Path) -> dict:
+    return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(repo)}
+
+
+def test_a_single_search_of_the_code_is_still_refused(repo):
+    assert decide(_bash('grep -rn "def keep" .', repo)) is not None
+    assert decide(_bash("rg keep store.py", repo)) is not None
+    assert decide(_bash('grep -n "keep" store.py | head -5', repo)) is not None
+
+
+def test_a_compound_command_is_let_through(repo):
+    """A `sed` reading one file was denied because a `grep` three commands
+    later named a definition. Refusing the search refused the read."""
+    assert decide(_bash('sed -n 1,20p store.py; grep -rn "def keep" .', repo)) is None
+    assert decide(_bash('ls && grep -rn "keep" store.py', repo)) is None
+    assert decide(_bash('grep -rn "keep" . || true', repo)) is None
+
+
+def test_a_search_filtering_a_pipe_is_let_through(repo):
+    """`ls | grep x` and `sed … | grep def` filter output already in hand."""
+    assert decide(_bash("ls tests | grep -i keep", repo)) is None
+    assert decide(_bash('sed -n 1,40p store.py | grep -n "def keep"', repo)) is None
+
+
+def test_a_search_over_prose_or_data_is_let_through(repo):
+    """`grep version plugin.json` is about data the graph does not hold."""
+    assert decide(_bash('grep -n "keep" README.md', repo)) is None
+    assert decide(_bash('grep -n "keep" .gitignore', repo)) is None
+    assert decide(_bash('grep -n "keep" .claude-plugin/plugin.json CHANGELOG.md', repo)) is None
+    assert decide(_bash('grep -n "keep" store.py notes.md', repo)) is None
+
+
+def test_the_grep_tool_over_prose_is_let_through(repo):
+    for scope in ({"glob": "*.md"}, {"path": "docs/notes.md"}, {"type": "md"}):
+        said = decide({"tool_name": "Grep", "tool_input": {"pattern": "def keep", **scope}, "cwd": str(repo)})
+        assert said is None, scope
+    assert decide({"tool_name": "Grep", "tool_input": {"pattern": "def keep", "glob": "*.py"}, "cwd": str(repo)}) is not None
+
+
+def test_a_pattern_containing_a_separator_is_one_search():
+    from vesta.instead import _searched_for
+
+    pattern, targets = _searched_for(_bash('grep -n "a|b;c" store.py', Path(".")))
+    assert pattern == "a|b;c" and targets == ["store.py"]
+
+
+def test_flags_with_values_are_not_mistaken_for_files():
+    from vesta.instead import _searched_for
+
+    pattern, targets = _searched_for(_bash("rg -t py -g '*.py' -A 3 keep src", Path(".")))
+    assert pattern == "keep" and targets == ["src"]
+    pattern, targets = _searched_for(_bash("grep -rn -e keep --include '*.py' .", Path(".")))
+    assert pattern == "keep" and targets == ["."]

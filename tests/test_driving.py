@@ -602,3 +602,66 @@ def test_the_question_only_comes_for_a_whole_implementation(tmp_path):
         "persist to a database, and expose a migration path",
     ):
         assert _something_to_build(a_project, str(tmp_path)), a_project
+
+
+# ── A step a function performs has to have run ──────────────────────────────
+
+
+def _a_step_performed_by(tmp_path, name="release-note"):
+    from vesta.function import Ask, Function, Role, add
+    from vesta.procedure import Procedure, Procedures, Step
+    from vesta.procedure import keep as keep_procedures
+
+    keep_procedures(Procedures(procedures=[
+        Procedure(id="release", label="release", steps=[Step(id="note", label="note")]),
+    ]), tmp_path)
+    add(tmp_path, Function(name=name, ask=Ask(system="s", prompt="p"),
+                           role=Role(procedure="release", step="note")))
+
+
+def test_a_step_nothing_has_performed_blocks_it(project, monkeypatch):
+    monkeypatch.setenv("VESTA_HOME", str(project / "home"))
+    _a_step_performed_by(project)
+    verdict = driving.look(project)
+    assert not verdict.done
+    assert "function release-note has no met run since the last change" in verdict.outstanding
+
+
+def test_a_met_run_since_the_last_change_satisfies_it(project, monkeypatch):
+    from vesta.function import done
+
+    monkeypatch.setenv("VESTA_HOME", str(project / "home"))
+    _a_step_performed_by(project)
+    done(project, "release-note", {}, "## 1")
+    assert driving.look(project).done
+
+
+def test_a_run_from_before_the_last_change_does_not_count(project, monkeypatch):
+    from vesta.function import done
+
+    monkeypatch.setenv("VESTA_HOME", str(project / "home"))
+    _a_step_performed_by(project)
+    done(project, "release-note", {}, "## 1", at=1.0)
+    driving.start(project, session="s")  # the project moved after that run
+    verdict = driving.look(project)
+    assert any("release-note" in line for line in verdict.outstanding)
+
+
+def test_a_run_that_did_not_meet_its_criteria_is_not_a_performance(project, monkeypatch):
+    from vesta.function import MATCHES, Ask, Criterion, Function, Role, add, done
+
+    monkeypatch.setenv("VESTA_HOME", str(project / "home"))
+    _a_step_performed_by(project)
+    add(project, Function(name="release-note", ask=Ask(system="s", prompt="p"),
+                          criteria=[Criterion(says="heading", check=MATCHES, pattern="^## ")],
+                          role=Role(procedure="release", step="note")))
+    done(project, "release-note", {}, "no heading")
+    assert any("release-note" in line for line in driving.look(project).outstanding)
+
+
+def test_a_function_without_a_role_is_not_a_condition(project, monkeypatch):
+    from vesta.function import Command, Function, add
+
+    monkeypatch.setenv("VESTA_HOME", str(project / "home"))
+    add(project, Function(name="tidy", command=Command(run="true")))
+    assert driving.look(project).done

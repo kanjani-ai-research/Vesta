@@ -75,7 +75,35 @@ TOO_COMMON = {
     "use", "uses", "using", "look", "find", "help", "start", "stop", "open",
     "close", "hold", "held", "move", "point", "value", "values", "data",
     "field", "fields", "item", "items", "state", "status", "context", "prompt",
+    # Extended after a second live session, in which `one`, `on`, `apply`,
+    # `commands`, `available`, `everything`, `complete`, `version` and `Run`
+    # were each injected on prompts plainly not about them — one of them on
+    # every prompt for two hundred prompts running. A hook that prepends to
+    # every prompt is a tax on every prompt, which is the failure this
+    # module exists to avoid.
+    "one", "two", "three", "everything", "anything", "nothing", "something",
+    "apply", "applies", "command", "commands", "available", "complete",
+    "version", "ready", "each", "every", "done", "step", "steps", "function",
+    "functions", "order", "record", "records", "role", "roles", "match",
+    "matches", "input", "inputs", "output", "outputs", "check", "checks",
+    "verdict", "reason", "reasons", "first", "last", "next", "new", "old",
+    "true", "false", "none", "all", "any", "some", "more", "most", "less",
+    "same", "other", "others", "here", "there", "then", "when", "while",
+    "with", "without", "after", "before", "under", "over", "between", "into",
+    "from", "this", "that", "these", "those", "what", "which", "who", "why",
+    "how", "where", "describe", "resolve", "resolved", "refer", "refers",
+    "project", "projects", "file", "files", "code", "source", "tree", "root",
+    "home", "store", "stored", "notice", "noted", "learn", "learned", "known",
+    "means", "does", "uses", "used", "touches", "bears", "decided", "agree",
+    "agreed", "drive", "driving", "contract", "procedure", "shape", "guide",
+    "words", "word", "skill", "skills", "truth", "space", "bound", "basis",
 }
+
+# Shorter than this, a bare word is never a definition somebody meant. `on`,
+# `at`, `id`, `one` are all identifiers somewhere and English everywhere, and
+# no list of common words will ever be long enough; the length is the rule
+# the list cannot be. Spelling it out — `battery.one` — still reaches it.
+SHORTEST_BARE = 4
 
 
 def _named(prompt: str, graph: Graph) -> List[str]:
@@ -90,7 +118,18 @@ def _named(prompt: str, graph: Graph) -> List[str]:
     # A dotted spelling is one word to the tokeniser, so `across.known` matches
     # neither the bare name nor a qualified name that has no container. The
     # last segment is what names the definition; the rest says which one.
-    tails = {w.rsplit(".", 1)[-1] for w in words if "." in w}
+    #
+    # Only where both halves are names. A sentence ending "…the primitive."
+    # tokenises as `primitive.` with an empty tail, and "v0.7.1" as a number;
+    # neither is somebody spelling out a definition, and a tail taken from
+    # punctuation was how `id` and `at` were being injected.
+    tails = {
+        w.rsplit(".", 1)[-1]
+        for w in words
+        if "." in w
+        and re.match(r"^[A-Za-z_]\w*$", w.rsplit(".", 1)[0])
+        and re.match(r"^[A-Za-z_]\w*$", w.rsplit(".", 1)[-1])
+    }
 
     found: List[str] = []
     for node in graph.nodes.values():
@@ -116,7 +155,12 @@ def _named(prompt: str, graph: Graph) -> List[str]:
         # `qualified` is just the name again, so testing it alone lets every
         # bare English word through — the same trap that made an earlier guard
         # here do nothing at all.
-        if node.name in TOO_COMMON:
+        #
+        # Compared lower-cased, because a sentence-initial "Run" is the English
+        # word with a capital, not the class `Run`; and any bare name shorter
+        # than `SHORTEST_BARE` is treated the same way, because no list of
+        # common words is ever long enough to hold `on`, `at`, `id` and `one`.
+        if node.name.lower() in TOO_COMMON or len(node.name) < SHORTEST_BARE:
             module = Path(node.path).stem
             spelled = (
                 ("." in node.qualified and node.qualified in words)
@@ -331,9 +375,11 @@ def main() -> int:
         _something_to_build(prompt, project),
         _a_rule_stated(prompt),
         _a_change_to_what_was_agreed(prompt, project),
+        _a_function_for_this(prompt, project),
         _a_rule_in_doubt(prompt, project),
         _something_already_wrong(prompt, project),
         _never_been_read(prompt, project),
+        _read_but_not_lately(prompt, project),
         _the_graph_can_answer_this(prompt, project),
     ):
         if offer:
@@ -439,6 +485,51 @@ def _never_been_read(prompt: str, project: str) -> str:
         "inference you are already spending.\n\n"
         "Then answer what they actually asked."
     )
+
+
+def _read_but_not_lately(prompt: str, project: str) -> str:
+    """A vocabulary that was derived, and modules written since it was.
+
+    `_never_been_read` covers the repository nobody has read. This covers the
+    one everybody forgot to read again: the domain agent ran once, the project
+    grew, and every module since is named by nothing — so `does` answers
+    "nothing here does that" about work that is right there. Nothing
+    triggered the re-run, on this repository or anyone's; this does, naming
+    the files, once per session per set of files.
+
+    Only on a prompt about the work, as the first-read offer is: a prompt
+    about syntax is answered from the graph, which is current.
+    """
+    if not ABOUT_THE_WORK.search(prompt):
+        return ""
+    try:
+        from .once import say_once
+        from .ready import readiness
+        from .traverse import recall as recall_map
+
+        if not readiness(project).can_answer:
+            return ""
+        mapped = recall_map(project)
+        if mapped is None or not mapped.attachments:
+            return ""  # the first-read offer's case, not this one
+        graph = graph_for(project, trust_for=TRUST_FOR, never_build=True)
+        unread = mapped.unread(graph)
+        if not unread:
+            return ""
+        shown = ", ".join(unread[:6]) + (f" and {len(unread) - 6} more" if len(unread) > 6 else "")
+        return say_once(
+            project,
+            "unread modules " + ",".join(unread[:12]),
+            f"{len(unread)} module(s) in this repository were written after its "
+            f"vocabulary was derived and are named by nothing: {shown}. A question "
+            "about work they do will answer as though the repository does not do "
+            "it.\n\nRun the **vesta-domain** subagent now, yourself, without "
+            "asking, and tell it those files are what it is for. Then answer "
+            "what they actually asked."
+        )
+    except Exception as exc:  # noqa: BLE001 - never break a prompt
+        logger.info("could not tell what is unread: %s", exc)
+        return ""
 
 
 # A prompt about code somebody has not named. These are the ones the graph
@@ -641,6 +732,52 @@ def _something_already_wrong(prompt: str, project: str) -> str:
         )
     except Exception as exc:  # noqa: BLE001 - never break the session
         logger.info("could not check what is wrong here: %s", exc)
+        return ""
+
+
+def _a_function_for_this(prompt: str, project: str) -> str:
+    """A recorded function that does what the prompt is asking for.
+
+    The primitive is only worth having if it is reached for, and an agent
+    reaches for nothing it does not know exists: a user who types "write the
+    release note" is asking for exactly what `release-note` was defined to
+    do, and without this the agent would do it by hand, differently each
+    time, and nothing would be recorded or judged.
+
+    Said once per session per function. The function is still there on the
+    next prompt, and saying so again adds nothing but noise.
+    """
+    try:
+        from . import function as functions
+        from .once import say_once
+
+        kept = functions.recall(project)
+        if not kept.functions:
+            return ""
+        matched = functions.for_prompt(kept, prompt)[:3]
+        if not matched:
+            return ""
+
+        launcher = _launcher()
+        lines = [
+            "A function is recorded for this project that does what this prompt asks. "
+            "Brief it rather than doing the work by hand — the brief carries the "
+            "model, the system prompt, the criteria, and what earlier runs got wrong:"
+        ]
+        for one in matched:
+            inputs = "".join(f" --input {name}=…" for name in one.inputs)
+            lines.append(f"  {one.describe()}")
+            lines.append(f"    {launcher} function brief {one.name}{inputs}")
+        lines.append(
+            "Perform the brief on the model it names (a subagent on that model, with "
+            "exactly that system prompt and prompt), save the output to a file, and "
+            f"record it: `{launcher} function done <name> --output-file <path> --input …`. "
+            "Show the verdicts; a `?` is asserted, not met."
+        )
+        said = "\n".join(lines)
+        return say_once(project, "function for " + ", ".join(o.name for o in matched), said)
+    except Exception as exc:  # noqa: BLE001 - never break the session
+        logger.info("could not look for a function: %s", exc)
         return ""
 
 

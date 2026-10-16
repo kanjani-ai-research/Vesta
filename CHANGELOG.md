@@ -1,5 +1,123 @@
 # Changelog
 
+## 0.8.0
+
+**A function is offered at the prompt that asks for it.** The primitive is
+only worth having if it is reached for, and an agent reaches for nothing it
+does not know exists. The inject hook now crosses a prompt into the functions
+recorded for the project — two shared stems, or the name typed out — and
+offers the brief once per session per function, as a rule in doubt is offered.
+
+**A command that accepts the output is a check.** Most of what was asserted
+is a command somebody could have run: parses as JSON, compiles, the linter
+accepts it. An `exits` criterion runs a stated shell line in the project with
+the output on stdin and holds on exit zero. A command that cannot run is
+reported as unknown, never as the output being wrong.
+
+**A procedure reads as the briefs that perform it.** `vesta function pipeline
+<procedure>` walks the recorded steps in order — starts first, continuations
+before branches, isolated steps last — and shows each with the function that
+performs it, its criteria, what it was last judged bad for, and the brief to
+run, or the plain fact that nothing recorded performs it.
+
+**Feedback names the criterion a bad run got past.** `--criterion` names one
+of the function's own; a requirement it never stated is a change to the
+function, not feedback on a run. The ledger counts them: an asserted criterion
+named repeatedly is the one worth turning into a check, and a checked one
+named is a check that is wrong. The lesson carried into the next brief names
+it too.
+
+**A function run leaves a witness.** Written in the record's shape where every
+other invocation's is kept, so `why` reads it: each checkable criterion a
+finding, the asserted ones counted as read because that is what they are, and
+the function's definition as the standard by name and digest. No trajectory is
+invented — a run narrows nothing, and the record leaves those fields empty.
+
+**Driving counts the steps a function performs.** A fifth completion
+condition: every function that performs a step of a recorded procedure has a
+run whose checkable criteria all held, taken since the project last changed.
+A driven project can no longer finish with a declared step never having run.
+
+And six things that touched every session, found by using Vesta on itself:
+
+**The search hook refuses one search of the code, and nothing else.** It
+denied a `sed` reading one file because a `grep` three commands later named a
+definition, denied `ls | grep` because the filter word was a definition, and
+denied searches of `.gitignore`, `plugin.json` and a markdown file because the
+word happened to be a name. A compound command does other work; a search that
+is not first in its pipeline filters output already in hand; a search over
+prose or data is about nothing the graph holds. Each is let through now, and
+what is refused is the one case the graph answers better: a single search,
+first in its pipeline, over source or over the tree.
+
+**Build output is not the project.** A test run's setuptools output under
+`build/` was indexed as source and doubled every definition in the package.
+The walker now honours the root `.gitignore` — the one list of "not mine" that
+is right for every repository is the one its author wrote — and skips `build/`
+and `dist/` beside a manifest, where they are what the build tool wrote rather
+than somebody's own directory of build scripts.
+
+**Ordinary English is not a definition.** `one`, `on`, `id`, `everything`,
+`apply` and a sentence-initial `Run` were each injected as definitions worth
+knowing about, one of them on every prompt for two hundred prompts running —
+the tax on every prompt the inject hook exists to avoid. A bare name shorter
+than four letters never qualifies, a common word is compared without case, a
+tail taken from sentence punctuation is not a qualified name, and the list of
+common words grew by what this session typed. Spelling a name out still
+reaches it.
+
+**A checkout without the sidecar extra skips six tests, with the reason.**
+They start the server, and a server that needs `mcp` describes the
+environment rather than the code when `mcp` is absent. Red for a missing
+optional dependency is red nobody acts on.
+
+**The next contract keeps the last.** Agreeing new work overwrote the signed,
+delivered contract with the next draft, and the record of what had been built
+went with it — which is how two releases of Vesta went out beside its own
+contract rather than through it. A signed contract with work outstanding is
+refused as a replacement; a delivered one is carried under the next, whole,
+and `VESTA.md` lists what was agreed before and met. Vesta's own contract for
+0.7 and 0.8 is recorded this way.
+
+**A term's id comes from what it says.** It came from Python's `hash()`,
+which is salted per process, so every derivation gave every term a new id and
+every attachment written against the last derivation pointed at nothing — 508
+of 558 on this repository, silently. Ids are now a digest of the term's kind
+and label, and a derivation re-points any attachment whose term id is gone at
+the term that carries its label, which `Attachment.label` was recorded for.
+A term the author removes leaves its attachments where they are.
+
+**One version, said once.** `vesta version` finds every place a version is
+written — the package metadata, the plugin manifest, a package's
+`__version__`, the changelog's latest heading — and says whether they agree,
+exiting non-zero when they do not. `--set` writes the number into each of
+them and turns an "Unreleased" heading into it; `--tag` cuts the local tag in
+the repository's own shape and never pushes. Vesta's own three version
+strings had disagreed for seven releases.
+
+**A new version repairs what the last one wrote.** The first time a new
+version of Vesta runs, as a command or as the sidecar, it puts every held
+record back in step — today, pointing attachments at the term that now
+carries their label — and marks the version so it costs one pass per update.
+`vesta held --repair` does the same on demand, with `--dry` to look first.
+Nothing is deleted: a claim under a word the vocabulary dropped is kept and
+counted, not thrown away.
+
+**The agents find the plugin wherever it is installed.** Their fallback
+launcher path named a `0.1.0` directory that has not existed since the first
+release, so an agent run without `CLAUDE_PLUGIN_ROOT` found nothing and
+recorded nothing. The fallback now takes the newest installed copy, whatever
+marketplace and version it came from. And `vesta.__version__`, which said
+0.1.0 for seven releases, is held equal to the package and plugin versions by
+a test.
+
+**A vocabulary that has fallen behind says which files it is missing.** The
+domain agent ran once, the project grew, and every module since was named by
+nothing; nothing triggered a re-run on any repository. `does` now names the
+modules no attachment reaches, on a hit as well as a miss, and the inject hook
+says so once per session on a question about the work, so the agent re-reads
+exactly those files.
+
 ## 0.7.1
 
 **The version catches up to the code.** 0.7.0 was pushed with the package

@@ -132,27 +132,172 @@ def answer_for(name: str, project: Path) -> str:
     return "\n".join(lines)
 
 
+# Files a definition is never hunted for in. A grep over a changelog, a
+# manifest, a document or a log is somebody reading prose or data, and the
+# graph holds nothing about either — refusing it leaves them with nothing,
+# which is the one failure this must never have. Observed live: searches of
+# `.gitignore`, `plugin.json`, `README.md` and an agent's markdown were each
+# refused because the word happened to name a definition.
+NOT_CODE = (
+    ".md", ".markdown", ".rst", ".txt", ".json", ".yaml", ".yml", ".toml",
+    ".ini", ".cfg", ".lock", ".csv", ".tsv", ".html", ".xml", ".log", ".svg",
+)
+
+SEARCHERS = ("grep", "egrep", "fgrep", "rg", "ag", "ack")
+
+# Flags that take the next word as their value, so it is not mistaken for the
+# pattern or a file. The common ones for the four searchers; an uncommon one
+# costs at worst a search being let through.
+TAKES_A_VALUE = {
+    "-e", "--regexp", "-f", "--file", "-A", "-B", "-C", "-m", "--max-count",
+    "-g", "--glob", "-t", "--type", "-T", "--type-not", "--include", "--exclude",
+    "--exclude-dir", "-d", "--color", "--colour",
+}
+
+
+def _split(text: str, *separators: str) -> List[str]:
+    """`text` cut at any separator that is outside quotes.
+
+    Longer separators are tried first at each position, so `||` is not read
+    as two pipes. Quote-aware because a pattern may legitimately contain `;`
+    or `|`, and a cut inside it would turn one search into two commands.
+    """
+    parts: List[str] = []
+    here: List[str] = []
+    quote = ""
+    i = 0
+    ordered = sorted(separators, key=len, reverse=True)
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            here.append(ch)
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            here.append(ch)
+            i += 1
+            continue
+        hit = next((s for s in ordered if text.startswith(s, i)), None)
+        if hit:
+            parts.append("".join(here))
+            here = []
+            i += len(hit)
+            continue
+        here.append(ch)
+        i += 1
+    parts.append("".join(here))
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _is_code(target: str) -> bool:
+    """Whether a search target could hold a definition.
+
+    A dotfile, a file with a prose or data suffix, and a shell variable are
+    not. A directory, a glob over source, or a file with a source suffix are.
+    """
+    stripped = target.rstrip("/")
+    name = stripped.rsplit("/", 1)[-1]
+    if name in ("", ".", "..") or target.endswith("/"):
+        return True  # a directory: the tree, or part of it
+    if name.startswith(".") and "." not in name[1:]:
+        return False  # `.gitignore`, `.env`
+    lowered = name.lower()
+    return not lowered.endswith(NOT_CODE)
+
+
+def _one_search(stage: str) -> Tuple[str, List[str]]:
+    """The pattern and targets of a single search command, or nothing.
+
+    Returns ("", []) for anything that is not one search command on its own:
+    a stage that starts with something else is reading or filtering, not
+    searching the tree.
+    """
+    import shlex
+
+    try:
+        words = shlex.split(stage, posix=True)
+    except ValueError:
+        return "", []
+    # Leading environment assignments: `LC_ALL=C grep …`.
+    while words and re.match(r"^[A-Za-z_]\w*=", words[0]):
+        words.pop(0)
+    if not words or words[0].rsplit("/", 1)[-1] not in SEARCHERS:
+        return "", []
+
+    pattern = ""
+    targets: List[str] = []
+    rest = words[1:]
+    i = 0
+    while i < len(rest):
+        word = rest[i]
+        if word == "--":
+            targets.extend(rest[i + 1:])
+            break
+        if word in ("-e", "--regexp") and i + 1 < len(rest):
+            pattern = pattern or rest[i + 1]
+            i += 2
+            continue
+        if word in TAKES_A_VALUE and i + 1 < len(rest):
+            i += 2
+            continue
+        if word.startswith("-") and len(word) > 1:
+            i += 1
+            continue
+        if not pattern:
+            pattern = word
+        else:
+            targets.append(word)
+        i += 1
+    return pattern, targets
+
+
 def _searched_for(payload: dict) -> Tuple[str, List[str]]:
-    """The pattern a tool call is searching for, whichever tool it is."""
+    """The pattern a tool call is searching for, and the files it searches.
+
+    Empty for anything that is not plainly one search of the code:
+
+    - a compound command (`a; b`, `a && b`) does other work beside the
+      search, and refusing the whole call refuses that work too — observed
+      live, a `sed` reading one file was denied because a `grep` three
+      commands later named a definition;
+    - a search that is not the first stage of its pipeline (`ls | grep x`,
+      `sed -n 1,40p f.py | grep def`) filters output already in hand, and the
+      graph is not a better version of that;
+    - a search over files that are not code (`grep version plugin.json`) is
+      about prose or data the graph does not hold.
+
+    The one case left is a single search, first in its pipeline, over source
+    or over the tree — which is the one case the graph answers better.
+    """
     tool = payload.get("tool_name", "")
     given = payload.get("tool_input") or {}
 
     if tool == "Grep":
+        for scope in (str(given.get("glob", "")), str(given.get("path", ""))):
+            if scope and not _is_code(scope):
+                return "", []
+        kind = str(given.get("type", "")).lower()
+        if kind and kind in ("md", "markdown", "txt", "json", "yaml", "toml", "config", "log"):
+            return "", []
         return str(given.get("pattern", "")), []
+
     if tool == "Bash":
-        # `grep -n "def graph_for" file.py`, `rg graph_for`
         said = str(given.get("command", ""))
-        found = re.search(
-            r"\b(?:grep|rg|ag|ack)\b[^|;]*?"
-            r"(?:-\w+\s+)*"
-            r"(['\"])(.+?)\1",
-            said,
-        )
-        if found:
-            return found.group(2), []
-        found = re.search(r"\b(?:grep|rg|ag|ack)\b\s+(?:-\w+\s+)*([A-Za-z_]\w{2,})\b", said)
-        if found:
-            return found.group(1), []
+        commands = _split(said, ";", "&&", "||", "\n")
+        if len(commands) != 1:
+            return "", []
+        stages = _split(commands[0], "|")
+        if not stages:
+            return "", []
+        pattern, targets = _one_search(stages[0])
+        if not pattern:
+            return "", []
+        if targets and not all(_is_code(t) for t in targets):
+            return "", []
+        return pattern, targets
     return "", []
 
 

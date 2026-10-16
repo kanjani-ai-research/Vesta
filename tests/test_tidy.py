@@ -101,3 +101,66 @@ def test_forgetting_one_repository_leaves_the_others(store: Path, tmp_path: Path
     assert not (store / "notes" / f"{key}.json").exists()
     # another repository's records are untouched
     assert (store / "notes" / "gone-bbbb.json").exists()
+
+
+# ── Records in disarray, and a new version arriving ─────────────────────────
+
+
+def _mapped(tmp_path, monkeypatch):
+    """A repository whose attachments point at term ids the ontology lost."""
+    from vesta.derive import write_attachments, write_terms
+    from vesta.held import graph_for
+    from vesta.home import keep_in
+    from vesta.traverse import keep as keep_map
+    from vesta.traverse import recall as recall_map
+
+    keep_in(tmp_path / "home")
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "store.py").write_text(
+        '"""Keeping things, which is what a store is for and nothing else is."""\n\n\n'
+        'def keep(item):\n    """Keep one."""\n    return item\n\n\n'
+        'def drop(item):\n    """Drop one."""\n    return item\n',
+        encoding="utf-8",
+    )
+    graph_for(root, rebuild=True)
+    write_terms(root, "activity: keeping an item\nactivity: dropping an item")
+    write_attachments(root, "store.py:4 keep | keeping an item\nstore.py:9 drop | dropping an item")
+    stale = recall_map(root)
+    stale.attachments[0].term = "activity:0-11111"
+    stale.attachments[1].term = "activity:1-22222"
+    stale.attachments[1].label = "a word the vocabulary dropped"
+    keep_map(stale, root)
+    return root
+
+
+def test_repair_repoints_by_label_and_keeps_orphans(tmp_path, monkeypatch):
+    from vesta.domain import recall as recall_ontology
+    from vesta.tidy import repair
+    from vesta.traverse import recall as recall_map
+
+    root = _mapped(tmp_path, monkeypatch)
+    dry = repair(root, dry=True)
+    assert (dry.projects, dry.repointed, dry.orphaned) == (1, 1, 1)
+    assert recall_map(root).attachments[0].term == "activity:0-11111"
+
+    done = repair(root)
+    assert (done.repointed, done.orphaned) == (1, 1)
+    current = {t["id"] for t in recall_ontology(root).terms}
+    after = recall_map(root).attachments
+    assert after[0].term in current
+    assert after[1].term == "activity:1-22222" and len(after) == 2
+    assert "re-pointed" in done.describe()
+
+
+def test_arrival_of_a_new_version_repairs_once(tmp_path, monkeypatch):
+    from vesta.tidy import arrived
+    from vesta.traverse import recall as recall_map
+
+    root = _mapped(tmp_path, monkeypatch)
+    first = arrived("9.9.9")
+    assert first is not None and first.repointed == 1
+    assert arrived("9.9.9") is None
+    assert recall_map(root).attachments[0].term.startswith("activity:")
+    again = arrived("9.9.10")
+    assert again is not None and again.repointed == 0

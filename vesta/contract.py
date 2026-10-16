@@ -108,6 +108,14 @@ class Contract(BaseModel):
     # declined and why, and so it can be picked up after delivery.
     deferred: List[str] = Field(default_factory=list)
 
+    # The contracts this one succeeded. A project is not built once: when
+    # every behaviour agreed is met, the next piece of work is a new agreement
+    # — and a new agreement that overwrote the old one would erase the record
+    # of what was delivered. This repository's own contract was that record,
+    # and two releases went out beside it rather than through it, because the
+    # only way to agree new work was to destroy the proof of the last.
+    previous: List["Contract"] = Field(default_factory=list)
+
     @property
     def signed(self) -> bool:
         return bool(self.signed_at)
@@ -231,7 +239,48 @@ def _readable(agreed: Contract) -> str:
         for choice in agreed.inferred:
             lines.append(f"- {choice}")
 
+    if agreed.previous:
+        lines.extend(["", "## Previously agreed, and delivered", ""])
+        lines.append("Each of these was met in full before the next was agreed.")
+        lines.append("")
+        for earlier in agreed.previous:
+            when = (
+                time.strftime("%Y-%m-%d", time.localtime(earlier.signed_at))
+                if earlier.signed_at else "undated"
+            )
+            lines.append(
+                f"- **{earlier.goal or 'untitled'}** — agreed {when}, "
+                f"{len(earlier.met)}/{len(earlier.behaviours)} behaviour(s) met"
+            )
+            for behaviour in earlier.behaviours:
+                lines.append(f"  - {behaviour.describe()}")
+
     return "\n".join(lines) + "\n"
+
+
+def succeed(repo: Path | str, next_agreed: Contract) -> Contract:
+    """Agree the next piece of work, keeping the record of the last.
+
+    Refused while the current contract is signed and anything in it is
+    outstanding: behaviour is fixed from signing, and the way to change it is
+    `defer`, not a replacement. Once every behaviour is met, the next contract
+    carries the finished one — and everything it carried — under `previous`,
+    so `VESTA.md` keeps saying what was delivered as well as what is agreed.
+
+    An unsigned contract is a draft, and a draft is replaced without ceremony.
+    """
+    current = recall(repo)
+    if current is not None and current.signed and current.outstanding:
+        raise ValueError(
+            f"the current contract is signed and {len(current.outstanding)} "
+            "behaviour(s) are outstanding — behaviour is fixed from signing. "
+            "Finish it, or `--defer` the change for after delivery."
+        )
+    if current is not None and current.signed:
+        earlier = current.model_copy(update={"previous": []})
+        next_agreed.previous = list(current.previous) + [earlier]
+    keep(next_agreed, repo)
+    return next_agreed
 
 
 def sign(repo: Path | str, at: Optional[float] = None) -> Optional[Contract]:

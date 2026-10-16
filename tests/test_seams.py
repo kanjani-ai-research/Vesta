@@ -24,6 +24,16 @@ from pathlib import Path
 
 import pytest
 
+# The sidecar is an extra. A checkout without it is a working Vesta whose
+# tools are absent, and a test that starts the server there is describing
+# the environment, not the code — so it is skipped with the reason, not failed.
+import importlib.util as _importlib_util
+
+needs_mcp = pytest.mark.skipif(
+    _importlib_util.find_spec("mcp") is None,
+    reason="the sidecar extra is not installed: pip install 'causum-vesta[sidecar]'",
+)
+
 HERE = Path(__file__).resolve().parent.parent
 INLINE = re.compile(r"!`([^`]+)`")
 
@@ -191,6 +201,7 @@ def test_every_command_answers_from_the_shell(path, tmp_path):
 # ── The server: over its own protocol ───────────────────────────────────────
 
 
+@needs_mcp
 def test_the_server_answers_an_initialize():
     done = subprocess.run(
         [str(HERE / "bin" / "vesta-sidecar")],
@@ -217,6 +228,7 @@ def test_the_server_answers_an_initialize():
     assert answered["result"]["serverInfo"]["name"] == "vesta"
 
 
+@needs_mcp
 def test_every_tool_the_server_offers_can_be_called():
     """A tool that lists and cannot be called is the same defect one layer up."""
     import asyncio
@@ -646,6 +658,7 @@ def test_once_driving_the_question_is_not_asked_again(fresh):
     assert "AskUserQuestion" not in said
 
 
+@needs_mcp
 def test_the_choice_is_asked_through_the_hosts_own_dialog():
     """Not through MCP elicitation.
 
@@ -672,6 +685,7 @@ def test_the_choice_is_asked_through_the_hosts_own_dialog():
     assert "exactly these two options" in source
 
 
+@needs_mcp
 def test_consent_uses_the_form_and_choosing_does_not():
     """Two moments, two mechanisms.
 

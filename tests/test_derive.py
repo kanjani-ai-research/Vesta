@@ -215,3 +215,55 @@ def test_an_exact_label_still_attaches(tmp_path, monkeypatch):
     assert not refused
     assert len(mapped.attachments) == 1
     assert mapped.attachments[0].kind == "activity", "a real term, not a loose one"
+
+
+# ── A term's id is a function of what it says ───────────────────────────────
+
+
+def test_a_term_id_comes_from_its_content_not_the_process():
+    from vesta.derive import term_id
+
+    first = read_terms("activity: resolving a reference")[0]
+    again = read_terms("- activity:  resolving a   reference ")[0]
+    assert first.id == again.id == term_id("activity", "resolving a reference")
+    assert term_id("activity", "resolving a reference") == "activity:" + term_id("activity", "Resolving A Reference").split(":")[1]
+    assert term_id("activity", "x") != term_id("role", "x")
+    assert read_terms("activity: resolving a reference\nactivity: resolving a reference")[1].id == first.id
+
+
+def test_rederiving_the_ontology_keeps_the_attachments_reachable(tmp_path, monkeypatch):
+    """508 of 558 attachments pointed at ids no ontology would produce again."""
+    from vesta.derive import write_attachments, write_terms
+    from vesta.held import graph_for
+    from vesta.traverse import recall as recall_map
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "store.py").write_text(
+        '"""Keeping things, which is what a store is for and nothing else is."""\n\n\n'
+        'def keep(item):\n    """Keep one."""\n    return item\n',
+        encoding="utf-8",
+    )
+    graph_for(root, rebuild=True)
+    write_terms(root, "activity: keeping an item\nactivity: a word nobody attaches")
+    mapped, refused = write_attachments(root, "store.py:4 keep | keeping an item")
+    assert not refused and len(mapped.attachments) == 1
+
+    # The old world: a map written against ids that will never recur.
+    stale = recall_map(root)
+    stale.attachments[0].term = "activity:0-12345"
+    from vesta.traverse import keep as keep_map
+    keep_map(stale, root)
+
+    # The author rephrases one term and re-derives; the attached one is kept.
+    found = write_terms(root, "activity: keeping an item\nactivity: a word somebody rephrased")
+    current = {t["id"] for t in found.terms}
+    attached = recall_map(root).attachments[0]
+    assert attached.term in current
+    assert attached.label == "keeping an item"
+
+    # And a term that is gone leaves its attachment as it was, not dropped.
+    write_terms(root, "activity: something else entirely")
+    left = recall_map(root).attachments
+    assert len(left) == 1 and left[0].label == "keeping an item"

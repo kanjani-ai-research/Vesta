@@ -535,3 +535,29 @@ def test_the_version_is_semantic_and_has_a_changelog():
 
     changelog = (HERE / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## {version}" in changelog, f"{version} is not in the changelog"
+
+
+def test_every_version_string_agrees():
+    """`__version__` said 0.1.0 for seven releases. Three places carry the
+    version — the package metadata, the plugin manifest, and the import — and
+    a reader of any one of them is entitled to the same answer."""
+    import json
+    import re
+
+    import vesta
+
+    pyproject = (HERE / "pyproject.toml").read_text(encoding="utf-8")
+    packaged = re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
+    manifest = json.loads((HERE / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert packaged == manifest["version"] == vesta.__version__
+
+
+def test_the_agents_do_not_name_a_plugin_version_that_does_not_exist():
+    """The fallback launcher path named `vesta/0.1.0`, which no installed
+    plugin has been called since the first release, so an agent running
+    without `CLAUDE_PLUGIN_ROOT` set found nothing and recorded nothing."""
+    for path in sorted((HERE / "agents").glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        assert "/0.1.0" not in text, f"{path.name} names a plugin version that does not exist"
+        assert "vesta-local" not in text, f"{path.name} names the development marketplace"
+        assert "CLAUDE_PLUGIN_ROOT" in text and "bin/vesta-run" in text, path.name

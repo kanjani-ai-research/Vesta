@@ -269,3 +269,114 @@ def forget(repo: Path | str, dry: bool = False) -> Swept:
                 except OSError:
                     pass
     return swept
+
+
+# ── Records in disarray, and a new version arriving ─────────────────────────
+
+
+class Repaired(BaseModel):
+    """What a repair found, and what it put right."""
+
+    projects: int = 0
+    repointed: int = 0
+    # Attachments whose term is gone by id and by label. Not removed: each is
+    # still a true claim about the code under a word the vocabulary no longer
+    # uses, and `does` already reads those as unattached. Counted so a reader
+    # knows the vocabulary moved under them.
+    orphaned: int = 0
+    said: List[str] = Field(default_factory=list)
+
+    def describe(self) -> str:
+        if not self.projects:
+            return "nothing held here needs repair"
+        lines = [
+            f"{self.projects} project(s) checked; {self.repointed} attachment(s) "
+            f"re-pointed at current term ids; {self.orphaned} under a word the "
+            "vocabulary no longer uses"
+        ]
+        lines.extend(f"  {line}" for line in self.said[:12])
+        return "\n".join(lines)
+
+
+def repair(repo: Optional[Path | str] = None, dry: bool = False) -> Repaired:
+    """Put the records for one repository, or every one held, back in step.
+
+    What can be in disarray is what one record says about another: an
+    attachment naming a term id the ontology no longer has, because ids were
+    once salted per process and because an author rephrasing a term changes
+    its id by design. Every attachment carries its label for this reason, so
+    the repair is to point it at the term that now carries that label — the
+    same thing `derive.write_terms` does on every derivation, done here for
+    records written before it did.
+
+    Nothing is deleted. A record whose repository is gone is `sweep`'s to let
+    go of, and a claim whose word is gone is kept as an orphan rather than
+    thrown away: it is still true about the code.
+    """
+    from .derive import repoint
+    from .domain import recall as recall_ontology
+    from .traverse import recall as recall_map
+
+    roots: List[Path]
+    if repo is not None:
+        roots = [Path(repo).expanduser().resolve()]
+    else:
+        roots = sorted({p for p in _repositories().values() if p.is_dir()})
+
+    found = Repaired()
+    for root in roots:
+        ontology = recall_ontology(root)
+        mapped = recall_map(root)
+        if ontology is None or mapped is None or not mapped.attachments:
+            continue
+        found.projects += 1
+        current = {t["id"] for t in ontology.terms}
+        labels = {" ".join(t["label"].lower().split()) for t in ontology.terms}
+        stale = [a for a in mapped.attachments if a.term not in current]
+        fixable = [a for a in stale if " ".join(a.label.lower().split()) in labels]
+        orphaned = len(stale) - len(fixable)
+        moved = len(fixable) if dry else repoint(root, ontology)
+        found.repointed += moved
+        found.orphaned += orphaned
+        if moved or orphaned:
+            found.said.append(
+                f"{root.name}: {moved} re-pointed, {orphaned} orphaned"
+                + (" (dry run)" if dry else "")
+            )
+    return found
+
+
+def _version_mark() -> Path:
+    return home() / "version"
+
+
+def arrived(version: str) -> Optional[Repaired]:
+    """Repair everything held, once, the first time a new version runs.
+
+    A plugin update arrives without ceremony: the framework replaces the
+    directory and the next hook runs the new code against records the old
+    code wrote. Whatever the new version does differently about those
+    records has to be reconciled then, before anything reads them — and
+    nobody is going to run a command to do it, so this runs itself, keyed by
+    the version so it costs one pass per update rather than one per prompt.
+
+    Silent and harmless on failure: a repair that cannot run must not stop a
+    tool from answering.
+    """
+    mark = _version_mark()
+    try:
+        if mark.is_file() and mark.read_text(encoding="utf-8").strip() == version:
+            return None
+    except OSError:
+        return None
+    try:
+        done = repair()
+    except Exception as exc:  # noqa: BLE001 - never block a tool on housekeeping
+        logger.info("could not repair on arrival of %s: %s", version, exc)
+        done = None
+    try:
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        mark.write_text(version, encoding="utf-8")
+    except OSError:
+        pass
+    return done

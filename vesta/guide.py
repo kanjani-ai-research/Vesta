@@ -130,6 +130,20 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ],
     ),
     (
+        "Is the version the same everywhere, and are the records in step?",
+        "A version is written in several files for several readers, and they "
+        "drift. `version` finds every place and holds them to one number; "
+        "the author says the number, Vesta makes sure it is said once. A new "
+        "version of Vesta repairs what it holds the first time it runs; "
+        "`held --repair` does the same on demand.",
+        [
+            ("vesta version", "every place that carries the version, and whether they agree"),
+            ("vesta version --set 0.8.0", "write it everywhere; an Unreleased changelog heading becomes it"),
+            ("vesta version --tag", "cut the local tag in this repository's own shape; nothing is pushed"),
+            ("vesta held --repair", "point every attachment at the term that now carries its label"),
+        ],
+    ),
+    (
         "What is done to this project, by name?",
         "A function is one thing done the same way each time — a shell "
         "command, or an ask a model performs: which model, a system prompt "
@@ -145,6 +159,7 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
             ("vesta function brief <name> --input k=v", "what to do, rendered"),
             ("vesta function done <name> --output-file out.md", "record a run; check its criteria"),
             ("vesta function feedback <name> --bad --why '…'", "say what the next run should learn"),
+            ("vesta function pipeline <procedure>", "a procedure's steps, each with the function that performs it"),
             ("vesta function remove <name>", "forget it; its runs stay"),
         ],
     ),

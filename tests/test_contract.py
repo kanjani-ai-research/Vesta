@@ -458,3 +458,74 @@ def test_one_behaviour_may_span_several_definitions():
     assert recall(where).behaviours[0].nodes == [
         "f.py:parse", "f.py:store", "f.py:report"
     ]
+
+
+# ── The next piece of work does not erase the last ──────────────────────────
+
+
+def _delivered(root):
+    from vesta.contract import Behaviour, Contract, keep, met, sign
+
+    keep(Contract(goal="first", behaviours=[Behaviour(does="a user can file a task")]), root)
+    sign(root)
+    met(root, "a user can file a task", nodes=["file_task"], tests=["test_file"])
+
+
+def test_a_signed_contract_with_work_outstanding_is_not_replaced(tmp_path):
+    from vesta.contract import Behaviour, Contract, keep, recall, sign, succeed
+
+    keep(Contract(goal="first", behaviours=[Behaviour(does="a user can file a task")]), tmp_path)
+    sign(tmp_path)
+    with pytest.raises(ValueError):
+        succeed(tmp_path, Contract(goal="second", behaviours=[Behaviour(does="x")]))
+    assert recall(tmp_path).goal == "first"
+
+
+def test_a_delivered_contract_is_kept_under_the_next(tmp_path):
+    from vesta.contract import Behaviour, Contract, recall, succeed
+
+    _delivered(tmp_path)
+    agreed = succeed(tmp_path, Contract(goal="second", behaviours=[Behaviour(does="a reader can filter")]))
+    assert agreed.goal == "second"
+    kept = recall(tmp_path)
+    assert [p.goal for p in kept.previous] == ["first"]
+    assert kept.previous[0].signed and kept.previous[0].complete
+    readable = (tmp_path / "VESTA.md").read_text(encoding="utf-8")
+    assert "## Previously agreed, and delivered" in readable
+    assert "**first**" in readable and "✓ a user can file a task" in readable
+
+
+def test_history_is_carried_whole_not_nested(tmp_path):
+    from vesta.contract import Behaviour, Contract, met, recall, sign, succeed
+
+    _delivered(tmp_path)
+    succeed(tmp_path, Contract(goal="second", behaviours=[Behaviour(does="b")]))
+    sign(tmp_path)
+    met(tmp_path, "b", nodes=["n"], tests=["t"])
+    succeed(tmp_path, Contract(goal="third", behaviours=[Behaviour(does="c")]))
+    kept = recall(tmp_path)
+    assert [p.goal for p in kept.previous] == ["first", "second"]
+    assert all(p.previous == [] for p in kept.previous)
+
+
+def test_an_unsigned_draft_is_replaced_without_ceremony(tmp_path):
+    from vesta.contract import Behaviour, Contract, keep, recall, succeed
+
+    keep(Contract(goal="draft", behaviours=[Behaviour(does="x")]), tmp_path)
+    succeed(tmp_path, Contract(goal="real", behaviours=[Behaviour(does="y")]))
+    assert recall(tmp_path).goal == "real" and recall(tmp_path).previous == []
+
+
+def test_the_cli_refuses_to_overwrite_a_signed_contract(tmp_path, capsys):
+    import vesta.cli as cli
+    from vesta.contract import Behaviour, Contract, keep, recall, sign
+
+    keep(Contract(goal="first", behaviours=[Behaviour(does="a user can file a task")]), tmp_path)
+    sign(tmp_path)
+    assert cli.main(["contract", "--root", str(tmp_path), "--goal", "second", "--does", "x"]) == 0
+    assert "outstanding" in capsys.readouterr().out
+    assert recall(tmp_path).goal == "first"
+
+    _delivered(tmp_path)
+    assert cli.main(["contract", "--root", str(tmp_path), "--goal", "second", "--does", "x"]) == 0
+    assert "Succeeds 1 delivered contract" in capsys.readouterr().out

@@ -8,3 +8,4 @@ var/
 theory/
 bench/results.json
 dist/
+build/

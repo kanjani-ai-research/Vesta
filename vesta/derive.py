@@ -67,10 +67,24 @@ def read_terms(text: str) -> List[Term]:
         kind, label = matched.group(1).lower(), matched.group(2).strip()
         if len(label) < 3:
             continue
-        found.append(
-            Term(id=f"{kind}:{len(found)}-{abs(hash(label)) % 100000}", kind=kind, label=label)
-        )
+        found.append(Term(id=term_id(kind, label), kind=kind, label=label))
     return found
+
+
+def term_id(kind: str, label: str) -> str:
+    """A term's id, from what it says and nothing else.
+
+    It was `hash(label)`, which Python salts per process: the same label got a
+    different id on every derivation, so re-deriving the ontology orphaned
+    every attachment written against the last one — 508 of 558 on this
+    repository, silently, and the only way to tell was to count them by hand.
+    An id that is a function of the term's content survives any number of
+    derivations that keep the term, which is what an id is for.
+    """
+    import hashlib
+
+    said = f"{kind.strip().lower()}:{' '.join(label.lower().split())}"
+    return f"{kind}:{hashlib.sha256(said.encode('utf-8')).hexdigest()[:12]}"
 
 
 def read_attachments(text: str, graph: Graph) -> Tuple[List[Tuple[str, str]], List[str]]:
@@ -129,7 +143,43 @@ def write_terms(repo: Path | str, text: str) -> Ontology:
         derived_at=time.time(),
     )
     _where(root).write_text(found.model_dump_json(), encoding="utf-8")
+    repoint(root, found)
     return found
+
+
+def repoint(repo: Path | str, ontology: Ontology) -> int:
+    """Re-aim every attachment at the term that now carries its label.
+
+    Ids are stable from here on, but every map written before they were
+    points at ids no ontology will produce again — and a term an author
+    rephrased gets a new id by design. Either way the attachment still knows
+    what it was about: `Attachment.label` was recorded for exactly this
+    reason, as `path` and `name` were for a moved definition. So a binding
+    whose term is gone is pointed at the term with the same label, and one
+    whose label is gone is left as it was: it is still a true claim about the
+    code, only about a word the vocabulary no longer uses, and `unattached`
+    and `does` already know how to read that.
+
+    Returns how many were re-pointed, so a caller can say so.
+    """
+    root = Path(repo).expanduser().resolve()
+    mapped = recall_map(root)
+    if mapped is None or not mapped.attachments:
+        return 0
+    current = {t["id"] for t in ontology.terms}
+    by_label = {" ".join(t["label"].lower().split()): t["id"] for t in ontology.terms}
+    moved = 0
+    for attachment in mapped.attachments:
+        if attachment.term in current:
+            continue
+        fresh = by_label.get(" ".join(attachment.label.lower().split()))
+        if fresh is not None:
+            attachment.term = fresh
+            moved += 1
+    if moved:
+        keep_map(mapped, root)
+        logger.info("re-pointed %d attachment(s) at the current term ids", moved)
+    return moved
 
 
 def write_attachments(repo: Path | str, text: str) -> Tuple[Map, List[str]]:

@@ -16,6 +16,8 @@ which is a fact:
 - the rules the user stated are honoured by the code
 - nothing is outstanding that `distance` can see — no defects, no files the
   resolver could not read
+- every function that performs a step of a recorded procedure has a met run
+  since the project last changed
 
 **A loop needs to know it is stuck, not only that it is unfinished.** An agent
 can iterate forever making changes that move nothing, and no stopping condition
@@ -311,6 +313,25 @@ def _tests_pass(repo: Path | str) -> str:
     return COULD_NOT_RUN
 
 
+def _last_change(repo: Path | str) -> float:
+    """When the project last moved: the later of its last commit and the
+    moment driving began. Zero when neither is known, so any met run counts."""
+    import subprocess
+
+    root = Path(repo).expanduser().resolve()
+    when = _recorded(root).since
+    try:
+        said = subprocess.run(
+            ["git", "log", "-1", "--format=%ct"],
+            cwd=str(root), capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+        if said:
+            when = max(when, float(said))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return when
+
+
 def look(repo: Path | str, at: Optional[float] = None) -> Verdict:
     """Whether the work is done, and if not, what is outstanding.
 
@@ -347,6 +368,17 @@ def look(repo: Path | str, at: Optional[float] = None) -> Verdict:
     ran = _tests_pass(root)
     if ran != PASSED:
         verdict.outstanding.append(ran)
+
+    # The fifth condition. A step a recorded function performs is part of the
+    # work, and the four above cannot see whether it ran: a procedure's step
+    # is not a behaviour, a test, a rule, or a defect. A run counts only from
+    # the last change onwards — the later of the last commit and the moment
+    # driving began — because a step performed before the code moved says
+    # nothing about the code as it stands.
+    from .function import unperformed
+
+    for name in unperformed(root, since=_last_change(root)):
+        verdict.outstanding.append(f"function {name} has no met run since the last change")
 
     if verdict.outstanding:
         verdict.keep_going = True

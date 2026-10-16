@@ -75,15 +75,76 @@ NOT_THE_PROJECT = (
 )
 
 
+# Directories that are build output wherever they appear beside a manifest.
+# Not in `NOT_THE_PROJECT`, because `build/` is somebody's own source in a
+# repository of build scripts — but beside a `pyproject.toml`, `setup.py`,
+# `package.json` or `Cargo.toml` it is what the build tool wrote, and indexing
+# it doubles every definition in the package. Observed live: a test run's
+# setuptools output made `Ontology.version` answer from two files.
+BUILD_OUTPUT = ("build", "dist")
+MANIFESTS = ("pyproject.toml", "setup.py", "setup.cfg", "package.json", "Cargo.toml")
+
+
+def ignored_by_git(root: Path) -> "callable":
+    """What the project's own `.gitignore` says is not the project.
+
+    The one list of "not mine" that is right for every repository is the one
+    its author wrote. Read once per walk, and read simply: a bare name or
+    glob matches a path's last part, a pattern with a slash matches the path
+    relative to the root, a trailing slash means a directory, and negations
+    are left alone because honouring them needs git's full ordering. A
+    pattern this cannot read costs a directory being walked, which is slow;
+    reading it wrongly would cost one being skipped, which is silent.
+    """
+    import fnmatch
+
+    patterns = []
+    try:
+        for line in (root / ".gitignore").read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("!"):
+                continue
+            only_dirs = line.endswith("/")
+            line = line.rstrip("/")
+            anchored = "/" in line
+            patterns.append((line.lstrip("/"), anchored, only_dirs))
+    except OSError:
+        pass
+
+    def ignored(entry: Path) -> bool:
+        if not patterns:
+            return False
+        try:
+            relative = str(entry.relative_to(root))
+        except ValueError:
+            relative = entry.name
+        is_dir = entry.is_dir()
+        for pattern, anchored, only_dirs in patterns:
+            if only_dirs and not is_dir:
+                continue
+            subject = relative if anchored else entry.name
+            if fnmatch.fnmatch(subject, pattern):
+                return True
+        return False
+
+    return ignored
+
+
 def walk(root: Path, suffix: str = "") -> "list":
     """Every file under `root` that is part of the project.
 
     Prunes as it descends rather than filtering afterwards. `rglob` walks into
     every excluded directory in full and then discards each path: on an
     ordinary repository that was 66,010 paths visited to find 77 source files.
+
+    Three things are not the project: hidden entries and the shared
+    `NOT_THE_PROJECT` names, whatever the root's own `.gitignore` names, and
+    build output sitting beside a manifest.
     """
     found = []
     stack = [root]
+    skip = ignored_by_git(root)
+    has_manifest = any((root / m).is_file() for m in MANIFESTS)
     while stack:
         here = stack.pop()
         try:
@@ -92,6 +153,10 @@ def walk(root: Path, suffix: str = "") -> "list":
             continue
         for entry in entries:
             if entry.name.startswith(".") or entry.name in NOT_THE_PROJECT:
+                continue
+            if has_manifest and here == root and entry.name in BUILD_OUTPUT:
+                continue
+            if skip(entry):
                 continue
             try:
                 if entry.is_dir():

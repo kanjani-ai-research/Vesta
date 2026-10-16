@@ -19,10 +19,14 @@ interpreter Vesta is installed into. **`vesta` is not on PATH** — a plugin is
 installed by the framework, not by pip, so a bare `vesta …` fails with "command
 not found" and whatever you were told to record is silently not recorded.
 
-Set this once and use `$V` everywhere:
+Set this once and use `$V` everywhere. `CLAUDE_PLUGIN_ROOT` is set when the
+framework runs you; when it is not, the newest installed copy of the plugin
+is used, whatever marketplace and version it came from:
 
 ```
-V="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/cache/vesta-local/vesta/0.1.0}/bin/vesta-run"
+V="${CLAUDE_PLUGIN_ROOT:-}"
+[ -n "$V" ] || V=$(ls -d "$HOME"/.claude/plugins/cache/*/vesta/*/ 2>/dev/null | sort -V | tail -1)
+V="${V%/}/bin/vesta-run"
 ```
 
 So `vesta contract --verify` below means `$V contract --verify`.

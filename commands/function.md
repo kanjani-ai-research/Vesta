@@ -23,13 +23,22 @@ the system prompt yourself — role, constraints, the shape of a good answer —
 and declare every `{input}` the prompt uses. Build the JSON:
 `{"name", "about", "inputs": [...], "ask": {"model": "haiku|sonnet|opus",
 "system", "prompt"}, "criteria": [{"says", "check":
-"matches|contains|nonempty|tests|asserted", "pattern"}], "role": {"procedure",
+"matches|contains|nonempty|tests|exits|asserted", "pattern", "command"}], "role": {"procedure",
 "step"}}` (a `command` function has `"command": {"run": "..."}` instead of
 `ask`; `role` is optional and must name a step `/vesta:procedure` lists).
 Then run `${CLAUDE_PLUGIN_ROOT}/bin/vesta-run function add --json '<the
 JSON>'` yourself. If it names a validation error, fix the JSON and try again
 rather than asking the user to.
 
+**Running a pipeline.** `vesta function pipeline <procedure>` lists a
+recorded procedure's steps in order, each with the function that performs it
+and the brief command to run, or the fact that nothing recorded performs it.
+Perform the briefs in that order, feeding each step's output to the next
+step's inputs where the templates call for it.
+
 **Judging.** When the user says a run was wrong, record why:
 `${CLAUDE_PLUGIN_ROOT}/bin/vesta-run function feedback <name> --bad --why '<their reason>'`.
-The next brief for that function carries it.
+The next brief for that function carries it. Where one of the function's
+criteria should have caught it, add `--criterion '<what it says>'`: an
+asserted criterion named this way repeatedly is one worth turning into a
+`matches` or `exits` check, and `show` counts them.

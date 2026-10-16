@@ -237,6 +237,35 @@ class Map(BaseModel):
     def covered(self) -> Set[str]:
         return {a.node for a in self.attachments}
 
+    def unread(self, graph: Graph) -> List[str]:
+        """Source files the graph holds definitions in that no attachment names.
+
+        A module written after the vocabulary was derived is named by nothing,
+        so a question about it answers exactly like work the repository does
+        not do. `domain.predates_the_code` can say *that* the vocabulary is
+        stale; this says *which files*, so the agent re-deriving can be told
+        what it is for and a reader can see the gap rather than infer it.
+
+        Attachments are matched by path as well as by id, because a definition
+        that moved a line still names its file. Tests are not counted: a test
+        describes a test, not the work, and the domain agent does not read
+        them.
+        """
+        from .propagate import is_test
+
+        named = {a.path for a in self.attachments if a.path}
+        for attachment in self.attachments:
+            node = graph.nodes.get(attachment.node)
+            if node is not None:
+                named.add(node.path)
+        with_definitions = {
+            node.path
+            for node in graph.nodes.values()
+            if not node.is_module and not is_test(node)
+            and "/tests/" not in f"/{node.path}" and not node.path.startswith("tests/")
+        }
+        return sorted(with_definitions - named)
+
     def describe(self, graph: Optional[Graph] = None) -> str:
         parts = [f"{len(self.attachments)} attachment(s)"]
         if graph:

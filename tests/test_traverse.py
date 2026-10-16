@@ -387,3 +387,26 @@ def test_two_terms_on_one_definition_both_resolve():
 
     assert len(resolved.live) == 2
     assert resolved.at[id(first)] == resolved.at[id(second)] == was.id
+
+
+def test_unread_names_the_files_no_attachment_reaches(tmp_path, monkeypatch):
+    """A module written after the vocabulary was derived is named by nothing."""
+    from vesta.held import graph_for
+    from vesta.traverse import Attachment, Map
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "old.py").write_text("def settle(x):\n    return x\n", encoding="utf-8")
+    (root / "fresh.py").write_text("def brief(x):\n    return x\n", encoding="utf-8")
+    (root / "tests" / "test_old.py").write_text("def test_settle():\n    assert True\n", encoding="utf-8")
+    graph = graph_for(root, rebuild=True)
+    settled = next(n for n in graph.nodes.values() if n.name == "settle")
+
+    by_id = Map(attachments=[Attachment(node=settled.id, term="t", label="l", kind="k", strength=1.0)])
+    assert by_id.unread(graph) == ["fresh.py"]
+
+    by_path = Map(attachments=[Attachment(node="gone", term="t", label="l", kind="k", strength=1.0, path="old.py", name="settle")])
+    assert by_path.unread(graph) == ["fresh.py"]
+
+    assert Map().unread(graph) == ["fresh.py", "old.py"]

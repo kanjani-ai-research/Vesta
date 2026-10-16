@@ -406,7 +406,19 @@ def _function(args: argparse.Namespace) -> int:
         return 0
 
     if not args.name:
-        raise RuntimeError(f"`vesta function {args.action}` needs a function name")
+        what = "procedure" if args.action == "pipeline" else "function"
+        raise RuntimeError(f"`vesta function {args.action}` needs a {what} name")
+
+    if args.action == "pipeline":
+        from . import procedure
+
+        found = procedure.recall(where).get(args.name)
+        if found is None:
+            raise RuntimeError(
+                f"no procedure {args.name!r} is recorded here — `vesta procedure list` shows what is"
+            )
+        _say(function.pipeline(found, function.recall(where)))
+        return 0
 
     if args.action == "remove":
         if function.remove(where, args.name):
@@ -443,6 +455,11 @@ def _function(args: argparse.Namespace) -> int:
             _say(f"  runs ({len(runs)}), latest first:")
             for run in reversed(runs[-args.show:]):
                 _say(f"    {run.describe()}")
+        leaks = kept.leaks(defined.name)
+        if leaks:
+            _say("  criteria bad runs got past:")
+            for leak in leaks:
+                _say(f"    {leak.describe()}")
         return 0
 
     if args.action == "brief":
@@ -467,6 +484,8 @@ def _function(args: argparse.Namespace) -> int:
         _say(run.describe())
         for verdict in run.verdicts:
             _say(f"  {verdict.describe()}")
+        if run.witness_at:
+            _say("  witnessed; `vesta why` reads it")
         if not run.met:
             _say("not every checkable criterion held. If the output was wrong in a way worth remembering, `vesta function feedback` records why.")
         return 0
@@ -475,10 +494,15 @@ def _function(args: argparse.Namespace) -> int:
         if args.good == args.bad:
             raise RuntimeError("say --good or --bad, and why")
         try:
-            run = function.judge(where, defined.name, good=bool(args.good), why=args.why or "")
+            run = function.judge(
+                where, defined.name, good=bool(args.good), why=args.why or "",
+                missed=args.criterion or "",
+            )
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
         _say(f"judged: {run.describe()}")
+        for leak in function.recall(where).leaks(defined.name):
+            _say(f"  {leak.describe()}")
         return 0
 
     return 0
@@ -821,7 +845,17 @@ def _contract(args: argparse.Namespace) -> int:
             inferred=list(args.inferred),
             noted=list(args.note_said),
         )
-        agreed_with.keep(agreed, where)
+        # Through `succeed`, never a bare `keep`: a bare keep overwrote a
+        # signed, delivered contract with the next draft, and the record of
+        # what had been built went with it. A signed contract with work
+        # outstanding is refused here, as a sentence.
+        try:
+            agreed = agreed_with.succeed(where, agreed)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        if agreed.previous:
+            _say(f"Succeeds {len(agreed.previous)} delivered contract(s), kept in VESTA.md.")
+            _say("")
         _say(agreed.to_verify())
         _say("")
         # The tool, not a command: it shows them the behaviours and asks. A
@@ -895,6 +929,42 @@ def _drive(args: argparse.Namespace) -> int:
     return 0
 
 
+def _version(args: argparse.Namespace) -> int:
+    """One version in every place it is written, or which places disagree.
+
+    Exits 1 on disagreement so a release script can refuse to go on; the
+    author says the number, this makes sure it is said once.
+    """
+    from . import version as versions
+
+    where = Path(args.root).expanduser().resolve()
+
+    if args.set:
+        try:
+            changed = versions.set_version(where, args.set)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        if changed:
+            _say(f"set {args.set} in: " + ", ".join(changed))
+        else:
+            _say(f"every place already says {args.set}")
+        if args.tag:
+            _say("tagging needs the versioned files committed first — commit, then `vesta version --tag`")
+        _say(versions.places(where).describe())
+        return 0
+
+    found = versions.places(where)
+    _say(found.describe())
+    if args.tag:
+        if not found.agree:
+            raise RuntimeError("not tagging a version the places disagree about")
+        try:
+            _say(f"tagged {versions.tag(where, found.version)} (local; nothing pushed)")
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+    return 0 if found.agree else 1
+
+
 def _held(args: argparse.Namespace) -> int:
     """What Vesta is holding, and getting rid of what is dead.
 
@@ -902,6 +972,12 @@ def _held(args: argparse.Namespace) -> int:
     somebody's home directory without showing them first is not a convenience.
     """
     from .reclaim import _size, held, reclaim
+
+    if args.repair:
+        from .tidy import repair
+
+        _say(repair(dry=args.dry).describe())
+        return 0
 
     holding = held()
     _say(holding.describe(show=args.show))
@@ -1002,9 +1078,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     func = sub.add_parser("function", help="the named functions of this project, and the asks a model performs")
     func.add_argument("root", nargs="?", default=".")
     func.add_argument(
-        "action", choices=["list", "add", "show", "remove", "brief", "done", "feedback"]
+        "action", choices=["list", "add", "show", "remove", "brief", "done", "feedback", "pipeline"]
     )
-    func.add_argument("name", nargs="?", default="", help="which function, for everything but list and add")
+    func.add_argument(
+        "name", nargs="?", default="",
+        help="which function, for everything but list and add; which procedure, for pipeline",
+    )
     func.add_argument(
         "--json", default=None,
         help="the function as JSON, for `add` — falls back to stdin if omitted",
@@ -1020,6 +1099,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     func.add_argument("--good", action="store_true", help="for `feedback`: the latest run was right")
     func.add_argument("--bad", action="store_true", help="for `feedback`: the latest run was wrong")
     func.add_argument("--why", default="", help="for `feedback`: what the next run should learn")
+    func.add_argument(
+        "--criterion", default="",
+        help="for `feedback --bad`: which of the function's criteria should have caught it, by what it says",
+    )
     func.add_argument("--show", type=int, default=5, help="how many runs `show` lists")
     func.set_defaults(run=_function)
 
@@ -1177,7 +1260,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="remove what belongs to repositories that no longer exist",
     )
     kept.add_argument("--show", type=int, default=12)
+    kept.add_argument(
+        "--repair",
+        action="store_true",
+        help="point every attachment at the term that now carries its label, in every project held",
+    )
+    kept.add_argument("--dry", action="store_true", help="with --repair: report without writing")
     kept.set_defaults(run=_held)
+
+    version = sub.add_parser("version", help="one version in every place it is written")
+    version.add_argument("root", nargs="?", default=".")
+    version.add_argument("--set", default="", metavar="X.Y.Z", help="write this version everywhere")
+    version.add_argument(
+        "--tag", action="store_true",
+        help="cut the local tag for the agreed version, in this repository's own shape; never pushed",
+    )
+    version.set_defaults(run=_version)
 
     tutorial = sub.add_parser("tutorial", help="learn vesta a page at a time")
     # A chapter number, or nothing to pick up where they left off. Positional,
@@ -1200,6 +1298,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(name)s: %(message)s",
     )
+    # The first run of a new version puts the records the last one wrote back
+    # in step, once. Silent: housekeeping is not the answer anybody asked for.
+    try:
+        from . import __version__
+        from .tidy import arrived
+
+        arrived(__version__)
+    except Exception as exc:  # noqa: BLE001 - never block a command on housekeeping
+        logging.getLogger("vesta.cli").info("could not check for a new version: %s", exc)
     try:
         return int(args.run(args) or 0)
     except RuntimeError as exc:

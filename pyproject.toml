@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 # package and the command are still `vesta`. `causum` itself is reserved for
 # the umbrella, not spent on one product.
 name = "causum-vesta"
-version = "0.7.1"
+version = "0.8.0"
 description = "Answers structural questions about a repository from a resolved graph, an ontology of what the work is called, and what earlier sessions worked out — and leaves a witness per decision"
 readme = "README.md"
 license = { text = "Apache-2.0" }

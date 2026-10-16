@@ -578,3 +578,80 @@ def test_a_common_word_is_reachable_when_it_is_spelled_out(tmp_path, monkeypatch
     # matches identifiers, not paths, and asserting otherwise would pin a
     # behaviour this does not have.
     assert _named("look at across.py", graph) == []
+
+
+# ── Ordinary English is not a definition ────────────────────────────────────
+
+
+@pytest.fixture
+def english(tmp_path, monkeypatch):
+    """A repository whose identifiers are also English words."""
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    from vesta.held import graph_for
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "battery.py").write_text(
+        '"""Trials."""\n\n\ndef one(where):\n    """One trial."""\n    return where\n\n\n'
+        'def id(x):\n    return x\n\n\nclass Run:\n    """A run."""\n\n\n'
+        'def everything(x):\n    return x\n\n\ndef admit(entry):\n    return entry\n',
+        encoding="utf-8",
+    )
+    graph_for(root, rebuild=True)
+    return root
+
+
+def test_a_short_bare_word_is_never_a_definition(english):
+    """`one`, `on`, `id` are identifiers somewhere and English everywhere."""
+    assert context_for("one more thing: the id of the record", english) == ""
+
+
+def test_a_short_word_spelled_out_still_reaches(english):
+    assert "one" in context_for("what does battery.one return", english)
+
+
+def test_a_capitalised_common_word_is_english(english):
+    """A sentence-initial "Run" is the word with a capital, not the class."""
+    assert context_for("Run the whole suite and tell me", english) == ""
+    assert "Run" in context_for("what is battery.Run for", english)
+
+
+def test_a_newly_common_word_is_not_injected(english):
+    assert context_for("I pushed everything already", english) == ""
+
+
+def test_punctuation_is_not_a_qualified_name(english):
+    """"…the primitive." tokenises as `primitive.`; "v0.7.1" as a number."""
+    assert context_for("ship v0.7.1 of the primitive. then id it", english) == ""
+
+
+def test_a_plain_name_is_still_injected(english):
+    assert "admit" in context_for("how does admit work", english)
+
+
+# ── A vocabulary that has fallen behind the code ────────────────────────────
+
+
+def test_modules_written_since_the_vocabulary_are_named(tmp_path, monkeypatch):
+    from vesta.held import graph_for
+    from vesta.inject import _read_but_not_lately
+    from vesta.traverse import Attachment, Map
+    from vesta.traverse import keep as keep_map
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "one-session")
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "old.py").write_text('"""Old."""\n\n\ndef settle(x):\n    """Settle."""\n    return x\n', encoding="utf-8")
+    (root / "fresh.py").write_text('"""Fresh."""\n\n\ndef brief(x):\n    """Brief."""\n    return x\n', encoding="utf-8")
+    graph = graph_for(root, rebuild=True)
+    settled = next(n for n in graph.nodes.values() if n.name == "settle")
+    keep_map(Map(ontology="o", attachments=[
+        Attachment(node=settled.id, term="t", label="settling", kind="activity", strength=1.0, path="old.py", name="settle"),
+    ]), root)
+
+    said = _read_but_not_lately("where does this handle briefing", str(root))
+    assert "fresh.py" in said and "vesta-domain" in said
+    assert "old.py" not in said
+    assert _read_but_not_lately("where does this handle briefing", str(root)) == ""
+    assert _read_but_not_lately("rename brief to summary", str(root)) == ""
