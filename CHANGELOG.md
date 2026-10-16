@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.7.1
+
+**The version catches up to the code.** 0.7.0 was pushed with the package
+and plugin manifest still reading 0.6.2 and no entry here. Nothing in the
+code changed between the two; this release is the changelog below, the
+`pyproject.toml` version, and the plugin manifest, all saying the same thing.
+
+## 0.7.0
+
+**A project's work now has names, and a model's step is a primitive.** A
+procedure said what order the work goes in and the ontology said what it is
+called; neither said how any of it is done. `vesta function` keeps that: one
+named thing done to the project the same way each time, listed, shown,
+defined, and forgotten from the CLI, read back over the sidecar's `functions`
+tool, and placed in a pipeline by naming which step of which recorded
+procedure it performs — a role that names no recorded step is refused when
+written, not left pointing nowhere.
+
+**An ask is a brief the host performs, never a call Vesta makes.** The step
+only a model can take — a model by role, a system prompt written by the
+agent that defined the function rather than by whoever calls it, a prompt
+template with declared inputs, and success criteria stated before it runs —
+is rendered by `vesta function brief` and performed on the host's own
+inference, the same seam every other judgement in Vesta crosses. No key is
+held and nothing reaches a network, as conformance continues to assert.
+`vesta function done` takes the output back, checks what can be checked,
+and keeps a digest rather than the prose.
+
+**Criteria are a closed set, and the ones nothing can check say so.** A
+criterion is `matches`, `contains`, `nonempty`, `tests`, or `asserted`. A
+`matches` or `contains` with nothing to look for is refused at write time,
+for the reason a branch without a condition is; an `asserted` criterion is
+reported as asserted, never as met.
+
+**Feedback is a ledger, and reinforcement is its smallest honest use.** A
+run can be judged good or bad with a reason, and the next brief for the same
+function carries the recent reasons it was judged bad. Rewriting the prompt
+from that is a judgement, and judgement stays the agent's.
+
 ## 0.6.2
 
 **One mode: a committed conclusion is earned by dominance.** The judgement
