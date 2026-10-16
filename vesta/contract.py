@@ -137,10 +137,15 @@ class Contract(BaseModel):
     def describe(self) -> str:
         if not self.signed:
             return f"{len(self.behaviours)} behaviour(s), not yet agreed"
+        delivered = sum(len(p.behaviours) for p in self.previous)
         return (
             f"{len(self.met)}/{len(self.behaviours)} behaviour(s) met"
             + (f", {len(self.constraints)} constraint(s)" if self.constraints else "")
             + (f", {len(self.deferred)} deferred" if self.deferred else "")
+            + (
+                f"; {delivered} more delivered under {len(self.previous)} earlier agreement(s)"
+                if self.previous else ""
+            )
         )
 
     def to_verify(self) -> str:
@@ -204,6 +209,18 @@ def _readable(agreed: Contract) -> str:
         when = time.strftime("%Y-%m-%d", time.localtime(agreed.signed_at))
         lines.append(f"Agreed {when}. Behaviour does not change after this.")
         lines.append("")
+    if agreed.previous:
+        # Said at the top, signed or not, because a reader who sees two
+        # behaviours under the headline and stops there concludes the project
+        # does two things. It does everything below; the newest agreement is
+        # only the most recent of them.
+        total = len(agreed.behaviours) + sum(len(p.behaviours) for p in agreed.previous)
+        lines.append(
+            f"This is the latest of {len(agreed.previous) + 1} agreements. "
+            f"Everything agreed before it was delivered and still holds — "
+            f"{total} behaviours in all, every one listed here."
+        )
+        lines.append("")
 
     lines.append("## What it does")
     lines.append("")
@@ -240,20 +257,33 @@ def _readable(agreed: Contract) -> str:
             lines.append(f"- {choice}")
 
     if agreed.previous:
-        lines.extend(["", "## Previously agreed, and delivered", ""])
-        lines.append("Each of these was met in full before the next was agreed.")
-        lines.append("")
-        for earlier in agreed.previous:
+        # Newest first, each at the same weight as the agreement above it: a
+        # predecessor's behaviours are not history, they are what the
+        # project does. The first time this rendered them as nested bullets
+        # under a one-line summary, nineteen delivered behaviours read as
+        # removed.
+        lines.extend(["", "## Delivered before this, and still true", ""])
+        lines.append(
+            "Each agreement below was met in full before the next was made. "
+            "Nothing in them was withdrawn."
+        )
+        for earlier in reversed(agreed.previous):
             when = (
                 time.strftime("%Y-%m-%d", time.localtime(earlier.signed_at))
                 if earlier.signed_at else "undated"
             )
+            lines.extend(["", f"### {earlier.goal or 'untitled'}", ""])
             lines.append(
-                f"- **{earlier.goal or 'untitled'}** — agreed {when}, "
-                f"{len(earlier.met)}/{len(earlier.behaviours)} behaviour(s) met"
+                f"Agreed {when}; {len(earlier.met)} of {len(earlier.behaviours)} "
+                "behaviour(s) met."
             )
+            lines.append("")
             for behaviour in earlier.behaviours:
-                lines.append(f"  - {behaviour.describe()}")
+                lines.append(f"- {behaviour.describe()}")
+            if earlier.constraints:
+                lines.extend(["", "How it had to be built:", ""])
+                for constraint in earlier.constraints:
+                    lines.append(f"- {constraint}")
 
     return "\n".join(lines) + "\n"
 

@@ -5,4 +5,4 @@ which things are actually affected. The claim is a correctness claim — "what
 breaks" — because that is the only version anyone can score.
 """
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"

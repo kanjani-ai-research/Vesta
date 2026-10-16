@@ -134,3 +134,122 @@ def test_the_cli_reports_and_sets(tmp_path, capsys):
     (root / "x" / "__init__.py").write_text('__version__ = "0.1.0"\n', encoding="utf-8")
     assert cli.main(["version", str(root)]) == 1
     assert "DISAGREE" in capsys.readouterr().out
+
+
+# ── A push carries the tag, or does not happen ──────────────────────────────
+
+
+def _repo_with_remote(tmp_path):
+    root = _project(tmp_path / "p", changelog="## 1.2.3\n\ncurrent\n")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "one")
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    _git(root, "remote", "add", "origin", str(remote))
+    return root, remote
+
+
+def _refs(root, branch="main"):
+    sha = _git(root, "rev-parse", branch)
+    return f"refs/heads/{branch} {sha} refs/heads/{branch} {'0' * 40}\n"
+
+
+def test_tags_are_annotated_and_a_lightweight_one_is_remade_in_place(tmp_path):
+    from vesta.version import _is_annotated
+
+    root, _ = _repo_with_remote(tmp_path)
+    _git(root, "tag", "v1.2.3")
+    at = _git(root, "rev-parse", "v1.2.3^{commit}")
+    assert _is_annotated(root, "v1.2.3") is False
+    assert tag(root, "1.2.3") == "v1.2.3"
+    assert _is_annotated(root, "v1.2.3") is True
+    assert _git(root, "rev-parse", "v1.2.3^{commit}") == at
+    with pytest.raises(ValueError):
+        tag(root, "1.2.3")
+
+
+def test_a_branch_push_without_the_tag_is_refused_with_the_fix(tmp_path):
+    from vesta.version import before_push
+
+    root, _ = _repo_with_remote(tmp_path)
+    ok, said = before_push(root, "origin", _refs(root))
+    assert not ok and "has no tag (v1.2.3)" in said and "vesta version --tag" in said
+
+    _git(root, "tag", "v1.2.3")
+    ok, said = before_push(root, "origin", _refs(root))
+    assert not ok and "lightweight" in said
+
+    tag(root, "1.2.3")
+    ok, said = before_push(root, "origin", _refs(root))
+    assert not ok and "followTags" in said
+
+    _git(root, "config", "--local", "push.followTags", "true")
+    ok, said = before_push(root, "origin", _refs(root))
+    assert ok and "v1.2.3 rides along" in said
+
+
+def test_pushes_that_are_not_a_branch_are_none_of_its_business(tmp_path):
+    from vesta.version import before_push
+
+    root, _ = _repo_with_remote(tmp_path)
+    assert before_push(root, "origin", "")[0]
+    assert before_push(root, "origin", f"refs/tags/v1 {'a' * 40} refs/tags/v1 {'0' * 40}\n")[0]
+    assert before_push(root, "origin", f"(delete) {'0' * 40} refs/heads/main {'b' * 40}\n")[0]
+
+
+def test_a_disagreeing_version_is_not_pushed(tmp_path):
+    from vesta.version import before_push
+
+    root, _ = _repo_with_remote(tmp_path)
+    (root / "x" / "__init__.py").write_text('__version__ = "0.1.0"\n', encoding="utf-8")
+    ok, said = before_push(root, "origin", _refs(root))
+    assert not ok and "not the same everywhere" in said
+
+
+def test_a_tag_on_a_commit_not_being_pushed_is_refused_unless_the_remote_has_it(tmp_path):
+    from vesta.version import before_push
+
+    root, remote = _repo_with_remote(tmp_path)
+    tag(root, "1.2.3")
+    _git(root, "config", "--local", "push.followTags", "true")
+    _git(root, "checkout", "-q", "--orphan", "other")
+    (root / "README").write_text("x", encoding="utf-8")
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "two")
+    # `other` does not reach the tagged commit; the pushed version files are the same.
+    ok, said = before_push(root, "origin", _refs(root, "other"))
+    assert not ok and "not in what is being pushed" in said
+    _git(root, "push", "-q", "origin", "v1.2.3")
+    ok, _ = before_push(root, "origin", _refs(root, "other"))
+    assert ok
+
+
+def test_the_guard_is_private_and_git_actually_refuses(tmp_path):
+    from vesta.version import guard
+
+    root, remote = _repo_with_remote(tmp_path)
+    done = guard(root)
+    assert any("pre-push" in line for line in done)
+    assert _git(root, "config", "--get", "push.followTags") == "true"
+    assert not (root / "pre-push").exists()
+    hook = root / ".git" / "hooks" / "pre-push"
+    assert hook.is_file() and "vesta" in hook.read_text()
+    assert "pre-push" not in _git(root, "status", "--porcelain")
+
+    pushed = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=str(root), capture_output=True, text=True)
+    assert pushed.returncode != 0
+    assert "has no tag" in pushed.stdout + pushed.stderr
+    assert "main" not in subprocess.run(["git", "branch"], cwd=str(remote), capture_output=True, text=True).stdout
+
+    tag(root, "1.2.3")
+    pushed = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=str(root), capture_output=True, text=True)
+    assert pushed.returncode == 0, pushed.stderr
+    on_remote = subprocess.run(["git", "tag"], cwd=str(remote), capture_output=True, text=True).stdout
+    assert "v1.2.3" in on_remote
+
+    # Installing again replaces ours; a foreign hook is left alone.
+    guard(root)
+    hook.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        guard(root)

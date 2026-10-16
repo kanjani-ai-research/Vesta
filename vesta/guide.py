@@ -139,7 +139,8 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         [
             ("vesta version", "every place that carries the version, and whether they agree"),
             ("vesta version --set 0.8.0", "write it everywhere; an Unreleased changelog heading becomes it"),
-            ("vesta version --tag", "cut the local tag in this repository's own shape; nothing is pushed"),
+            ("vesta version --tag", "cut the local annotated tag in this repository's own shape; nothing is pushed"),
+            ("vesta version --guard", "a private pre-push hook: a push carries the version's tag, or is refused"),
             ("vesta held --repair", "point every attachment at the term that now carries its label"),
         ],
     ),

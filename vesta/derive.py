@@ -147,6 +147,20 @@ def write_terms(repo: Path | str, text: str) -> Ontology:
     return found
 
 
+def bare_label(label: str) -> str:
+    """A label as the ontology spells it: no kind prefix, one space between words.
+
+    Attachments written by earlier versions carried the kind in the label —
+    "role: graph node and edge" against a term labelled "graph node and
+    edge" — and a repair matching on the label verbatim could move none of
+    them. Measured on one project, 112 of 124 stale attachments were stale
+    for that reason alone.
+    """
+    stripped = TERM.match(label)
+    said = stripped.group(2) if stripped else label
+    return " ".join(said.lower().split())
+
+
 def repoint(repo: Path | str, ontology: Ontology) -> int:
     """Re-aim every attachment at the term that now carries its label.
 
@@ -167,14 +181,18 @@ def repoint(repo: Path | str, ontology: Ontology) -> int:
     if mapped is None or not mapped.attachments:
         return 0
     current = {t["id"] for t in ontology.terms}
-    by_label = {" ".join(t["label"].lower().split()): t["id"] for t in ontology.terms}
+    by_label = {bare_label(t["label"]): t for t in ontology.terms}
     moved = 0
     for attachment in mapped.attachments:
         if attachment.term in current:
             continue
-        fresh = by_label.get(" ".join(attachment.label.lower().split()))
-        if fresh is not None:
-            attachment.term = fresh
+        term = by_label.get(bare_label(attachment.label))
+        if term is not None:
+            attachment.term = term["id"]
+            # The label and kind as the ontology spells them, so the next
+            # repair matches verbatim and `does` shows one spelling.
+            attachment.label = term["label"]
+            attachment.kind = term.get("kind", attachment.kind)
             moved += 1
     if moved:
         keep_map(mapped, root)

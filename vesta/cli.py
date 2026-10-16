@@ -939,6 +939,25 @@ def _version(args: argparse.Namespace) -> int:
 
     where = Path(args.root).expanduser().resolve()
 
+    if args.before_push:
+        # Git's pre-push hook. A refusal is exit 1 here, not a RuntimeError —
+        # `main()` turns those into exit 0 for slash commands, and a hook that
+        # exits 0 refuses nothing.
+        remote = args.before_push[0]
+        ok, said = versions.before_push(where, remote, sys.stdin.read())
+        if said:
+            _say(said)
+        return 0 if ok else 1
+
+    if args.guard:
+        try:
+            for line in versions.guard(where):
+                _say(line)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        _say("A plain `git push` now carries the version's annotated tag, and refuses when there is none.")
+        return 0
+
     if args.set:
         try:
             changed = versions.set_version(where, args.set)
@@ -1273,7 +1292,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     version.add_argument("--set", default="", metavar="X.Y.Z", help="write this version everywhere")
     version.add_argument(
         "--tag", action="store_true",
-        help="cut the local tag for the agreed version, in this repository's own shape; never pushed",
+        help="cut the local annotated tag for the agreed version, in this repository's own shape; never pushed",
+    )
+    version.add_argument(
+        "--guard", action="store_true",
+        help="install a private pre-push hook and push.followTags, so a push carries the tag or is refused",
+    )
+    version.add_argument(
+        "--before-push", nargs=2, metavar=("REMOTE", "URL"), default=None,
+        help="what the pre-push hook runs; reads git's ref list on stdin",
     )
     version.set_defaults(run=_version)
 

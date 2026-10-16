@@ -241,17 +241,32 @@ def tag_shape(repo: Path | str) -> str:
     return DEFAULT_TAG
 
 
+def _is_annotated(root: Path, name: str) -> Optional[bool]:
+    """Whether a tag is annotated, or None when there is no such tag."""
+    code, kind = _git(root, "cat-file", "-t", f"refs/tags/{name}")
+    if code != 0:
+        return None
+    return kind.strip() == "tag"
+
+
 def tag(repo: Path | str, version: str) -> str:
     """Cut the local tag for `version`, in the repository's own shape.
 
-    Refused when the tag exists already or the tree has uncommitted changes
-    to a versioned file — a tag on a tree whose files do not yet say the
-    version is a tag on the wrong commit. Never pushed.
+    Annotated, not lightweight: `push.followTags` carries annotated tags
+    reachable from what is pushed, and a lightweight one stays behind however
+    the push is made — which is how two releases went out with their tags
+    still on one machine. A lightweight tag of this name already present is
+    re-made annotated at the same commit, so what it points at does not move;
+    an annotated one already present is left alone and refused.
+
+    Refused when the tree has uncommitted changes to a versioned file — a tag
+    on a tree whose files do not yet say the version is a tag on the wrong
+    commit. Never pushed.
     """
     root = Path(repo).expanduser().resolve()
     name = tag_shape(root).format(version=version)
-    code, existing = _git(root, "tag", "--list", name)
-    if code == 0 and existing.strip() == name:
+    annotated = _is_annotated(root, name)
+    if annotated:
         raise ValueError(f"tag {name} already exists")
     code, dirty = _git(root, "status", "--porcelain", "--", *[p.where for p in places(root).places])
     if code == 0 and dirty.strip():
@@ -259,7 +274,144 @@ def tag(repo: Path | str, version: str) -> str:
             f"versioned files are not committed yet ({dirty.splitlines()[0].strip()}) — "
             "commit, then tag"
         )
-    code, said = _git(root, "tag", name)
+    if annotated is False:
+        code, at = _git(root, "rev-parse", f"{name}^{{commit}}")
+        if code != 0:
+            raise ValueError(f"could not read where {name} points: {at}")
+        code, said = _git(root, "tag", "-a", "-f", "-m", name, name, at)
+    else:
+        code, said = _git(root, "tag", "-a", "-m", name, name)
     if code != 0:
         raise ValueError(f"could not tag: {said}")
     return name
+
+
+# ── Guarding the push ───────────────────────────────────────────────────────
+
+# The hook is recognised by this line, so a hook somebody else installed is
+# never overwritten and ours is always replaceable.
+OURS = "# vesta: a push carries the version's tag."
+
+
+def _launcher(root: Path) -> str:
+    """How the hook reaches Vesta: this checkout's launcher, else the installed
+    plugin's, else the interpreter running now."""
+    import os
+    import sys
+
+    own = root / "bin" / "vesta-run"
+    if own.is_file():
+        return f'"{own}"'
+    plugin = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if plugin and (Path(plugin) / "bin" / "vesta-run").is_file():
+        return f'"{Path(plugin) / "bin" / "vesta-run"}"'
+    # The interpreter running now, told where this package is: it may be
+    # importable here only through the working directory, which a hook run
+    # by git from another repository does not share.
+    package = Path(__file__).resolve().parent.parent
+    # Through `env`, because the hook `exec`s this and `exec VAR=x cmd` runs
+    # a command called `VAR=x`.
+    return (
+        f'env PYTHONPATH="{package}${{PYTHONPATH:+:$PYTHONPATH}}" '
+        f'"{sys.executable}" -m vesta.cli'
+    )
+
+
+def guard(repo: Path | str) -> List[str]:
+    """Make this repository's pushes carry the version's tag.
+
+    Two private settings, neither in the tree: `push.followTags`, so a plain
+    `git push` brings every annotated tag reachable from what it pushes; and
+    a pre-push hook that refuses to push a branch whose agreed version has no
+    tag, a lightweight one, or one pointing at a commit not being pushed —
+    and says the command that fixes it. The hook does not push, add refs, or
+    change anything; it only declines, so what reaches a remote is still the
+    author's act.
+    """
+    root = Path(repo).expanduser().resolve()
+    code, top = _git(root, "rev-parse", "--show-toplevel")
+    if code != 0:
+        raise ValueError("not a git repository")
+    code, hooks_dir = _git(root, "rev-parse", "--git-path", "hooks")
+    hooks = Path(hooks_dir) if Path(hooks_dir).is_absolute() else Path(top) / hooks_dir
+    hooks.mkdir(parents=True, exist_ok=True)
+    hook = hooks / "pre-push"
+    if hook.is_file() and OURS not in hook.read_text(encoding="utf-8", errors="replace"):
+        raise ValueError(
+            f"{hook} exists and is not Vesta's — move it aside, or call "
+            "`vesta version --before-push \"$1\" \"$2\"` from it yourself"
+        )
+    done: List[str] = []
+    hook.write_text(
+        "#!/bin/sh\n"
+        f"{OURS} Installed by `vesta version --guard`; remove the file to stop.\n"
+        f'exec {_launcher(root)} version "{top}" --before-push "$1" "$2"\n',
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    done.append(f"installed {hook}")
+    code, said = _git(root, "config", "--local", "push.followTags", "true")
+    if code != 0:
+        raise ValueError(f"could not set push.followTags: {said}")
+    done.append("set push.followTags=true (annotated tags ride along with a plain `git push`)")
+    return done
+
+
+def before_push(repo: Path | str, remote: str, pushing: str) -> Tuple[bool, str]:
+    """Whether a push may go ahead, and what to do if not.
+
+    `pushing` is what git hands a pre-push hook on stdin: one line per ref,
+    `<local ref> <local sha> <remote ref> <remote sha>`. A push of no branch
+    (only tags, or a delete) is none of this hook's business.
+    """
+    root = Path(repo).expanduser().resolve()
+    branches = []
+    for line in pushing.splitlines():
+        parts = line.split()
+        if len(parts) == 4 and parts[0].startswith("refs/heads/") and not set(parts[1]) == {"0"}:
+            branches.append((parts[0], parts[1]))
+    if not branches:
+        return True, ""
+
+    found = places(root)
+    if not found.places:
+        return True, ""  # a repository that keeps no version has no tag to carry
+    if not found.agree:
+        return False, (
+            "refusing to push: the version is not the same everywhere.\n"
+            f"{found.describe()}\n"
+            "Fix: vesta version --set <X.Y.Z>, commit, then push again."
+        )
+    name = tag_shape(root).format(version=found.version)
+    annotated = _is_annotated(root, name)
+    if annotated is None:
+        return False, (
+            f"refusing to push: {found.version} has no tag ({name}).\n"
+            "Fix: vesta version --tag, then push again — the tag rides along."
+        )
+    if annotated is False:
+        return False, (
+            f"refusing to push: {name} is a lightweight tag, which a push does not carry.\n"
+            "Fix: vesta version --tag (re-makes it annotated at the same commit), then push again."
+        )
+    code, at = _git(root, "rev-parse", f"{name}^{{commit}}")
+    reachable = any(
+        _git(root, "merge-base", "--is-ancestor", at.strip(), sha)[0] == 0
+        for _, sha in branches
+    )
+    if not reachable:
+        code, on_remote = _git(root, "ls-remote", "--tags", remote, name)
+        if code == 0 and on_remote.strip():
+            return True, ""
+        return False, (
+            f"refusing to push: {name} points at {at[:12]}, which is not in what is being pushed.\n"
+            "Fix: move the tag to the released commit (vesta version --tag after deleting it), "
+            "or push that commit."
+        )
+    code, follow = _git(root, "config", "--get", "push.followTags")
+    if follow.strip().lower() != "true":
+        return False, (
+            "refusing to push: push.followTags is off, so the tag would stay behind.\n"
+            "Fix: vesta version --guard, then push again."
+        )
+    return True, f"{name} rides along."

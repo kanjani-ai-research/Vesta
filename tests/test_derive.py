@@ -267,3 +267,37 @@ def test_rederiving_the_ontology_keeps_the_attachments_reachable(tmp_path, monke
     write_terms(root, "activity: something else entirely")
     left = recall_map(root).attachments
     assert len(left) == 1 and left[0].label == "keeping an item"
+
+
+def test_a_label_carrying_its_kind_still_repoints(tmp_path, monkeypatch):
+    """112 of 124 stale attachments on one project said "role: x" against a
+    term labelled "x", and a verbatim match moved none of them."""
+    from vesta.derive import bare_label, repoint, write_attachments, write_terms
+    from vesta.domain import recall as recall_ontology
+    from vesta.held import graph_for
+    from vesta.traverse import keep as keep_map
+    from vesta.traverse import recall as recall_map
+
+    assert bare_label("role:  Graph Node   and edge") == "graph node and edge"
+    assert bare_label("graph node and edge") == "graph node and edge"
+
+    monkeypatch.setenv("VESTA_HOME", str(tmp_path / "home"))
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "store.py").write_text(
+        '"""Keeping things, which is what a store is for and nothing else is."""\n\n\n'
+        'def keep(item):\n    """Keep one."""\n    return item\n',
+        encoding="utf-8",
+    )
+    graph_for(root, rebuild=True)
+    write_terms(root, "role: keeping an item")
+    write_attachments(root, "store.py:4 keep | keeping an item")
+    stale = recall_map(root)
+    stale.attachments[0].term = "role:0-99999"
+    stale.attachments[0].label = "role: Keeping an item"
+    keep_map(stale, root)
+
+    assert repoint(root, recall_ontology(root)) == 1
+    fixed = recall_map(root).attachments[0]
+    assert fixed.term == recall_ontology(root).terms[0]["id"]
+    assert fixed.label == "keeping an item" and fixed.kind == "role"

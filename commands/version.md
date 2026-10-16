@@ -1,6 +1,6 @@
 ---
 description: One version in every place it is written — report, set, or tag
-argument-hint: [--set X.Y.Z] [--tag]
+argument-hint: [--set X.Y.Z] [--tag] [--guard]
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/vesta-run:*)
 disable-model-invocation: true
 ---
@@ -17,3 +17,8 @@ says whether they agree.
 changelog heading into it, or opens one. `--tag` cuts the local tag in this
 repository's own shape once the versioned files are committed. **Nothing is
 ever pushed**; publishing is theirs to do, and you do not run it for them.
+
+`--guard` installs a private pre-push hook in this repository's `.git` and
+turns on `push.followTags`, so a plain `git push` carries the version's
+annotated tag and refuses, with the fix, when the agreed version has no tag or
+a lightweight one. It changes nothing in the tree and never pushes.

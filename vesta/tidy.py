@@ -313,7 +313,7 @@ def repair(repo: Optional[Path | str] = None, dry: bool = False) -> Repaired:
     go of, and a claim whose word is gone is kept as an orphan rather than
     thrown away: it is still true about the code.
     """
-    from .derive import repoint
+    from .derive import bare_label, repoint
     from .domain import recall as recall_ontology
     from .traverse import recall as recall_map
 
@@ -331,9 +331,9 @@ def repair(repo: Optional[Path | str] = None, dry: bool = False) -> Repaired:
             continue
         found.projects += 1
         current = {t["id"] for t in ontology.terms}
-        labels = {" ".join(t["label"].lower().split()) for t in ontology.terms}
+        labels = {bare_label(t["label"]) for t in ontology.terms}
         stale = [a for a in mapped.attachments if a.term not in current]
-        fixable = [a for a in stale if " ".join(a.label.lower().split()) in labels]
+        fixable = [a for a in stale if bare_label(a.label) in labels]
         orphaned = len(stale) - len(fixable)
         moved = len(fixable) if dry else repoint(root, ontology)
         found.repointed += moved

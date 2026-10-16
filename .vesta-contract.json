@@ -1,235 +1,39 @@
 {
-  "goal": "Named functions over a project, with the step a model performs as a primitive — reached for, checked, sequenced, judged, witnessed and counted — and Vesta's own hooks, walker, tests, contract and vocabulary made honest by using it on itself",
+  "goal": "A release's version is said once and its tag travels with the push",
   "behaviours": [
     {
-      "does": "a user can record a named function for a project, as a shell command or an ask, and list, show, and forget it",
+      "does": "a user can see every place the version is written and whether they agree, and set one number in all of them",
       "nodes": [
-        "function.Function",
-        "function.add",
-        "function.remove",
-        "cli._function"
+        "version.places",
+        "version.set_version",
+        "cli._version"
       ],
       "tests": [
-        "tests/test_function.py"
+        "tests/test_version.py"
       ],
-      "met_at": 1792126542.2525032
+      "met_at": 1792144953.5250912
     },
     {
-      "does": "an ask names its model by role and declares every input its prompt uses, or is refused",
+      "does": "a plain git push carries the version's annotated tag, and is refused with the fix when the agreed version has no tag",
       "nodes": [
-        "function.Ask",
-        "function.Function._one_kind_and_every_input_declared"
+        "version.tag",
+        "version.guard",
+        "version.before_push"
       ],
       "tests": [
-        "tests/test_function.py"
+        "tests/test_version.py"
       ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a function whose role names no step of a recorded procedure is refused",
-      "nodes": [
-        "function.add"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a criterion that checks against nothing is refused when it is written",
-      "nodes": [
-        "function.Criterion._a_check_says_what_it_checks"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "an agent can render a function's brief with its inputs filled, and record the output back with a verdict per checkable criterion",
-      "nodes": [
-        "function.brief",
-        "function.done",
-        "function.check"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "an asserted criterion is reported as asserted, never as met",
-      "nodes": [
-        "function.Verdict"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a user can judge a run good or bad with a reason, and the next brief carries recent bad reasons",
-      "nodes": [
-        "function.judge",
-        "function.lessons"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a user can name the criterion a bad run got past, and see which criteria let bad runs through",
-      "nodes": [
-        "function.Functions.leaks",
-        "function.Leak"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "an agent is offered a recorded function at a prompt that plainly asks for what it does, once per session",
-      "nodes": [
-        "function.for_prompt",
-        "inject._a_function_for_this"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "an exits criterion holds when a stated command accepts the output",
-      "nodes": [
-        "function._exits"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "an agent can read a procedure as the briefs that perform it, in step order",
-      "nodes": [
-        "function.pipeline",
-        "function.in_order",
-        "sidecar._functions_query"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a function run leaves a witness that why reads",
-      "nodes": [
-        "function._witnessed",
-        "bundle.Witness"
-      ],
-      "tests": [
-        "tests/test_function.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a driven project is not done while a role-bearing function has no met run since the last change",
-      "nodes": [
-        "function.unperformed",
-        "driving.look",
-        "driving._last_change"
-      ],
-      "tests": [
-        "tests/test_driving.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a single search of the code for a held definition is refused with the answer, and a compound command, a pipe filter, or a search over prose is let through",
-      "nodes": [
-        "instead._searched_for",
-        "instead._one_search",
-        "instead._is_code"
-      ],
-      "tests": [
-        "tests/test_instead.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "build output beside a manifest and anything the root gitignore names are not indexed",
-      "nodes": [
-        "home.walk",
-        "home.ignored_by_git"
-      ],
-      "tests": [
-        "tests/test_home.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a bare word shorter than four letters, or a common word, is not injected unless spelled out",
-      "nodes": [
-        "inject._named"
-      ],
-      "tests": [
-        "tests/test_inject.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a checkout without the sidecar extra skips the server tests with the reason",
-      "nodes": [
-        "tests.test_seams.needs_mcp"
-      ],
-      "tests": [
-        "tests/test_seams.py",
-        "tests/test_conformance.py",
-        "tests/test_capture.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "agreeing new work keeps the delivered contract under the next, and refuses while the signed one has work outstanding",
-      "nodes": [
-        "contract.succeed",
-        "contract.Contract.previous",
-        "cli._contract"
-      ],
-      "tests": [
-        "tests/test_contract.py"
-      ],
-      "met_at": 1792126542.2525032
-    },
-    {
-      "does": "a question about the work names the modules no attachment reaches",
-      "nodes": [
-        "traverse.Map.unread",
-        "inject._read_but_not_lately",
-        "sidecar._does"
-      ],
-      "tests": [
-        "tests/test_traverse.py"
-      ],
-      "met_at": 1792126542.2525032
+      "met_at": 1792145513.9815419
     }
   ],
   "constraints": [
-    "no network call and no API key — an ask is a brief the host agent performs on its own inference",
-    "criteria are a closed set of checks, each deterministic or marked asserted; no expression language",
-    "pydantic stays the only runtime dependency",
-    "nothing derived is written into the repository except the contract itself"
+    "nothing is ever pushed by Vesta; the guard only declines"
   ],
   "inferred": [
-    "functions and their runs are kept under ~/.vesta/functions keyed by project, as every other holding is (home.kept_at)",
-    "a run keeps a digest and size of the output, not the output",
-    "a function run is written as a bundle.Witness with no trajectory, the function's definition as the standard by digest",
-    "models are named by role (haiku, sonnet, opus) because the host resolves the role; Vesta holds no provider's id",
-    "the search hook parses one command with shlex rather than a regex over the whole line"
+    "the guard lives in the clone's own .git and local config, never in the tree"
   ],
   "noted": [],
-  "signed_at": 1792126542.2525032,
+  "signed_at": 1792144953.134785,
   "deferred": [],
   "previous": [
     {
@@ -440,6 +244,241 @@
         "A normative specification for the witness record lives at spec/witness.md, separate from doc/ which holds working notes. It specifies four blame attributions (inadequate standard, insufficient narrowing, sound-but-wrong, degraded environment), ten required fields, six checks, and three conformance levels. Several required fields and all of levels 2 and 3 are specified but not implemented; the document marks these throughout and must not be read as describing running code."
       ],
       "signed_at": 1788027975.028619,
+      "deferred": [],
+      "previous": []
+    },
+    {
+      "goal": "Named functions over a project, with the step a model performs as a primitive — reached for, checked, sequenced, judged, witnessed and counted — and Vesta's own hooks, walker, tests, contract and vocabulary made honest by using it on itself",
+      "behaviours": [
+        {
+          "does": "a user can record a named function for a project, as a shell command or an ask, and list, show, and forget it",
+          "nodes": [
+            "function.Function",
+            "function.add",
+            "function.remove",
+            "cli._function"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "an ask names its model by role and declares every input its prompt uses, or is refused",
+          "nodes": [
+            "function.Ask",
+            "function.Function._one_kind_and_every_input_declared"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a function whose role names no step of a recorded procedure is refused",
+          "nodes": [
+            "function.add"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a criterion that checks against nothing is refused when it is written",
+          "nodes": [
+            "function.Criterion._a_check_says_what_it_checks"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "an agent can render a function's brief with its inputs filled, and record the output back with a verdict per checkable criterion",
+          "nodes": [
+            "function.brief",
+            "function.done",
+            "function.check"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "an asserted criterion is reported as asserted, never as met",
+          "nodes": [
+            "function.Verdict"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a user can judge a run good or bad with a reason, and the next brief carries recent bad reasons",
+          "nodes": [
+            "function.judge",
+            "function.lessons"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a user can name the criterion a bad run got past, and see which criteria let bad runs through",
+          "nodes": [
+            "function.Functions.leaks",
+            "function.Leak"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "an agent is offered a recorded function at a prompt that plainly asks for what it does, once per session",
+          "nodes": [
+            "function.for_prompt",
+            "inject._a_function_for_this"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "an exits criterion holds when a stated command accepts the output",
+          "nodes": [
+            "function._exits"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "an agent can read a procedure as the briefs that perform it, in step order",
+          "nodes": [
+            "function.pipeline",
+            "function.in_order",
+            "sidecar._functions_query"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a function run leaves a witness that why reads",
+          "nodes": [
+            "function._witnessed",
+            "bundle.Witness"
+          ],
+          "tests": [
+            "tests/test_function.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a driven project is not done while a role-bearing function has no met run since the last change",
+          "nodes": [
+            "function.unperformed",
+            "driving.look",
+            "driving._last_change"
+          ],
+          "tests": [
+            "tests/test_driving.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a single search of the code for a held definition is refused with the answer, and a compound command, a pipe filter, or a search over prose is let through",
+          "nodes": [
+            "instead._searched_for",
+            "instead._one_search",
+            "instead._is_code"
+          ],
+          "tests": [
+            "tests/test_instead.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "build output beside a manifest and anything the root gitignore names are not indexed",
+          "nodes": [
+            "home.walk",
+            "home.ignored_by_git"
+          ],
+          "tests": [
+            "tests/test_home.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a bare word shorter than four letters, or a common word, is not injected unless spelled out",
+          "nodes": [
+            "inject._named"
+          ],
+          "tests": [
+            "tests/test_inject.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a checkout without the sidecar extra skips the server tests with the reason",
+          "nodes": [
+            "tests.test_seams.needs_mcp"
+          ],
+          "tests": [
+            "tests/test_seams.py",
+            "tests/test_conformance.py",
+            "tests/test_capture.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "agreeing new work keeps the delivered contract under the next, and refuses while the signed one has work outstanding",
+          "nodes": [
+            "contract.succeed",
+            "contract.Contract.previous",
+            "cli._contract"
+          ],
+          "tests": [
+            "tests/test_contract.py"
+          ],
+          "met_at": 1792126542.2525032
+        },
+        {
+          "does": "a question about the work names the modules no attachment reaches",
+          "nodes": [
+            "traverse.Map.unread",
+            "inject._read_but_not_lately",
+            "sidecar._does"
+          ],
+          "tests": [
+            "tests/test_traverse.py"
+          ],
+          "met_at": 1792126542.2525032
+        }
+      ],
+      "constraints": [
+        "no network call and no API key — an ask is a brief the host agent performs on its own inference",
+        "criteria are a closed set of checks, each deterministic or marked asserted; no expression language",
+        "pydantic stays the only runtime dependency",
+        "nothing derived is written into the repository except the contract itself"
+      ],
+      "inferred": [
+        "functions and their runs are kept under ~/.vesta/functions keyed by project, as every other holding is (home.kept_at)",
+        "a run keeps a digest and size of the output, not the output",
+        "a function run is written as a bundle.Witness with no trajectory, the function's definition as the standard by digest",
+        "models are named by role (haiku, sonnet, opus) because the host resolves the role; Vesta holds no provider's id",
+        "the search hook parses one command with shlex rather than a regex over the whole line"
+      ],
+      "noted": [],
+      "signed_at": 1792126542.2525032,
       "deferred": [],
       "previous": []
     }

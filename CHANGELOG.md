@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.1
+
+**A push carries the version's tag, or does not happen.** Two releases went
+out with their tags still on one machine, because a plain `git push` carries
+no lightweight tag and nothing said so. `vesta version --tag` now cuts an
+annotated tag, which `push.followTags` carries with whatever is pushed; a
+lightweight tag of the same name is re-made annotated at the same commit.
+`vesta version --guard` installs a private pre-push hook in the repository's
+own `.git` and turns `push.followTags` on, so a plain push brings the tag and
+a push of a branch whose agreed version has no tag, a lightweight one, or one
+on a commit not being pushed is refused with the command that fixes it. The
+hook changes nothing in the tree, adds no refs, and never pushes: what reaches
+a remote stays the author's act.
+
 ## 0.8.0
 
 **A function is offered at the prompt that asks for it.** The primitive is

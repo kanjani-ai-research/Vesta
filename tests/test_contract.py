@@ -491,8 +491,16 @@ def test_a_delivered_contract_is_kept_under_the_next(tmp_path):
     assert [p.goal for p in kept.previous] == ["first"]
     assert kept.previous[0].signed and kept.previous[0].complete
     readable = (tmp_path / "VESTA.md").read_text(encoding="utf-8")
-    assert "## Previously agreed, and delivered" in readable
-    assert "**first**" in readable and "✓ a user can file a task" in readable
+    assert "## Delivered before this, and still true" in readable
+    assert "### first" in readable
+    # At full weight, not nested under a summary: a predecessor's behaviours
+    # are what the project does, and the first rendering made nineteen of
+    # them read as removed.
+    assert "\n- ✓ a user can file a task\n" in readable
+    assert "This is the latest of 2 agreements" in readable and "2 behaviours in all" in readable
+    from vesta.contract import sign as _sign
+    _sign(tmp_path)
+    assert "1 more delivered under 1 earlier agreement(s)" in recall(tmp_path).describe()
 
 
 def test_history_is_carried_whole_not_nested(tmp_path):
