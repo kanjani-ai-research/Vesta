@@ -704,6 +704,55 @@ def _decided(project: Optional[Path], check: bool, limit: int) -> str:
     return "\n".join(lines)
 
 
+def _functions_query(project: Optional[Path], name: str = "") -> str:
+    """The functions kept for a project, or one in full — read-only.
+
+    Not gated on readiness: a function is authored, not derived, and listing
+    what somebody wrote down needs no graph.
+    """
+    if project is None:
+        return "Could not tell which project this is."
+
+    from . import function as functions
+
+    kept = functions.recall(project)
+    if not name:
+        lines = [f"project: {project}", kept.describe()]
+        lines.extend(f"  {one.describe()}" for one in kept.functions)
+        if not kept.functions:
+            lines.append(
+                "Record one with `vesta function add --json '<the JSON>'` — "
+                "{name, about, inputs, ask|command, criteria, role?}."
+            )
+        return "\n".join(lines)
+
+    defined = kept.get(name)
+    if defined is None:
+        return f"project: {project}\nno function {name!r} is recorded here — {kept.describe()}"
+
+    lines = [f"project: {project}", defined.describe()]
+    if defined.ask is not None:
+        lines.append(f"  model: {defined.ask.model}")
+        lines.append("  system:")
+        lines.extend(f"    {line}" for line in defined.ask.system.splitlines())
+        lines.append("  prompt:")
+        lines.extend(f"    {line}" for line in defined.ask.prompt.splitlines())
+    else:
+        lines.append(f"  run: {defined.command.run}")  # type: ignore[union-attr]
+    if defined.criteria:
+        lines.append("  held to:")
+        lines.extend(f"    · {c.describe()}" for c in defined.criteria)
+    runs = kept.runs_of(name)
+    if runs:
+        lines.append(f"  runs ({len(runs)}), latest first:")
+        lines.extend(f"    {run.describe()}" for run in reversed(runs[-5:]))
+    learned = functions.lessons(kept, name)
+    if learned:
+        lines.append("  the next brief will carry:")
+        lines.extend(f"    · {why}" for why in learned)
+    return "\n".join(lines)
+
+
 def _procedure_query(project: Optional[Path], phrase: str) -> str:
     """What a recorded procedure says about a step, and where the code
     satisfies it.
@@ -745,6 +794,13 @@ def _procedure_query(project: Optional[Path], phrase: str) -> str:
         graph = graph_for(project, trust_for=300)
         mapped = attach(graph, procedures.as_terms(best))
 
+    # A step may also be performed by a recorded function — an ask a model
+    # takes, or a command — which no graph attachment can see, because it is
+    # not a definition. Said beside the attachments, not instead of them.
+    from . import function as functions
+
+    performed = functions.recall(project)
+
     lines = [f"project: {project}", best.describe(), ""]
     for step in best.steps:
         attachments = mapped.for_term(step.id)
@@ -754,6 +810,8 @@ def _procedure_query(project: Optional[Path], phrase: str) -> str:
                 node = graph.nodes.get(a.node)
                 if node:
                     lines.append(f"      satisfied by {node.describe()}")
+        for one in performed.performing(best.id, step.id):
+            lines.append(f"      performed by function {one.name} [{one.kind}]")
         for then in best.after(step.id):
             when = f" when {then.when}" if then.when else ""
             target = then.target or "(ends here)"
@@ -2129,6 +2187,31 @@ def build_server():
         started = _t.monotonic()
         answer = await anyio.to_thread.run_sync(_procedure_query, project, phrase)
         _record("procedure", project, _t.monotonic() - started, len(answer))
+        return answer
+
+    @server.tool()
+    async def functions(name: str = "", context: Context = None) -> str:
+        """The named functions recorded for this project, or one of them in
+        full.
+
+        A function is one thing done to the project the same way each time: a
+        shell command, or an *ask* — a step a model performs, with its model,
+        system prompt, prompt template, and the criteria its output is held
+        to, all written down before it is called. Vesta runs none of them:
+        `vesta function brief <name> --input k=v` renders what to do, you do
+        it on your own inference, and `vesta function done` records the
+        result and checks what can be checked.
+
+        Args:
+            name: A function to show in full; empty lists them all.
+        """
+        project = await project_of(context)
+        import anyio
+        import time as _t
+
+        started = _t.monotonic()
+        answer = await anyio.to_thread.run_sync(_functions_query, project, name)
+        _record("functions", project, _t.monotonic() - started, len(answer))
         return answer
 
     return server

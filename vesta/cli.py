@@ -351,6 +351,139 @@ def _procedure(args: argparse.Namespace) -> int:
     return 0
 
 
+def _inputs(given: Optional[list]) -> dict:
+    """`--input name=value`, repeated, as a dict. A bare name is refused."""
+    found = {}
+    for pair in given or []:
+        name, sep, value = pair.partition("=")
+        if not sep or not name.strip():
+            raise RuntimeError(f"an input is name=value, not {pair!r}")
+        found[name.strip()] = value
+    return found
+
+
+def _function(args: argparse.Namespace) -> int:
+    """Define, list, show, brief, and judge the named functions of this project.
+
+    Reads and writes what `function.py` keeps. Nothing here runs a model: a
+    `brief` is printed for the host agent to perform, and `done` takes the
+    output back. A function whose role names no recorded step, or whose
+    criterion checks against nothing, is refused when it is added — surfaced
+    here as a sentence, as every other refusal is.
+    """
+    import json
+
+    from . import function
+
+    where = Path(args.root).expanduser().resolve()
+
+    if args.action == "list":
+        kept = function.recall(where)
+        _say(kept.describe())
+        for one in kept.functions:
+            _say(f"  {one.describe()}")
+        return 0
+
+    if args.action == "add":
+        raw = args.json if args.json is not None else sys.stdin.read()
+        try:
+            payload = json.loads(raw)
+        except ValueError as exc:
+            raise RuntimeError(f"not valid JSON: {exc}") from exc
+        try:
+            defined = function.Function.model_validate(payload)
+        except ValueError as exc:
+            errors = getattr(exc, "errors", lambda: [])()
+            if errors:
+                reasons = "; ".join(e.get("msg", "") for e in errors)
+                raise RuntimeError(f"not a valid function: {reasons}") from exc
+            raise RuntimeError(f"not a valid function: {exc}") from exc
+        try:
+            function.add(where, defined)
+        except ValueError as exc:
+            raise RuntimeError(f"not kept: {exc}") from exc
+        _say(f"kept: {defined.describe()}")
+        return 0
+
+    if not args.name:
+        raise RuntimeError(f"`vesta function {args.action}` needs a function name")
+
+    if args.action == "remove":
+        if function.remove(where, args.name):
+            _say(f"forgot {args.name}; its runs are kept.")
+        else:
+            _say(f"no function {args.name!r} is recorded here.")
+        return 0
+
+    kept = function.recall(where)
+    defined = kept.get(args.name)
+    if defined is None:
+        raise RuntimeError(
+            f"no function {args.name!r} is recorded here — `vesta function list` shows what is"
+        )
+
+    if args.action == "show":
+        _say(defined.describe())
+        if defined.ask is not None:
+            _say(f"  model: {defined.ask.model}")
+            _say("  system:")
+            for line in defined.ask.system.splitlines():
+                _say(f"    {line}")
+            _say("  prompt:")
+            for line in defined.ask.prompt.splitlines():
+                _say(f"    {line}")
+        else:
+            _say(f"  run: {defined.command.run}")
+        if defined.criteria:
+            _say("  held to:")
+            for criterion in defined.criteria:
+                _say(f"    · {criterion.describe()}")
+        runs = kept.runs_of(defined.name)
+        if runs:
+            _say(f"  runs ({len(runs)}), latest first:")
+            for run in reversed(runs[-args.show:]):
+                _say(f"    {run.describe()}")
+        return 0
+
+    if args.action == "brief":
+        try:
+            _say(function.brief(defined, _inputs(args.input), kept))
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return 0
+
+    if args.action == "done":
+        if args.output_file:
+            try:
+                output = Path(args.output_file).expanduser().read_text(encoding="utf-8")
+            except OSError as exc:
+                raise RuntimeError(f"could not read the output: {exc}") from exc
+        else:
+            output = sys.stdin.read()
+        try:
+            run = function.done(where, defined.name, _inputs(args.input), output)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        _say(run.describe())
+        for verdict in run.verdicts:
+            _say(f"  {verdict.describe()}")
+        if not run.met:
+            _say("not every checkable criterion held. If the output was wrong in a way worth remembering, `vesta function feedback` records why.")
+        return 0
+
+    if args.action == "feedback":
+        if args.good == args.bad:
+            raise RuntimeError("say --good or --bad, and why")
+        try:
+            run = function.judge(where, defined.name, good=bool(args.good), why=args.why or "")
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        _say(f"judged: {run.describe()}")
+        return 0
+
+    return 0
+
+
 def _patterns(args: argparse.Namespace) -> int:
     """Things worth fixing, found without being asked."""
     from .held import graph_for
@@ -865,6 +998,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="the procedure as JSON, for `add` — falls back to stdin if omitted",
     )
     proc.set_defaults(run=_procedure)
+
+    func = sub.add_parser("function", help="the named functions of this project, and the asks a model performs")
+    func.add_argument("root", nargs="?", default=".")
+    func.add_argument(
+        "action", choices=["list", "add", "show", "remove", "brief", "done", "feedback"]
+    )
+    func.add_argument("name", nargs="?", default="", help="which function, for everything but list and add")
+    func.add_argument(
+        "--json", default=None,
+        help="the function as JSON, for `add` — falls back to stdin if omitted",
+    )
+    func.add_argument(
+        "--input", action="append", default=None, metavar="NAME=VALUE",
+        help="an input, for `brief` and `done`; repeat for each",
+    )
+    func.add_argument(
+        "--output-file", default="",
+        help="what the run produced, for `done` — falls back to stdin if omitted",
+    )
+    func.add_argument("--good", action="store_true", help="for `feedback`: the latest run was right")
+    func.add_argument("--bad", action="store_true", help="for `feedback`: the latest run was wrong")
+    func.add_argument("--why", default="", help="for `feedback`: what the next run should learn")
+    func.add_argument("--show", type=int, default=5, help="how many runs `show` lists")
+    func.set_defaults(run=_function)
 
     patterns = sub.add_parser("defects", help="things worth fixing, found unasked")
     patterns.add_argument("root", nargs="?", default=".")

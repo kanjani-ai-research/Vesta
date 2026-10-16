@@ -130,6 +130,25 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ],
     ),
     (
+        "What is done to this project, by name?",
+        "A function is one thing done the same way each time — a shell "
+        "command, or an ask a model performs: which model, a system prompt "
+        "written when it was defined, a prompt template, and the criteria "
+        "its output is held to. Vesta runs none of them: it renders the "
+        "brief, the agent performs it on its own inference, and the result "
+        "is recorded and checked where a check is possible. Judging a run "
+        "bad, with a reason, puts that reason into the next brief.",
+        [
+            ("vesta function list", "the functions recorded for this project"),
+            ("vesta function add --json '…'", "record one; a role must name a recorded step"),
+            ("vesta function show <name>", "its definition and recent runs"),
+            ("vesta function brief <name> --input k=v", "what to do, rendered"),
+            ("vesta function done <name> --output-file out.md", "record a run; check its criteria"),
+            ("vesta function feedback <name> --bad --why '…'", "say what the next run should learn"),
+            ("vesta function remove <name>", "forget it; its runs stay"),
+        ],
+    ),
+    (
         "What was agreed, and is it built yet?",
         "Automated mode only. The behaviours are agreed before any code "
         "exists and do not move: while driving, a request that changes one is "
