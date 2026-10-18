@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.8.5
+
+**A test is shown to run on its data before the whole suite runs.** `vesta
+sample` runs each test on a few records — the first N parametrized cases, and
+`VESTA_SAMPLE=N` for a test that walks its own rows — and stops at the first
+test that cannot run. What is measured is whether a test reaches a verdict,
+not which one: a failing assertion has still run on the data, an error before
+it could assert has not, and the answer to that is changing the test, not
+running more of it. Kept per test file against its contents, so an edit sends
+it back; a sample cut off by its time limit keeps what finished and carries
+on from there. Until every file has run, a full `pytest` in the shell is
+refused with where each file stands, and the drive loop samples before it
+runs the suite. Where Vesta cannot start a sample at all, nothing is held
+back.
 
 **A turn the API cut short is noted, not mistaken for a finished one.** While
 the host waits on the API — a timeout, an overload, a rate limit being retried

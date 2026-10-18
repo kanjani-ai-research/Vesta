@@ -85,6 +85,27 @@ def _touches(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sample(args: argparse.Namespace) -> int:
+    """Run the tests on a few records each, or say where they stand.
+
+    Whether a test can run on its data, not whether it passes: that is what
+    decides whether a full run is worth its time.
+    """
+    from . import sampled
+
+    where = Path(args.root).expanduser().resolve()
+    if not args.status:
+        done = sampled.run(where, args.paths, records=args.records)
+        if not done.ran:
+            _say(f"Could not sample: {done.said}")
+            return 1
+        if done.said:
+            _say(done.said)
+    here = sampled.standing(where)
+    _say(here.describe())
+    return 0 if not here.could_not_run else 1
+
+
 def _used(args: argparse.Namespace) -> int:
     """What the sidecar was actually asked, and when.
 
@@ -1314,6 +1335,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     guide = sub.add_parser("guide", help="what vesta is, and what you can do")
     guide.add_argument("topic", nargs="?", default="")
     guide.set_defaults(run=_guide)
+
+    sample = sub.add_parser(
+        "sample", help="run each test on a few records, and know whether a full run is worth it"
+    )
+    sample.add_argument("paths", nargs="*", help="test files or directories; all by default")
+    sample.add_argument("--root", default=".")
+    sample.add_argument("--records", type=int, default=3, help="records per test")
+    sample.add_argument("--status", action="store_true", help="where the tests stand, without running")
+    sample.set_defaults(run=_sample)
 
     used = sub.add_parser("used", help="what the sidecar was asked, and when")
     used.add_argument("--since", type=float, default=0, help="minutes to look back")

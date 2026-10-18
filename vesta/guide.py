@@ -176,6 +176,17 @@ SECTIONS: List[Tuple[str, str, List[Tuple[str, str]]]] = [
         ],
     ),
     (
+        "Are the tests ready for a full run?",
+        "Whether each test has been shown to run on its data — a few records "
+        "each, stopping at the first that cannot. A failing assertion still "
+        "counts as running; an error before it could assert means the test "
+        "needs changing. Until every file has run, a full run is held back.",
+        [
+            ("vesta sample", "run each test on a few records, and say where they stand"),
+            ("vesta sample --status", "where they stand, without running"),
+        ],
+    ),
+    (
         "What has it actually saved me?",
         "The honest accounting, kept as it happens: not what it might save, "
         "what it did — questions answered from what was already known rather "

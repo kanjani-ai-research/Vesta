@@ -276,6 +276,9 @@ PASSED = "passed"
 FAILED = "failed"
 NOTHING_TO_RUN = "no tests to run"
 COULD_NOT_RUN = "the tests could not be run"
+# A fourth, ahead of the rest: a test that has not been shown to run on its
+# data. A full run then measures the fixtures, not the work.
+NOT_ON_THE_DATA = "the tests do not yet run on the data"
 
 
 def _tests_pass(repo: Path | str) -> str:
@@ -286,6 +289,19 @@ def _tests_pass(repo: Path | str) -> str:
     root = Path(repo).expanduser().resolve()
     if not any(root.rglob("test_*.py")) and not any(root.rglob("*_test.py")):
         return NOTHING_TO_RUN
+
+    # One or a few records first, and the whole suite only once every test
+    # can run on them. Validated already, this costs nothing.
+    from . import sampled
+
+    if not sampled.ready(root):
+        # A sample that cannot start is Vesta's limit, not the tests': the
+        # full run below then says what it can.
+        done = sampled.run(root)
+        here = sampled.standing(root)
+        if done.ran and here.could_not_run:
+            name, why = sorted(here.could_not_run.items())[0]
+            return f"{NOT_ON_THE_DATA}: {name}: {why}"
 
     # The interpreter running Vesta, not whatever `python` happens to mean.
     # Bare `python` is frequently not on PATH at all, and the FileNotFoundError

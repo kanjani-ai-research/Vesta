@@ -301,6 +301,91 @@ def _searched_for(payload: dict) -> Tuple[str, List[str]]:
     return "", []
 
 
+# What narrows a test run to something less than the whole suite. A run
+# narrowed by any of these is a sample already, or close enough to one.
+NARROWING = ("--sample", "-k", "--lf", "--last-failed", "--sw", "--stepwise",
+             "--co", "--collect-only", "--deselect")
+
+
+def _a_full_test_run(said: str) -> bool:
+    """Whether a shell command runs the whole of a pytest suite.
+
+    One test file, one test, a `-k` filter, a sample — none of these is a full
+    run. `pytest`, `pytest tests/` and `python -m pytest -q` are.
+    """
+    import shlex
+
+    for command in _split(said, ";", "&&", "||", "\n"):
+        stage = _split(command, "|")
+        if not stage:
+            continue
+        try:
+            words = shlex.split(stage[0], posix=True)
+        except ValueError:
+            continue
+        while words and re.match(r"^[A-Za-z_]\w*=", words[0]):
+            words.pop(0)
+        if not words:
+            continue
+        head = words[0].rsplit("/", 1)[-1]
+        if head in ("pytest", "py.test"):
+            rest = words[1:]
+        elif head.startswith("python") and words[1:3] == ["-m", "pytest"]:
+            rest = words[3:]
+        else:
+            continue
+        if any(w.split("=", 1)[0] in NARROWING for w in rest):
+            continue
+        if any(w.endswith(".py") or "::" in w for w in rest if not w.startswith("-")):
+            continue
+        return True
+    return False
+
+
+def _not_yet_a_full_run(payload: dict) -> Optional[dict]:
+    """Refuse the whole suite before every test has run on a sample.
+
+    The standing rule this project's user set: test on one or a few samples
+    until the test is ready, then run the full tests. A full run of tests that
+    cannot yet run on their data measures the fixtures, and costs the whole
+    suite's time to report one of them.
+    """
+    if payload.get("tool_name") != "Bash":
+        return None
+    if not _a_full_test_run(str((payload.get("tool_input") or {}).get("command", ""))):
+        return None
+
+    import os
+
+    where = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or ""
+    if not where:
+        return None
+    from . import sampled
+
+    project = Path(where).expanduser().resolve()
+    here = sampled.standing(project)
+    if here.ready or sampled.cannot_sample(project):
+        return None
+
+    from .inject import _launcher
+
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "Not yet a full run — not every test has been shown to run on "
+                "its data.\n\n"
+                f"{here.describe()}\n\n"
+                f"Sample first: `{_launcher()} sample --root {project}` runs "
+                "each test on a few records and stops at the first that "
+                "cannot run. A test that cannot run needs changing, not more "
+                "of it. Running one test file or one test directly is allowed."
+            ),
+        }
+    }
+
+
 def decide(payload: dict) -> Optional[dict]:
     """Whether to refuse this search, and what to say instead.
 
@@ -309,6 +394,14 @@ def decide(payload: dict) -> Optional[dict]:
     case where the search is a strictly worse version of a lookup Vesta can do
     exactly.
     """
+    try:
+        held_back = _not_yet_a_full_run(payload)
+    except Exception as exc:  # noqa: BLE001 - never block on not knowing
+        logger.info("could not tell where the tests stand: %s", exc)
+        held_back = None
+    if held_back:
+        return held_back
+
     pattern, _ = _searched_for(payload)
     if not pattern:
         return None
