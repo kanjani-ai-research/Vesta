@@ -38,6 +38,17 @@
           }
         ]
       }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/interrupted.sh",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

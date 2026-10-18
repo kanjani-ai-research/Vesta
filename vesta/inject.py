@@ -360,6 +360,16 @@ def main() -> int:
     project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "."
 
     parts = []
+
+    # The last turn ended because the API failed, and nothing has said so.
+    # First, because everything else here assumes the last turn finished.
+    try:
+        from .interrupted import once
+
+        parts.append(once(project, str(payload.get("session_id") or "")))
+    except Exception as exc:  # noqa: BLE001 - never break the session
+        logger.info("could not read the interruption note: %s", exc)
+
     try:
         parts.append(context_for(prompt, project))
     except Exception as exc:  # noqa: BLE001 - never break the session

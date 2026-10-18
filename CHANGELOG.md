@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+**A turn the API cut short is noted, not mistaken for a finished one.** While
+the host waits on the API — a timeout, an overload, a rate limit being retried
+— no hook runs, and when the retries run out the turn ends with `StopFailure`,
+which nothing here listened for. The graph was not caught up, a driven loop
+ended without a word, and the next turn picked up half-done work as if it were
+fresh. A `StopFailure` hook now keeps a note of what failed, when, how many
+times running, and whether a loop was in flight, and catches the graph up; the
+next prompt is told once — check the working tree before redoing anything,
+take smaller steps after an output-limit cut, or stop and tell the user when
+waiting will not fix it. The interrupted turn is not counted against a loop.
+
 ## 0.8.1
 
 **A push carries the version's tag, or does not happen.** Two releases went
