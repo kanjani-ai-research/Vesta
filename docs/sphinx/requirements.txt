@@ -1,0 +1,12 @@
+# Docs build dependencies. The shared config is vendored under _ext/ as a
+# fallback; installing it from an index keeps it updatable.
+sphinx>=7,<9
+furo>=2024.1.29
+myst-parser>=2
+sphinxcontrib-mermaid>=0.9
+sphinx-copybutton>=0.5
+sphinx-design>=0.5
+sphinxcontrib-openapi>=0.8
+pylint>=3.0
+pyvis>=0.3
+cyclonedx-bom>=5
