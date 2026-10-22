@@ -1,0 +1,5 @@
+_build/
+_autosummary/
+_generated/
+_static/arch-*.html
+_static/sbom-*.json
