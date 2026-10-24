@@ -1,0 +1,63 @@
+name: Docs (publish)
+
+# On merge to main, build the docs and publish to the PRIVATE docs S3 bucket,
+# served via CloudFront at https://docs.deloitte-guard.ai/<repo>/ (SPEC-174).
+# Dormant until the org/repo variable DOCS_PUBLISH_ENABLED == 'true'.
+# Self-hosted runner + OIDC role (no long-lived keys, no GitHub-hosted minutes).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "engine/**"
+      - "frontend/**"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # OIDC: assume the docs publish role
+  contents: read
+
+jobs:
+  publish:
+    if: vars.DOCS_PUBLISH_ENABLED == 'true'
+    runs-on: [self-hosted, linux, x64]
+    env:
+      DOCS_BUCKET: ${{ vars.DOCS_BUCKET }}                 # e.g. deloitte-guard-docs
+      DOCS_DISTRIBUTION_ID: ${{ vars.DOCS_DISTRIBUTION_ID }}
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build docs (with AWS scans available)
+        env:
+          AWS_PROFILE_DOCS: ""   # on the runner, default creds come from OIDC below
+        run: |
+          uv venv --python 3.13 .docs-venv
+          . .docs-venv/bin/activate
+          uv pip install -r docs/sphinx/requirements.txt
+          sphinx-build -b html docs/sphinx docs/sphinx/_build/html
+          test -f docs/sphinx/_build/html/index.html
+
+      - name: Configure AWS credentials (docs publish role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DOCS_PUBLISH_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Sync to private S3 (under this repo's path)
+        run: |
+          repo="${{ github.event.repository.name }}"
+          aws s3 sync docs/sphinx/_build/html "s3://${DOCS_BUCKET}/${repo}/" \
+            --delete --only-show-errors
+          echo "Published to s3://${DOCS_BUCKET}/${repo}/ (served at https://docs.deloitte-guard.ai/${repo}/)"
+
+      - name: Invalidate CloudFront for this repo's path
+        run: |
+          repo="${{ github.event.repository.name }}"
+          aws cloudfront create-invalidation \
+            --distribution-id "${DOCS_DISTRIBUTION_ID}" \
+            --paths "/${repo}/*" >/dev/null
+          echo "Invalidated /${repo}/* on CloudFront ${DOCS_DISTRIBUTION_ID}"
